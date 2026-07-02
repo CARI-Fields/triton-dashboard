@@ -1,36 +1,95 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Triton Board
 
-## Getting Started
+A live, editable project board for the **Triton Kernel Agent — RL Training** project.
+Everyone with the link can edit modules, tasks, statuses, and assignees, and changes
+sync in real time. Built with Next.js + Supabase, deploys free on Vercel.
 
-First, run the development server:
+> **Access model:** no login. The URL is the secret. Anyone who has the deployed link
+> can view and edit. Don't share it beyond your team. (You can add real per-person
+> login later — see "Adding login" below.)
+
+---
+
+## 1. Create the database (Supabase)
+
+1. Go to <https://supabase.com>, sign in, and create a new **free** project. Pick a
+   region close to your team. Wait ~2 min for it to provision.
+2. Open **SQL Editor → New query**. Paste the contents of [`supabase/schema.sql`](supabase/schema.sql)
+   and click **Run**. This creates the tables, opens up access, and turns on realtime.
+3. (Optional but recommended) New query again, paste [`supabase/seed.sql`](supabase/seed.sql),
+   **Run**. This loads your current plan (SFT → RL pipeline, Harness + Skills foundations,
+   and the four in-progress tasks). Skip this if you want to start empty.
+4. Go to **Project Settings → API** and copy two values:
+   - **Project URL**
+   - **Project API keys → `anon` `public`**
+
+## 2. Run it locally
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd triton-board
+cp .env.local.example .env.local     # then edit .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Put your two values in `.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Then:
 
-## Learn More
+```bash
+npm install      # first time only
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open <http://localhost:3000>. If the env vars are missing you'll see a setup screen
+instead of a crash.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 3. Deploy for the team (Vercel)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Push this folder to a GitHub repo (it was `git init`-ed for you):
+   ```bash
+   git add -A
+   git commit -m "Triton board"
+   # create an empty repo on github.com, then:
+   git remote add origin https://github.com/<you>/triton-board.git
+   git push -u origin main
+   ```
+2. Go to <https://vercel.com>, **Add New → Project**, import that repo.
+3. In the import screen, add the two **Environment Variables**
+   (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) — same values as
+   `.env.local`.
+4. **Deploy.** You get a URL like `https://triton-board.vercel.app`. Share it with the team.
+   Every push to `main` redeploys automatically.
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## What you can do in the board
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Edit any text** — module names, objectives, task titles: click it, type, Enter to save.
+- **Add / delete** modules (pipeline stages or foundations) and tasks.
+- **Set status** — To do / In progress / Done / Blocked, per task.
+- **Assign people** — click the `+` on a task; check teammates or type a new name.
+- **Manage the roster** — add/remove teammates in the Team bar at the bottom.
+- The **Ownership** table is derived automatically from task assignments.
+
+Everything writes straight to Supabase and pushes to every open browser via realtime.
+
+## Data model
+
+`modules` (pipeline | foundation) → `tasks` (status, assignees[]) · `members` (roster).
+See [`supabase/schema.sql`](supabase/schema.sql).
+
+## Adding login later
+
+The board is intentionally open (anon key + permissive RLS). To require per-person
+login, enable an auth provider in Supabase, change the policies in `schema.sql` from
+`using (true)` to `to authenticated using (true)`, and add Supabase Auth to the app.
+Ask and this can be wired up.
+
+## Notes / not yet built
+
+- No drag-to-reorder yet (new items append; order is by creation). Easy to add.
+- No history/audit log. Realtime is last-write-wins.

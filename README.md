@@ -2,96 +2,131 @@
 
 ### 🔗 Live board: **https://triton-board.vercel.app**
 
-A live, editable project board for the **Triton Kernel Agent — RL Training** project.
-Everyone with the link can edit modules, tasks, statuses, and assignees, and changes
-sync in real time. Built with Next.js + Supabase, deploys free on Vercel.
+A live, editable project board + research log for the **Triton Kernel Agent — RL Training**
+project. Modules → tasks with owners and status, and each task has its own detail page
+with progress notes, experiments, auto-generated metric charts, and uploaded plots.
+Everything syncs in real time across everyone's browser.
 
-> **Access model:** password-protected. The board sits behind one shared team
-> password (Supabase Auth), and the database rejects any request without a valid
-> login (Row Level Security). See `supabase/migration-auth.sql` and `lib/auth.ts`.
+> **Access model:** password-protected. The board sits behind one **shared team password**
+> (Supabase Auth), and the database rejects any request without a valid login (Row Level
+> Security). So even someone who reads the Supabase key out of the page source gets nothing.
 
 ---
 
-## 1. Create the database (Supabase)
+## Stack
 
-1. Go to <https://supabase.com>, sign in, and create a new **free** project. Pick a
-   region close to your team. Wait ~2 min for it to provision.
-2. Open **SQL Editor → New query**. Paste the contents of [`supabase/schema.sql`](supabase/schema.sql)
-   and click **Run**. This creates the tables, opens up access, and turns on realtime.
-3. (Optional but recommended) New query again, paste [`supabase/seed.sql`](supabase/seed.sql),
-   **Run**. This loads your current plan (SFT → RL pipeline, Harness + Skills foundations,
-   and the four in-progress tasks). Skip this if you want to start empty.
-4. Go to **Project Settings → API** and copy two values:
-   - **Project URL**
-   - **Project API keys → `anon` `public`**
+- **Next.js 16** (App Router, TypeScript) — UI
+- **Supabase** — Postgres, Realtime, Auth, Storage (the entire backend; the app talks to it directly from the browser)
+- **Vercel** — hosting; **auto-deploys on every push to `main`**
+- `react-markdown` + `remark-gfm` for the markdown fields. Charts are hand-rolled SVG/CSS (no chart library).
 
-## 2. Run it locally
+## Project structure
+
+```
+app/
+  layout.tsx            root layout
+  page.tsx              "/"  → <AuthGate><Board/></AuthGate>
+  task/[id]/page.tsx    "/task/:id" → <AuthGate><TaskDetail/></AuthGate>
+  globals.css           all styles (design tokens at top)
+components/
+  Board.tsx             the board: modules, tasks, ownership table, team roster
+  TaskDetail.tsx        task page: notes, experiments, metric charts, per-experiment plots
+  AuthGate.tsx          shared-password login gate (wraps both pages)
+  MarkdownField.tsx     reusable click-to-edit markdown field
+lib/
+  supabase.ts           browser Supabase client (reads env vars)
+  auth.ts               TEAM_EMAIL constant for the shared login
+  types.ts              TypeScript types
+supabase/
+  schema.sql            base tables + realtime
+  seed.sql              initial plan data (optional)
+  migration-*.sql       later DB changes (see "Database" below)
+```
+
+## Features
+
+- Board: add/edit/delete **modules** (pipeline stages or cross-cutting foundations) and **tasks**; set **status**; **assign** people; auto **ownership** table; team **roster**.
+- Task detail (`/task/:id`, opened from a task title): **progress notes**, **experiments** (each with numeric **metrics** that auto-render as comparison **bar charts**), and **plots/images** uploaded per experiment.
+- **Markdown** everywhere freeform (objectives, notes) — click to edit, renders on blur.
+- Realtime: edits write straight to Supabase and appear in every open browser.
+
+---
+
+## Run locally (working on the existing board)
+
+You need the project's two Supabase values. They're **not in the repo** (`.env.local` is
+git-ignored). Get them from Bruce, or from Vercel → the `rl4kernel` project → Settings →
+Environment Variables:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — this holds the Supabase **publishable** key (`sb_publishable_…`); it's safe to expose in a browser, and access is protected by the login + RLS, not by hiding this key.
 
 ```bash
+git clone https://github.com/brucexi999/triton-board.git
 cd triton-board
-cp .env.local.example .env.local     # then edit .env.local
+cp .env.local.example .env.local     # then paste the two values in
+npm install
+npm run dev                          # http://localhost:3000
 ```
 
-Put your two values in `.env.local`:
+Log in with the team password. **Note:** local dev talks to the **same live database**, so
+edits you make locally are real for everyone. To experiment safely, spin up your own free
+Supabase project, run the SQL below against it, and point `.env.local` at it instead.
 
-```
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
-```
-
-Then:
-
-```bash
-npm install      # first time only
-npm run dev
-```
-
-Open <http://localhost:3000>. If the env vars are missing you'll see a setup screen
-instead of a crash.
-
-## 3. Deploy for the team (Vercel)
-
-1. Push this folder to a GitHub repo (it was `git init`-ed for you):
-   ```bash
-   git add -A
-   git commit -m "Triton board"
-   # create an empty repo on github.com, then:
-   git remote add origin https://github.com/<you>/triton-board.git
-   git push -u origin main
-   ```
-2. Go to <https://vercel.com>, **Add New → Project**, import that repo.
-3. In the import screen, add the two **Environment Variables**
-   (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) — same values as
-   `.env.local`.
-4. **Deploy.** You get a URL like `https://triton-board.vercel.app`. Share it with the team.
-   Every push to `main` redeploys automatically.
+Always run `npm run build` before pushing — it type-checks the whole app.
 
 ---
 
-## What you can do in the board
+## ⚠️ Deploying & contributing (read this first)
 
-- **Edit any text** — module names, objectives, task titles: click it, type, Enter to save.
-- **Add / delete** modules (pipeline stages or foundations) and tasks.
-- **Set status** — To do / In progress / Done / Blocked, per task.
-- **Assign people** — click the `+` on a task; check teammates or type a new name.
-- **Manage the roster** — add/remove teammates in the Team bar at the bottom.
-- The **Ownership** table is derived automatically from task assignments.
+The site redeploys automatically when `main` updates — **but Vercel only builds commits whose
+author email is linked to the Vercel account** (`brucexi99@outlook.com`). If you push a commit
+authored by a different email, Vercel refuses to build it ("… not a member of the team") and
+the site silently stays on the old version. As a second maintainer, pick one:
 
-Everything writes straight to Supabase and pushes to every open browser via realtime.
+1. **Open a Pull Request** (recommended). Bruce reviews and merges; the merge commit deploys. Cleanest, keeps history attributed to you.
+2. **Get added to the Vercel project** (requires Vercel Pro) so your own pushes deploy.
+3. **Commit under the shared identity** for this repo only — if Bruce is OK with it:
+   ```bash
+   git config user.email "brucexi99@outlook.com"   # repo-local, doesn't touch your global git
+   ```
+
+## Database (Supabase)
+
+Already provisioned for the live project — you normally don't touch this. For reference, or to
+stand up a fresh instance, run these in the Supabase **SQL Editor** in order:
+
+1. `schema.sql` — `modules`, `tasks`, `members` + realtime
+2. `seed.sql` — initial plan data (optional)
+3. `migration-task-details.sql` — `tasks.notes`, `experiments`, `attachments`, and the `task-images` Storage bucket
+4. `migration-plots-per-experiment.sql` — adds `attachments.experiment_id`
+5. `migration-auth.sql` — **run last**, after creating the shared user — locks every table to the `authenticated` role
+
+### Shared login
+
+Auth is a single shared user. Create it in Supabase → **Authentication → Users → Add user**:
+
+- **Email:** `team@triton-board.app` (must match `TEAM_EMAIL` in `lib/auth.ts`)
+- **Password:** the team password
+- ✅ **Auto Confirm User**
+
+Change the password anytime by resetting that user's password in Supabase.
 
 ## Data model
 
-`modules` (pipeline | foundation) → `tasks` (status, assignees[]) · `members` (roster).
-See [`supabase/schema.sql`](supabase/schema.sql).
+| Table | Key fields |
+|---|---|
+| `modules` | `kind` (pipeline \| foundation), `name`, `objective` (markdown), `position` |
+| `tasks` | `module_id`, `title`, `status` (todo \| in_progress \| done \| blocked), `assignees` (text[]), `notes` (markdown) |
+| `members` | `name`, `initials` (roster / assignee options) |
+| `experiments` | `task_id`, `name`, `notes` (markdown), `metrics` (jsonb `{ metric: number }`) |
+| `attachments` | `experiment_id` (+ `task_id`), `url`, `path`, `caption` — files live in the `task-images` Storage bucket |
 
-## Adding login later
+All tables have realtime enabled and an `"auth access"` RLS policy (`to authenticated`).
 
-The board is intentionally open (anon key + permissive RLS). To require per-person
-login, enable an auth provider in Supabase, change the policies in `schema.sql` from
-`using (true)` to `to authenticated using (true)`, and add Supabase Auth to the app.
-Ask and this can be wired up.
+## Not yet built / ideas
 
-## Notes / not yet built
-
-- No drag-to-reorder yet (new items append; order is by creation). Easy to add.
-- No history/audit log. Realtime is last-write-wins.
+- Drag-to-reorder (items currently append by `position`)
+- Per-person logins instead of one shared password (would give a real audit trail)
+- History / audit log (realtime is last-write-wins)
+- Fully private images via signed URLs (currently public-read with random UUID paths; upload requires login)

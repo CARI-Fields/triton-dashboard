@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { Member, Module, Status, Task } from "@/lib/types";
 
@@ -243,14 +244,42 @@ function TaskRow({
   onToggleAssignee: (name: string) => void;
   onAddMember: (name: string) => void;
 }) {
+  const [renaming, setRenaming] = useState(false);
   return (
     <div className="task">
       <div className="task-title">
-        <EditableText
-          value={task.title}
-          ariaLabel="Task title"
-          onSave={(v) => onPatch({ title: v })}
-        />
+        {renaming ? (
+          <input
+            className="edit-input"
+            autoFocus
+            defaultValue={task.title}
+            aria-label="Rename task"
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v && v !== task.title) onPatch({ title: v });
+              setRenaming(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") setRenaming(false);
+            }}
+          />
+        ) : (
+          <>
+            <Link className="task-open" href={`/task/${task.id}`}>
+              {task.title}
+              <span className="open-hint" aria-hidden="true">↗</span>
+            </Link>
+            <button
+              className="icon-btn subtle rename-btn"
+              onClick={() => setRenaming(true)}
+              aria-label="Rename task"
+              title="Rename"
+            >
+              ✎
+            </button>
+          </>
+        )}
       </div>
       <div className="task-meta">
         <div className="task-left">

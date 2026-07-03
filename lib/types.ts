@@ -43,6 +43,7 @@ export interface Experiment {
 export interface Attachment {
   id: string;
   task_id: string;
+  experiment_id: string | null;
   url: string;
   path: string;
   caption: string;

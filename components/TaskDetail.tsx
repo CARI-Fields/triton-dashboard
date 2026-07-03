@@ -202,13 +202,24 @@ function MetricsEditor({
 /* ---------- One experiment card ---------- */
 function ExperimentCard({
   exp,
+  attachments,
+  uploading,
   onUpdate,
   onDelete,
+  onUpload,
+  onDeleteAttachment,
+  onUpdateAttachment,
 }: {
   exp: Experiment;
+  attachments: Attachment[];
+  uploading: boolean;
   onUpdate: (patch: Partial<Experiment>) => void;
   onDelete: () => void;
+  onUpload: (files: FileList) => void;
+  onDeleteAttachment: (att: Attachment) => void;
+  onUpdateAttachment: (attId: string, patch: Partial<Attachment>) => void;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
   return (
     <div className="exp-card">
       <div className="exp-head">
@@ -228,6 +239,49 @@ function ExperimentCard({
         />
       </div>
       <MetricsEditor metrics={exp.metrics} onChange={(m) => onUpdate({ metrics: m })} />
+
+      <div className="exp-plots">
+        <div className="exp-sub-head">
+          <span className="exp-sub-label">Plots &amp; images</span>
+          <button className="btn" onClick={() => fileRef.current?.click()} disabled={uploading}>
+            {uploading ? "Uploading…" : "⬆ Upload"}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) onUpload(e.target.files);
+              if (fileRef.current) fileRef.current.value = "";
+            }}
+          />
+        </div>
+        {attachments.length === 0 ? (
+          <p className="muted small">No plots yet — upload PNG/JPG (matplotlib output, W&amp;B screenshots).</p>
+        ) : (
+          <div className="img-grid">
+            {attachments.map((att) => (
+              <figure className="img-card" key={att.id}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <a href={att.url} target="_blank" rel="noreferrer">
+                  <img src={att.url} alt={att.caption || "plot"} loading="lazy" />
+                </a>
+                <figcaption>
+                  <EditableText
+                    value={att.caption}
+                    placeholder="Add a caption…"
+                    ariaLabel="Image caption"
+                    onSave={(v) => onUpdateAttachment(att.id, { caption: v })}
+                  />
+                  <button className="icon-btn" onClick={() => onDeleteAttachment(att)} aria-label="Delete image">✕</button>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -241,9 +295,8 @@ export default function TaskDetail({ id }: { id: string }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploadingExpId, setUploadingExpId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const reload = useCallback(async () => {
     if (!supabase || !id) return;
@@ -322,14 +375,15 @@ export default function TaskDetail({ id }: { id: string }) {
     updateTask({ assignees: next });
   }
 
-  async function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!supabase || !e.target.files?.length) return;
-    setUploading(true);
+  async function uploadToExperiment(expId: string, files: FileList) {
+    if (!supabase) return;
+    setUploadingExpId(expId);
     setErr(null);
     const client = supabase;
-    for (const file of Array.from(e.target.files)) {
+    const existing = attachments.filter((a) => a.experiment_id === expId);
+    for (const file of Array.from(files)) {
       const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const path = `${id}/${crypto.randomUUID()}-${safe}`;
+      const path = `${id}/${expId}/${crypto.randomUUID()}-${safe}`;
       const up = await client.storage.from("task-images").upload(path, file, { upsert: false });
       if (up.error) {
         setErr(up.error.message);
@@ -338,14 +392,14 @@ export default function TaskDetail({ id }: { id: string }) {
       const { data: pub } = client.storage.from("task-images").getPublicUrl(path);
       await client.from("attachments").insert({
         task_id: id,
+        experiment_id: expId,
         url: pub.publicUrl,
         path,
         caption: "",
-        position: nextPosition(attachments),
+        position: nextPosition(existing),
       });
     }
-    setUploading(false);
-    if (fileRef.current) fileRef.current.value = "";
+    setUploadingExpId(null);
     reload();
   }
 
@@ -467,50 +521,14 @@ export default function TaskDetail({ id }: { id: string }) {
               <ExperimentCard
                 key={exp.id}
                 exp={exp}
+                attachments={attachments.filter((a) => a.experiment_id === exp.id)}
+                uploading={uploadingExpId === exp.id}
                 onUpdate={(patch) => updateExperiment(exp.id, patch)}
                 onDelete={() => deleteExperiment(exp.id)}
+                onUpload={(files) => uploadToExperiment(exp.id, files)}
+                onDeleteAttachment={deleteAttachment}
+                onUpdateAttachment={updateAttachment}
               />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Attachments */}
-      <section className="detail-section">
-        <div className="detail-section-head">
-          <h2>Plots &amp; images</h2>
-          <button className="btn" onClick={() => fileRef.current?.click()} disabled={uploading}>
-            {uploading ? "Uploading…" : "⬆ Upload images"}
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            onChange={onPickFiles}
-          />
-        </div>
-        {attachments.length === 0 ? (
-          <p className="muted">No images yet. Upload plots (PNG/JPG) — matplotlib output, W&amp;B screenshots, etc.</p>
-        ) : (
-          <div className="img-grid">
-            {attachments.map((att) => (
-              <figure className="img-card" key={att.id}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <a href={att.url} target="_blank" rel="noreferrer">
-                  <img src={att.url} alt={att.caption || "attachment"} loading="lazy" />
-                </a>
-                <figcaption>
-                  <EditableText
-                    value={att.caption}
-                    placeholder="Add a caption…"
-                    ariaLabel="Image caption"
-                    onSave={(v) => updateAttachment(att.id, { caption: v })}
-                  />
-                  <button className="icon-btn" onClick={() => deleteAttachment(att)} aria-label="Delete image">✕</button>
-                </figcaption>
-              </figure>
             ))}
           </div>
         )}

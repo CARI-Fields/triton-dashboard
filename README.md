@@ -1,5 +1,7 @@
 # Triton Board
 
+### 🔗 Live board: **https://triton-board.vercel.app**
+
 A live, editable project board for the **Triton Kernel Agent — RL Training** project.
 Everyone with the link can edit modules, tasks, statuses, and assignees, and changes
 sync in real time. Built with Next.js + Supabase, deploys free on Vercel.

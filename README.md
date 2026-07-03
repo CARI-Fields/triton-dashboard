@@ -6,9 +6,9 @@ A live, editable project board for the **Triton Kernel Agent — RL Training** p
 Everyone with the link can edit modules, tasks, statuses, and assignees, and changes
 sync in real time. Built with Next.js + Supabase, deploys free on Vercel.
 
-> **Access model:** no login. The URL is the secret. Anyone who has the deployed link
-> can view and edit. Don't share it beyond your team. (You can add real per-person
-> login later — see "Adding login" below.)
+> **Access model:** password-protected. The board sits behind one shared team
+> password (Supabase Auth), and the database rejects any request without a valid
+> login (Row Level Security). See `supabase/migration-auth.sql` and `lib/auth.ts`.
 
 ---
 

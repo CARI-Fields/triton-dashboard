@@ -94,19 +94,20 @@ Plus the **team login password** (to sign in to the running board) — shared ou
 
 ---
 
-## ⚠️ Deploying & contributing (read this first)
+## Deploying & contributing
 
-The site redeploys automatically when `main` updates — **but Vercel only builds commits whose
-author email is linked to the Vercel account** (`brucexi99@outlook.com`). If you push a commit
-authored by a different email, Vercel refuses to build it ("… not a member of the team") and
-the site silently stays on the old version. As a second maintainer, pick one:
+- **Production auto-deploys** from `main` via Vercel on every merge.
+- **`main` is branch-protected** — collaborators can't push to it directly; all changes go through
+  **pull requests**. The full workflow (branch → PR → review → merge) is in
+  **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
+- **Why a maintainer merges each PR:** Vercel only builds commits authored by the owner's Vercel
+  account (`brucexi99@outlook.com`). A PR merged by the owner deploys; a commit pushed under a
+  different email is refused ("… not a member of the team"). If a merge ever doesn't trigger a
+  build, redeploy from the Vercel dashboard (**Deployments → ⋯ → Redeploy**).
 
-1. **Open a Pull Request** (recommended). Bruce reviews and merges; the merge commit deploys. Cleanest, keeps history attributed to you.
-2. **Get added to the Vercel project** (requires Vercel Pro) so your own pushes deploy.
-3. **Commit under the shared identity** for this repo only — if Bruce is OK with it:
-   ```bash
-   git config user.email "brucexi99@outlook.com"   # repo-local, doesn't touch your global git
-   ```
+**Adding a collaborator:** the owner invites them under GitHub **Settings → Collaborators**; then
+they follow [`CONTRIBUTING.md`](CONTRIBUTING.md). Branch protection is configured so the owner
+(admin) can still push to `main` directly, while collaborators use PRs.
 
 ## Database (Supabase) & migrations
 

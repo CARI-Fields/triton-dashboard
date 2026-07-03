@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import MarkdownField from "@/components/MarkdownField";
 import { supabase } from "@/lib/supabase";
 import type { Attachment, Experiment, Member, Module, Status, Task } from "@/lib/types";
 
@@ -221,14 +220,13 @@ function ExperimentCard({
         />
         <button className="icon-btn" onClick={onDelete} aria-label="Delete experiment">✕</button>
       </div>
-      <EditableText
-        value={exp.notes}
-        multiline
-        className="exp-notes"
-        placeholder="Notes for this run — setup, observations…"
-        ariaLabel="Experiment notes"
-        onSave={(v) => onUpdate({ notes: v })}
-      />
+      <div className="exp-notes">
+        <MarkdownField
+          value={exp.notes}
+          placeholder="Notes for this run — setup, observations… (Markdown)"
+          onSave={(v) => onUpdate({ notes: v })}
+        />
+      </div>
       <MetricsEditor metrics={exp.metrics} onChange={(m) => onUpdate({ metrics: m })} />
     </div>
   );
@@ -243,8 +241,6 @@ export default function TaskDetail({ id }: { id: string }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [editingNotes, setEditingNotes] = useState(false);
-  const [notesDraft, setNotesDraft] = useState("");
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -286,10 +282,6 @@ export default function TaskDetail({ id }: { id: string }) {
       .subscribe();
     return () => { client.removeChannel(channel); };
   }, [id, reload]);
-
-  useEffect(() => {
-    if (!editingNotes) setNotesDraft(task?.notes ?? "");
-  }, [task?.notes, editingNotes]);
 
   const updateTask = useCallback(
     async (patch: Partial<Task>) => {
@@ -437,36 +429,13 @@ export default function TaskDetail({ id }: { id: string }) {
 
       {/* Notes / progress */}
       <section className="detail-section">
-        <div className="detail-section-head">
-          <h2>Progress &amp; notes</h2>
-          {!editingNotes && (
-            <button className="btn" onClick={() => setEditingNotes(true)}>Edit</button>
-          )}
-        </div>
-        {editingNotes ? (
-          <div className="notes-editor">
-            <textarea
-              className="edit-input notes-area"
-              value={notesDraft}
-              autoFocus
-              onChange={(e) => setNotesDraft(e.target.value)}
-              placeholder="Write progress, decisions, findings… Markdown supported (headings, lists, **bold**, tables)."
-            />
-            <div className="notes-actions">
-              <button className="btn primary" onClick={() => { updateTask({ notes: notesDraft }); setEditingNotes(false); }}>
-                Save
-              </button>
-              <button className="btn" onClick={() => setEditingNotes(false)}>Cancel</button>
-              <span className="hint">Markdown supported</span>
-            </div>
-          </div>
-        ) : task.notes ? (
-          <div className="markdown">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.notes}</ReactMarkdown>
-          </div>
-        ) : (
-          <p className="muted">No notes yet. Click <b>Edit</b> to add progress, findings, and decisions.</p>
-        )}
+        <div className="detail-section-head"><h2>Progress &amp; notes</h2></div>
+        <MarkdownField
+          value={task.notes}
+          minHeight={160}
+          placeholder="Click to add progress, findings, and decisions… (Markdown supported: headings, lists, **bold**, tables)"
+          onSave={(v) => updateTask({ notes: v })}
+        />
       </section>
 
       {/* Charts */}

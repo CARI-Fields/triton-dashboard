@@ -380,3 +380,37 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .picker-details > summary::-webkit-details-marker { display: none; }
 .picker-details .menu { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; }
 .menu-empty { padding: 8px; font-size: 12.5px; color: var(--todo); }
+
+/* ================= Markdown field (shared freeform editor) ================= */
+.md-view {
+  border-radius: 6px; padding: 6px 8px; margin: -6px -8px; cursor: text;
+  transition: background 0.12s ease; outline: none;
+}
+.md-view:hover { background: rgba(59, 73, 173, 0.06); }
+.md-view:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.md-view.placeholder { color: var(--todo); font-style: italic; }
+.stage.dark .md-view:hover { background: rgba(255, 255, 255, 0.06); }
+.stage.dark .md-view.placeholder { color: var(--on-dark-mute); }
+
+.md-textarea {
+  width: 100%; font: inherit; font-size: 14px; line-height: 1.6; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--accent); border-radius: 8px;
+  padding: 10px 12px; outline: none; box-shadow: 0 0 0 3px var(--accent-soft);
+  resize: none; overflow: hidden;
+}
+.stage.dark .md-textarea { background: #10141f; color: var(--on-dark); border-color: #5563c6; box-shadow: none; }
+.md-hint { font-family: var(--mono); font-size: 11px; color: var(--todo); margin-top: 5px; }
+.stage.dark .md-hint { color: var(--on-dark-mute); }
+
+/* compact markdown inside inline fields */
+.markdown > :last-child { margin-bottom: 0; }
+.stage-obj .markdown, .exp-notes .markdown { font-size: 13.5px; }
+.exp-notes .markdown { color: var(--ink-soft); }
+
+/* markdown on dark foundation cards */
+.stage.dark .markdown { color: var(--on-dark); }
+.stage.dark .markdown code { background: rgba(255, 255, 255, 0.12); color: #e8ebf5; }
+.stage.dark .markdown a { color: #aab2ff; }
+.stage.dark .markdown th { background: rgba(255, 255, 255, 0.06); }
+.stage.dark .markdown td, .stage.dark .markdown th { border-color: #333c57; }
+.stage.dark .markdown blockquote { color: var(--on-dark-mute); border-color: #3c4667; }

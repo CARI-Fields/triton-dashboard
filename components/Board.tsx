@@ -9,6 +9,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import MarkdownField from "@/components/MarkdownField";
 import type { Member, Module, Status, Task } from "@/lib/types";
 
 const STATUS_OPTIONS: { value: Status; label: string }[] = [
@@ -366,15 +367,13 @@ function ModuleCard({
         </button>
       </div>
 
-      <p className="stage-obj">
-        <EditableText
+      <div className="stage-obj">
+        <MarkdownField
           value={module.objective}
-          multiline
-          placeholder="Describe the objective…"
-          ariaLabel="Module objective"
+          placeholder="Describe the objective… (Markdown)"
           onSave={(v) => onPatchModule({ objective: v })}
         />
-      </p>
+      </div>
 
       <div className="tasks">
         {tasks.length === 0 && <div className="empty">No tasks yet</div>}

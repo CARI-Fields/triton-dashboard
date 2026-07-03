@@ -75,6 +75,23 @@ Supabase project, run the SQL below against it, and point `.env.local` at it ins
 
 Always run `npm run build` before pushing — it type-checks the whole app.
 
+## Environment variables (who needs what)
+
+Nothing secret is in the repo — request the values you need and put them in your own
+`.env.local` (copy from [`.env.local.example`](.env.local.example)):
+
+| Variable | Who needs it | Where to get it | Sensitivity |
+|---|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | anyone running the app locally | a maintainer, or Vercel → project → Settings → Environment Variables | low (public) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anyone running the app locally | same as above | low — publishable key, already ships in the browser |
+| `SUPABASE_DB_URL` | **only** if you run DB migrations | a maintainer (Supabase session-pooler string + DB password) | **high — full DB admin; treat like a root password** |
+
+Plus the **team login password** (to sign in to the running board) — shared out-of-band
+(password manager / DM), not an env var.
+
+> **Never commit `.env.local`.** It's git-ignored on purpose. Share secrets through a password
+> manager or a direct message — never through git, because git history keeps them forever.
+
 ---
 
 ## ⚠️ Deploying & contributing (read this first)

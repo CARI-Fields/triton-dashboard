@@ -91,16 +91,34 @@ the site silently stays on the old version. As a second maintainer, pick one:
    git config user.email "brucexi99@outlook.com"   # repo-local, doesn't touch your global git
    ```
 
-## Database (Supabase)
+## Database (Supabase) & migrations
 
-Already provisioned for the live project — you normally don't touch this. For reference, or to
-stand up a fresh instance, run these in the Supabase **SQL Editor** in order:
+Schema changes live as `.sql` files in [`supabase/migrations/`](supabase/migrations) and are
+applied with **one command** — no more pasting into the dashboard:
 
-1. `schema.sql` — `modules`, `tasks`, `members` + realtime
-2. `seed.sql` — initial plan data (optional)
-3. `migration-task-details.sql` — `tasks.notes`, `experiments`, `attachments`, and the `task-images` Storage bucket
-4. `migration-plots-per-experiment.sql` — adds `attachments.experiment_id`
-5. `migration-auth.sql` — **run last**, after creating the shared user — locks every table to the `authenticated` role
+```bash
+npm run db:migrate        # applies any migrations not yet applied
+```
+
+This needs `SUPABASE_DB_URL` in `.env.local` (Supabase → Project Settings → Database →
+Connection string → **Session pooler**, with the DB password). Applied migrations are tracked
+in a `_migrations` table, so it only ever runs new files.
+
+Current migrations (run in order on a fresh database):
+
+1. `0001_schema.sql` — `modules`, `tasks`, `members` + realtime
+2. `0002_task_details.sql` — `tasks.notes`, `experiments`, `attachments`, `task-images` Storage bucket
+3. `0003_plots_per_experiment.sql` — `attachments.experiment_id`
+4. `0004_auth_lockdown.sql` — locks every table to the `authenticated` role
+
+`supabase/seed.sql` (initial plan data) is optional and separate — run it once via the SQL editor.
+
+**To make a schema change:** add a new `NNNN_description.sql` file to `supabase/migrations/`, then
+`npm run db:migrate`.
+
+> First time on a database that was set up **by hand**, run `npm run db:baseline` **once** — it
+> records the existing migrations as already-applied so they're never re-run (which matters:
+> re-running `0001` would re-open public access before `0004` locks it again).
 
 ### Shared login
 

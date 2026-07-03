@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
+    "db:baseline": "node --env-file=.env.local scripts/migrate.mjs --baseline"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",
@@ -19,6 +21,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "pg": "^8.22.0",
     "typescript": "^5"
   }
 }

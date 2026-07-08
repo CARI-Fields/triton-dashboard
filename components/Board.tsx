@@ -341,9 +341,9 @@ function ModuleCard({
   onToggleAssignee: (taskId: string, name: string) => void;
   onAddMemberToTask: (taskId: string, name: string) => void;
 }) {
-  const dark = module.kind === "foundation";
+  const found = module.kind === "foundation";
   return (
-    <article className={`stage ${dark ? "dark" : ""}`}>
+    <article className={`stage ${found ? "found" : ""}`}>
       <div className="stage-head">
         {number !== null ? (
           <span className="stage-num">{String(number).padStart(2, "0")}</span>

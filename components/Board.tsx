@@ -11,7 +11,7 @@ import Link from "next/link";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import MarkdownField from "@/components/MarkdownField";
 import { logActivity } from "@/lib/activity";
-import { nextStatus, statusLabel } from "@/lib/status";
+import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
 import { relTime } from "@/lib/time";
 import type { Member, Module, Task } from "@/lib/types";
 
@@ -165,12 +165,22 @@ function AssigneePicker({
     setNewName("");
   }
 
+  const unassigned = members.filter((m) => !task.assignees.includes(m.name));
+
   return (
     <div className="picker" ref={ref}>
       <div className="owners">
         {task.assignees.map((name) => (
-          <span className="av" key={name} title={name}>
-            {avatarText(name, members)}
+          <span className="owner-chip" key={name} title={name}>
+            <span className="av">{avatarText(name, members)}</span>
+            <button
+              className="owner-x"
+              onClick={() => onToggle(name)}
+              aria-label={`Unassign ${name}`}
+              title={`Unassign ${name}`}
+            >
+              ✕
+            </button>
           </span>
         ))}
         <button
@@ -185,23 +195,20 @@ function AssigneePicker({
 
       {open && (
         <div className="menu" role="menu">
-          {members.map((m) => {
-            const checked = task.assignees.includes(m.name);
-            return (
-              <button
-                key={m.id}
-                className="menu-item"
-                role="menuitemcheckbox"
-                aria-checked={checked}
-                onClick={() => onToggle(m.name)}
-              >
-                <span className="av">{m.initials || initialsFromName(m.name)}</span>
-                {m.name}
-                {checked && <span className="check">✓</span>}
-              </button>
-            );
-          })}
-          {members.length > 0 && <div className="menu-divider" />}
+          {unassigned.map((m) => (
+            <button
+              key={m.id}
+              className="menu-item"
+              onClick={() => onToggle(m.name)}
+            >
+              <span className="av">{m.initials || initialsFromName(m.name)}</span>
+              {m.name}
+            </button>
+          ))}
+          {members.length > 0 && unassigned.length === 0 && (
+            <div className="menu-empty">Everyone is assigned.</div>
+          )}
+          <div className="menu-divider" />
           <div className="menu-add">
             <input
               value={newName}
@@ -299,14 +306,16 @@ function TaskRow({
           />
         </div>
         <div className="task-left">
-          <button
+          <select
             className={`pill ${task.status}`}
-            title="Click to change status"
-            aria-label={`Status: ${statusLabel(task.status)}. Click to change.`}
-            onClick={() => onPatch({ status: nextStatus(task.status) })}
+            value={task.status}
+            aria-label="Status"
+            onChange={(e) => onPatch({ status: e.target.value as Task["status"] })}
           >
-            {statusLabel(task.status)}
-          </button>
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
           <button className="icon-btn" onClick={onDelete} aria-label="Delete task" title="Delete task">
             ✕
           </button>

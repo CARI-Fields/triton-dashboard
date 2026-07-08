@@ -5,7 +5,7 @@ import Link from "next/link";
 import MarkdownField from "@/components/MarkdownField";
 import { supabase } from "@/lib/supabase";
 import { KIND_COLOR, logActivity } from "@/lib/activity";
-import { nextStatus, statusLabel } from "@/lib/status";
+import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
 import { fmtDate, relTime } from "@/lib/time";
 import type { Activity, Attachment, Experiment, Member, Module, Task } from "@/lib/types";
 
@@ -25,6 +25,19 @@ function formatNum(v: number): string {
 }
 function nextPosition(items: { position: number }[]): number {
   return items.length ? Math.max(...items.map((i) => i.position)) + 1 : 0;
+}
+
+/** Close a popover when clicking outside of it. */
+function useClickOutside(onOutside: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onOutside();
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [onOutside]);
+  return ref;
 }
 
 /* ---------- Inline editable text ---------- */
@@ -296,6 +309,8 @@ export default function TaskDetail({ id }: { id: string }) {
   const [notFound, setNotFound] = useState(false);
   const [uploadingExpId, setUploadingExpId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const assignRef = useClickOutside(() => setAssignOpen(false));
 
   const reload = useCallback(async () => {
     if (!supabase || !id) return;
@@ -461,37 +476,61 @@ export default function TaskDetail({ id }: { id: string }) {
           <EditableText value={task.title} ariaLabel="Task title" onSave={(v) => updateTask({ title: v })} />
         </h1>
         <div className="detail-meta">
-          <button
+          <select
             className={`pill ${task.status}`}
-            title="Click to change status"
-            aria-label={`Status: ${statusLabel(task.status)}. Click to change.`}
-            onClick={() => updateTask({ status: nextStatus(task.status) })}
+            value={task.status}
+            aria-label="Status"
+            onChange={(e) => updateTask({ status: e.target.value as Task["status"] })}
           >
-            {statusLabel(task.status)}
-          </button>
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
 
           <div className="assignees-inline">
             <div className="owners">
               {task.assignees.map((name) => (
-                <span className="av" key={name} title={name}>{avatarText(name, members)}</span>
+                <span className="owner-chip" key={name} title={name}>
+                  <span className="av">{avatarText(name, members)}</span>
+                  <button
+                    className="owner-x"
+                    onClick={() => toggleAssignee(name)}
+                    aria-label={`Unassign ${name}`}
+                    title={`Unassign ${name}`}
+                  >
+                    ✕
+                  </button>
+                </span>
               ))}
-            </div>
-            <details className="picker-details">
-              <summary className="add-owner" aria-label="Assign people">+</summary>
-              <div className="menu">
-                {members.map((m) => {
-                  const checked = task.assignees.includes(m.name);
-                  return (
-                    <button key={m.id} className="menu-item" onClick={() => toggleAssignee(m.name)}>
-                      <span className="av">{m.initials || initialsFromName(m.name)}</span>
-                      {m.name}
-                      {checked && <span className="check">✓</span>}
-                    </button>
-                  );
-                })}
-                {members.length === 0 && <div className="menu-empty">Add teammates on the board first.</div>}
+              <div className="picker" ref={assignRef}>
+                <button
+                  className="add-owner"
+                  onClick={() => setAssignOpen((o) => !o)}
+                  aria-label="Assign people"
+                  title="Assign people"
+                >
+                  +
+                </button>
+                {assignOpen && (
+                  <div className="menu" role="menu">
+                    {members
+                      .filter((m) => !task.assignees.includes(m.name))
+                      .map((m) => (
+                        <button key={m.id} className="menu-item" onClick={() => toggleAssignee(m.name)}>
+                          <span className="av">{m.initials || initialsFromName(m.name)}</span>
+                          {m.name}
+                        </button>
+                      ))}
+                    {members.length === 0 && (
+                      <div className="menu-empty">Add teammates on the board first.</div>
+                    )}
+                    {members.length > 0 && members.every((m) => task.assignees.includes(m.name)) && (
+                      <div className="menu-empty">Everyone is assigned.</div>
+                    )}
+                  </div>
+                )}
               </div>
-            </details>
+            </div>
           </div>
 
           <span className="detail-dates">

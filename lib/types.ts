@@ -20,6 +20,7 @@ export interface Task {
   notes: string;
   position: number;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Member {
@@ -38,6 +39,7 @@ export interface Experiment {
   metrics: Record<string, number>;
   position: number;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Attachment {
@@ -48,5 +50,22 @@ export interface Attachment {
   path: string;
   caption: string;
   position: number;
+  created_at: string;
+}
+
+export type ActivityKind =
+  | "create"
+  | "status"
+  | "assign"
+  | "experiment"
+  | "note"
+  | "edit"
+  | "comment";
+
+export interface Activity {
+  id: string;
+  task_id: string;
+  text: string;
+  kind: ActivityKind;
   created_at: string;
 }

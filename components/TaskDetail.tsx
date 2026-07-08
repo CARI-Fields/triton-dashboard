@@ -4,14 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import MarkdownField from "@/components/MarkdownField";
 import { supabase } from "@/lib/supabase";
-import type { Attachment, Experiment, Member, Module, Status, Task } from "@/lib/types";
-
-const STATUS_OPTIONS: { value: Status; label: string }[] = [
-  { value: "todo", label: "To do" },
-  { value: "in_progress", label: "In progress" },
-  { value: "done", label: "Done" },
-  { value: "blocked", label: "Blocked" },
-];
+import { KIND_COLOR, logActivity } from "@/lib/activity";
+import { nextStatus, statusLabel } from "@/lib/status";
+import { fmtDate, relTime } from "@/lib/time";
+import type { Activity, Attachment, Experiment, Member, Module, Task } from "@/lib/types";
 
 function initialsFromName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -229,6 +225,7 @@ function ExperimentCard({
           ariaLabel="Experiment name"
           onSave={(v) => onUpdate({ name: v })}
         />
+        <span className="exp-updated">Updated {relTime(exp.updated_at)}</span>
         <button className="icon-btn" onClick={onDelete} aria-label="Delete experiment">✕</button>
       </div>
       <div className="exp-notes">
@@ -293,6 +290,8 @@ export default function TaskDetail({ id }: { id: string }) {
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [activity, setActivity] = useState<Activity[]>([]);
+  const [draftNote, setDraftNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [uploadingExpId, setUploadingExpId] = useState<string | null>(null);
@@ -307,16 +306,18 @@ export default function TaskDetail({ id }: { id: string }) {
       return;
     }
     setTask(t as Task);
-    const [modRes, expRes, attRes, memRes] = await Promise.all([
+    const [modRes, expRes, attRes, memRes, actRes] = await Promise.all([
       supabase.from("modules").select("*").eq("id", (t as Task).module_id).maybeSingle(),
       supabase.from("experiments").select("*").eq("task_id", id).order("position"),
       supabase.from("attachments").select("*").eq("task_id", id).order("position"),
       supabase.from("members").select("*").order("position"),
+      supabase.from("activity").select("*").eq("task_id", id).order("created_at", { ascending: false }),
     ]);
     setModule((modRes.data as Module) ?? null);
     setExperiments((expRes.data ?? []) as Experiment[]);
     setAttachments((attRes.data ?? []) as Attachment[]);
     setMembers((memRes.data ?? []) as Member[]);
+    setActivity((actRes.data ?? []) as Activity[]);
     setLoading(false);
   }, [id]);
 
@@ -332,6 +333,7 @@ export default function TaskDetail({ id }: { id: string }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, reload)
       .on("postgres_changes", { event: "*", schema: "public", table: "experiments" }, reload)
       .on("postgres_changes", { event: "*", schema: "public", table: "attachments" }, reload)
+      .on("postgres_changes", { event: "*", schema: "public", table: "activity" }, reload)
       .subscribe();
     return () => { client.removeChannel(channel); };
   }, [id, reload]);
@@ -340,6 +342,9 @@ export default function TaskDetail({ id }: { id: string }) {
     async (patch: Partial<Task>) => {
       if (!supabase) return;
       await supabase.from("tasks").update(patch).eq("id", id);
+      if (patch.status) logActivity(id, `Status set to ${statusLabel(patch.status)}`, "status");
+      if (patch.title) logActivity(id, `Renamed to “${patch.title}”`, "edit");
+      if (patch.notes !== undefined) logActivity(id, "Updated progress notes", "note");
       reload();
     },
     [id, reload]
@@ -347,13 +352,15 @@ export default function TaskDetail({ id }: { id: string }) {
 
   async function addExperiment() {
     if (!supabase) return;
+    const name = `Experiment ${experiments.length + 1}`;
     await supabase.from("experiments").insert({
       task_id: id,
-      name: `Experiment ${experiments.length + 1}`,
+      name,
       notes: "",
       metrics: {},
       position: nextPosition(experiments),
     });
+    logActivity(id, `Added experiment “${name}”`, "experiment");
     reload();
   }
   async function updateExperiment(expId: string, patch: Partial<Experiment>) {
@@ -363,16 +370,28 @@ export default function TaskDetail({ id }: { id: string }) {
   }
   async function deleteExperiment(expId: string) {
     if (!supabase) return;
+    const exp = experiments.find((e) => e.id === expId);
     await supabase.from("experiments").delete().eq("id", expId);
+    if (exp) logActivity(id, `Removed experiment “${exp.name}”`, "experiment");
     reload();
   }
 
   function toggleAssignee(name: string) {
     if (!task) return;
-    const next = task.assignees.includes(name)
+    const had = task.assignees.includes(name);
+    const next = had
       ? task.assignees.filter((a) => a !== name)
       : [...task.assignees, name];
     updateTask({ assignees: next });
+    logActivity(id, `${had ? "Unassigned" : "Assigned"} ${name}`, "assign");
+  }
+
+  async function addTimelineNote() {
+    const v = draftNote.trim();
+    if (!v) return;
+    await logActivity(id, v, "comment");
+    setDraftNote("");
+    reload();
   }
 
   async function uploadToExperiment(expId: string, files: FileList) {
@@ -442,16 +461,14 @@ export default function TaskDetail({ id }: { id: string }) {
           <EditableText value={task.title} ariaLabel="Task title" onSave={(v) => updateTask({ title: v })} />
         </h1>
         <div className="detail-meta">
-          <select
+          <button
             className={`pill ${task.status}`}
-            value={task.status}
-            aria-label="Status"
-            onChange={(e) => updateTask({ status: e.target.value as Status })}
+            title="Click to change status"
+            aria-label={`Status: ${statusLabel(task.status)}. Click to change.`}
+            onClick={() => updateTask({ status: nextStatus(task.status) })}
           >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+            {statusLabel(task.status)}
+          </button>
 
           <div className="assignees-inline">
             <div className="owners">
@@ -476,6 +493,10 @@ export default function TaskDetail({ id }: { id: string }) {
               </div>
             </details>
           </div>
+
+          <span className="detail-dates">
+            Created {fmtDate(task.created_at)} · Updated {relTime(task.updated_at)}
+          </span>
         </div>
       </header>
 
@@ -529,6 +550,39 @@ export default function TaskDetail({ id }: { id: string }) {
                 onDeleteAttachment={deleteAttachment}
                 onUpdateAttachment={updateAttachment}
               />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Activity timeline */}
+      <section className="detail-section">
+        <div className="detail-section-head"><h2>Activity timeline</h2></div>
+        <div className="timeline-add">
+          <input
+            value={draftNote}
+            placeholder="Add a note to the timeline…"
+            onChange={(e) => setDraftNote(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addTimelineNote(); }}
+            aria-label="Add a note to the timeline"
+          />
+          <button className="btn primary" onClick={addTimelineNote}>Add note</button>
+        </div>
+        {activity.length === 0 ? (
+          <p className="muted">No activity yet.</p>
+        ) : (
+          <div className="timeline">
+            {activity.map((ev, i) => (
+              <div className="tl-row" key={ev.id}>
+                <div className="tl-rail">
+                  <span className="tl-dot" style={{ background: KIND_COLOR[ev.kind] ?? "var(--todo)" }} />
+                  {i < activity.length - 1 && <span className="tl-line" />}
+                </div>
+                <div className="tl-body">
+                  <div className="tl-text">{ev.text}</div>
+                  <div className="tl-time">{relTime(ev.created_at)} · {fmtDate(ev.created_at)}</div>
+                </div>
+              </div>
             ))}
           </div>
         )}

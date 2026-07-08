@@ -10,18 +10,10 @@ import {
 import Link from "next/link";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import MarkdownField from "@/components/MarkdownField";
-import type { Member, Module, Status, Task } from "@/lib/types";
-
-const STATUS_OPTIONS: { value: Status; label: string }[] = [
-  { value: "todo", label: "To do" },
-  { value: "in_progress", label: "In progress" },
-  { value: "done", label: "Done" },
-  { value: "blocked", label: "Blocked" },
-];
-
-function statusLabel(s: Status): string {
-  return STATUS_OPTIONS.find((o) => o.value === s)?.label ?? s;
-}
+import { logActivity } from "@/lib/activity";
+import { nextStatus, statusLabel } from "@/lib/status";
+import { relTime } from "@/lib/time";
+import type { Member, Module, Task } from "@/lib/types";
 
 function initialsFromName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -149,17 +141,22 @@ function EditableText({
 function AssigneePicker({
   task,
   members,
+  open,
+  onToggleOpen,
+  onClose,
   onToggle,
   onAddMember,
 }: {
   task: Task;
   members: Member[];
+  open: boolean;
+  onToggleOpen: () => void;
+  onClose: () => void;
   onToggle: (name: string) => void;
   onAddMember: (name: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [newName, setNewName] = useState("");
-  const ref = useClickOutside(() => setOpen(false));
+  const ref = useClickOutside(onClose);
 
   function submitNew() {
     const n = newName.trim();
@@ -178,7 +175,7 @@ function AssigneePicker({
         ))}
         <button
           className="add-owner"
-          onClick={() => setOpen((o) => !o)}
+          onClick={onToggleOpen}
           aria-label="Assign people"
           title="Assign people"
         >
@@ -233,6 +230,9 @@ function AssigneePicker({
 function TaskRow({
   task,
   members,
+  pickerOpen,
+  onTogglePicker,
+  onClosePicker,
   onPatch,
   onDelete,
   onToggleAssignee,
@@ -240,6 +240,9 @@ function TaskRow({
 }: {
   task: Task;
   members: Member[];
+  pickerOpen: boolean;
+  onTogglePicker: () => void;
+  onClosePicker: () => void;
   onPatch: (patch: Partial<Task>) => void;
   onDelete: () => void;
   onToggleAssignee: (name: string) => void;
@@ -279,6 +282,7 @@ function TaskRow({
             >
               ✎
             </button>
+            <span className="task-updated" title="Last updated">{relTime(task.updated_at)}</span>
           </>
         )}
       </div>
@@ -287,23 +291,22 @@ function TaskRow({
           <AssigneePicker
             task={task}
             members={members}
+            open={pickerOpen}
+            onToggleOpen={onTogglePicker}
+            onClose={onClosePicker}
             onToggle={onToggleAssignee}
             onAddMember={onAddMember}
           />
         </div>
         <div className="task-left">
-          <select
+          <button
             className={`pill ${task.status}`}
-            value={task.status}
-            aria-label="Task status"
-            onChange={(e) => onPatch({ status: e.target.value as Status })}
+            title="Click to change status"
+            aria-label={`Status: ${statusLabel(task.status)}. Click to change.`}
+            onClick={() => onPatch({ status: nextStatus(task.status) })}
           >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            {statusLabel(task.status)}
+          </button>
           <button className="icon-btn" onClick={onDelete} aria-label="Delete task" title="Delete task">
             ✕
           </button>
@@ -321,6 +324,8 @@ function ModuleCard({
   number,
   tasks,
   members,
+  pickerId,
+  onSetPicker,
   onPatchModule,
   onDeleteModule,
   onAddTask,
@@ -333,6 +338,8 @@ function ModuleCard({
   number: number | null;
   tasks: Task[];
   members: Member[];
+  pickerId: string | null;
+  onSetPicker: (id: string | null) => void;
   onPatchModule: (patch: Partial<Module>) => void;
   onDeleteModule: () => void;
   onAddTask: () => void;
@@ -341,9 +348,9 @@ function ModuleCard({
   onToggleAssignee: (taskId: string, name: string) => void;
   onAddMemberToTask: (taskId: string, name: string) => void;
 }) {
-  const dark = module.kind === "foundation";
+  const found = module.kind === "foundation";
   return (
-    <article className={`stage ${dark ? "dark" : ""}`}>
+    <article className={`stage ${found ? "found" : ""}`}>
       <div className="stage-head">
         {number !== null ? (
           <span className="stage-num">{String(number).padStart(2, "0")}</span>
@@ -382,6 +389,11 @@ function ModuleCard({
             key={t.id}
             task={t}
             members={members}
+            pickerOpen={pickerId === t.id}
+            onTogglePicker={() => onSetPicker(pickerId === t.id ? null : t.id)}
+            onClosePicker={() => {
+              if (pickerId === t.id) onSetPicker(null);
+            }}
             onPatch={(patch) => onPatchTask(t.id, patch)}
             onDelete={() => onDeleteTask(t.id)}
             onToggleAssignee={(name) => onToggleAssignee(t.id, name)}
@@ -441,6 +453,7 @@ export default function Board() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [newMember, setNewMember] = useState("");
+  const [pickerId, setPickerId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!supabase) return;
@@ -515,13 +528,24 @@ export default function Board() {
     async (moduleId: string) => {
       if (!supabase) return;
       const siblings = tasks.filter((t) => t.module_id === moduleId);
-      await supabase.from("tasks").insert({
-        module_id: moduleId,
-        title: "New task",
-        status: "todo",
-        assignees: [],
-        position: nextPosition(siblings),
-      });
+      // Pin new tasks to the top of the column, and open the assignee picker
+      // right away so the task can be assigned without another click.
+      const topPos = siblings.length ? Math.min(...siblings.map((i) => i.position)) - 1 : 0;
+      const { data } = await supabase
+        .from("tasks")
+        .insert({
+          module_id: moduleId,
+          title: "New task",
+          status: "todo",
+          assignees: [],
+          position: topPos,
+        })
+        .select("id")
+        .single();
+      if (data) {
+        logActivity(data.id, "Task created", "create");
+        setPickerId(data.id);
+      }
       reload();
     },
     [tasks, reload]
@@ -531,6 +555,8 @@ export default function Board() {
     async (id: string, patch: Partial<Task>) => {
       if (!supabase) return;
       await supabase.from("tasks").update(patch).eq("id", id);
+      if (patch.status) logActivity(id, `Status set to ${statusLabel(patch.status)}`, "status");
+      if (patch.title) logActivity(id, `Renamed to “${patch.title}”`, "edit");
       reload();
     },
     [reload]
@@ -550,10 +576,12 @@ export default function Board() {
       if (!supabase) return;
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
-      const next = task.assignees.includes(name)
+      const had = task.assignees.includes(name);
+      const next = had
         ? task.assignees.filter((a) => a !== name)
         : [...task.assignees, name];
       await supabase.from("tasks").update({ assignees: next }).eq("id", taskId);
+      logActivity(taskId, `${had ? "Unassigned" : "Assigned"} ${name}`, "assign");
       reload();
     },
     [tasks, reload]
@@ -588,6 +616,7 @@ export default function Board() {
           .from("tasks")
           .update({ assignees: [...task.assignees, n] })
           .eq("id", taskId);
+        logActivity(taskId, `Assigned ${n}`, "assign");
       }
       reload();
     },
@@ -625,6 +654,13 @@ export default function Board() {
     [modules]
   );
 
+  const lastUpdated = useMemo(() => {
+    const times = tasks
+      .map((t) => new Date(t.updated_at ?? t.created_at).getTime())
+      .filter((n) => !Number.isNaN(n));
+    return times.length ? relTime(new Date(Math.max(...times)).toISOString()) : "just now";
+  }, [tasks]);
+
   const ownershipRows = useMemo(() => {
     const rows: { member: string; task: string; module?: Module }[] = [];
     for (const t of tasks) {
@@ -653,7 +689,7 @@ export default function Board() {
           <span className="key"><span className="dot in_progress" />In progress</span>
           <span className="key"><span className="dot done" />Done</span>
           <span className="key"><span className="dot blocked" />Blocked</span>
-          <span className="updated">Edits sync live · everyone with the link</span>
+          <span className="updated">Last updated {lastUpdated} · everyone with the link</span>
         </div>
       </header>
 
@@ -686,6 +722,8 @@ export default function Board() {
                   number={i + 1}
                   tasks={tasksByModule(mod.id)}
                   members={members}
+                  pickerId={pickerId}
+                  onSetPicker={setPickerId}
                   onPatchModule={(patch) => patchModule(mod.id, patch)}
                   onDeleteModule={() => deleteModule(mod.id, mod.name)}
                   onAddTask={() => addTask(mod.id)}
@@ -720,6 +758,8 @@ export default function Board() {
                 number={null}
                 tasks={tasksByModule(mod.id)}
                 members={members}
+                pickerId={pickerId}
+                onSetPicker={setPickerId}
                 onPatchModule={(patch) => patchModule(mod.id, patch)}
                 onDeleteModule={() => deleteModule(mod.id, mod.name)}
                 onAddTask={() => addTask(mod.id)}

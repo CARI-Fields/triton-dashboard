@@ -457,6 +457,27 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .logout-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ================= Activity timeline ================= */
+.detail-dates { font-family: var(--mono); font-size: 12px; color: var(--todo); margin-left: auto; }
+.exp-updated { font-family: var(--mono); font-size: 11px; color: var(--todo); white-space: nowrap; }
+.timeline-add { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; }
+.timeline-add input {
+  flex: 1; font: inherit; font-size: 14px; padding: 7px 10px;
+  border: 1px solid var(--line-strong); border-radius: 4px; outline: none; background: var(--paper);
+}
+.timeline-add input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.timeline { display: flex; flex-direction: column; }
+.tl-row { display: grid; grid-template-columns: 14px 1fr; gap: 14px; }
+.tl-rail { display: flex; flex-direction: column; align-items: center; }
+.tl-dot {
+  width: 11px; height: 11px; border-radius: 50%; margin-top: 3px; flex: 0 0 auto;
+  border: 2px solid var(--paper); box-shadow: 0 0 0 1px var(--line-strong);
+}
+.tl-line { flex: 1; width: 2px; background: var(--line); margin: 3px 0; }
+.tl-body { padding-bottom: 18px; }
+.tl-text { font-size: 14px; line-height: 1.4; color: var(--ink); }
+.tl-time { font-family: var(--mono); font-size: 11.5px; color: var(--todo); margin-top: 2px; }
+
 /* ================= Per-experiment plots ================= */
 .exp-plots { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 12px; }
 .exp-sub-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }

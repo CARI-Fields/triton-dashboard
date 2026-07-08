@@ -167,6 +167,14 @@ h1 {
 .pill.done { background: var(--good-soft); color: #1c6b47; }
 .pill.blocked { background: var(--crit-soft); color: #8f2f29; }
 
+.task-updated {
+  font-family: var(--mono); font-size: 10.5px; color: var(--todo);
+  flex: 0 0 auto; white-space: nowrap;
+}
+button.pill { font: inherit; font-family: var(--mono); font-size: 11px; }
+button.pill:hover { filter: brightness(0.96); }
+button.pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 .empty {
   border: 1px dashed var(--line-strong); border-radius: 6px; padding: 14px 12px;
   text-align: center; font-size: 13px; color: var(--todo); background: #fafbfc;

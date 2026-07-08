@@ -24,29 +24,35 @@ Everything syncs in real time across everyone's browser.
 
 ```
 app/
-  layout.tsx            root layout
+  layout.tsx            root layout (mounts the navbar)
   page.tsx              "/"  → <AuthGate><Board/></AuthGate>
   task/[id]/page.tsx    "/task/:id" → <AuthGate><TaskDetail/></AuthGate>
+  analytics/page.tsx    "/analytics" → <AuthGate><Analytics/></AuthGate>
   globals.css           all styles (design tokens at top)
 components/
+  Navbar.tsx            top navbar: brand, LIVE badge, Board / Analytics nav
   Board.tsx             the board: modules, tasks, ownership table, team roster
-  TaskDetail.tsx        task page: notes, experiments, metric charts, per-experiment plots
-  AuthGate.tsx          shared-password login gate (wraps both pages)
+  TaskDetail.tsx        task page: notes, experiments, metric charts, plots, activity timeline
+  Analytics.tsx         analytics: KPIs, completion, workload, module progress
+  AuthGate.tsx          shared-password login gate (wraps all pages)
   MarkdownField.tsx     reusable click-to-edit markdown field
 lib/
   supabase.ts           browser Supabase client (reads env vars)
   auth.ts               TEAM_EMAIL constant for the shared login
   types.ts              TypeScript types
+  time.ts               relative/absolute time formatting
+  status.ts             status labels + click-cycle order
+  activity.ts           activity-timeline logging helper
 supabase/
-  schema.sql            base tables + realtime
+  migrations/           numbered DB migrations (see "Database" below)
   seed.sql              initial plan data (optional)
-  migration-*.sql       later DB changes (see "Database" below)
 ```
 
 ## Features
 
-- Board: add/edit/delete **modules** (pipeline stages or cross-cutting foundations) and **tasks**; set **status**; **assign** people; auto **ownership** table; team **roster**.
-- Task detail (`/task/:id`, opened from a task title): **progress notes**, **experiments** (each with numeric **metrics** that auto-render as comparison **bar charts**), and **plots/images** uploaded per experiment.
+- Board: add/edit/delete **modules** (pipeline stages or cross-cutting foundations) and **tasks**; click a status pill to **cycle status**; **assign** people; auto **ownership** table; team **roster**; per-task and board-level **"last updated"** stamps.
+- Task detail (`/task/:id`, opened from a task title): **progress notes**, **experiments** (each with numeric **metrics** that auto-render as comparison **bar charts**), **plots/images** uploaded per experiment, and an **activity timeline** (auto-logged events + free-form notes).
+- Analytics (`/analytics`): task **KPIs**, overall **completion**, **workload by member**, per-module **progress**.
 - **Markdown** everywhere freeform (objectives, notes) — click to edit, renders on blur.
 - Realtime: edits write straight to Supabase and appear in every open browser.
 
@@ -128,6 +134,7 @@ Current migrations (run in order on a fresh database):
 2. `0002_task_details.sql` — `tasks.notes`, `experiments`, `attachments`, `task-images` Storage bucket
 3. `0003_plots_per_experiment.sql` — `attachments.experiment_id`
 4. `0004_auth_lockdown.sql` — locks every table to the `authenticated` role
+5. `0005_activity_and_timestamps.sql` — `activity` table (task timeline) + `updated_at` on `tasks` / `experiments`
 
 `supabase/seed.sql` (initial plan data) is optional and separate — run it once via the SQL editor.
 
@@ -157,6 +164,7 @@ Change the password anytime by resetting that user's password in Supabase.
 | `members` | `name`, `initials` (roster / assignee options) |
 | `experiments` | `task_id`, `name`, `notes` (markdown), `metrics` (jsonb `{ metric: number }`) |
 | `attachments` | `experiment_id` (+ `task_id`), `url`, `path`, `caption` — files live in the `task-images` Storage bucket |
+| `activity` | `task_id`, `text`, `kind` (create \| status \| assign \| experiment \| note \| edit \| comment) — the task timeline |
 
 All tables have realtime enabled and an `"auth access"` RLS policy (`to authenticated`).
 
@@ -164,5 +172,5 @@ All tables have realtime enabled and an `"auth access"` RLS policy (`to authenti
 
 - Drag-to-reorder (items currently append by `position`)
 - Per-person logins instead of one shared password (would give a real audit trail)
-- History / audit log (realtime is last-write-wins)
+- Full history / audit log (the per-task activity timeline exists; realtime is still last-write-wins)
 - Fully private images via signed URLs (currently public-read with random UUID paths; upload requires login)

@@ -48,7 +48,9 @@ export function applyExperimentFilters(
       if (filters.savedView === "recently_completed") {
         if (row.status !== "completed" || !row.completed_at) return false;
         const completed = new Date(row.completed_at).getTime();
-        if (!Number.isFinite(completed) || now - completed > RECENT_WINDOW_MS) return false;
+        if (!Number.isFinite(now) || !Number.isFinite(completed)) return false;
+        const age = now - completed;
+        if (age < 0 || age > RECENT_WINDOW_MS) return false;
       }
       if (filters.ownerId === "unassigned" && row.owner_id !== null) return false;
       if (

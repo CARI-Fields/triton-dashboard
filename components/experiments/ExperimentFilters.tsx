@@ -50,6 +50,7 @@ export default function ExperimentFilters({
             key={view.value}
             type="button"
             className={value.savedView === view.value ? "active" : ""}
+            aria-pressed={value.savedView === view.value}
             onClick={() => set("savedView", view.value)}
           >
             {view.label}

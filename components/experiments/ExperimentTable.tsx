@@ -7,7 +7,8 @@ import {
 } from "@/lib/experiments/policy";
 import ExperimentStatusBadge from "@/components/experiments/ExperimentStatusBadge";
 
-function metricValue(value: number): string {
+function metricValue(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return Number.isInteger(value) ? value.toLocaleString() : Number(value.toPrecision(5)).toString();
 }
 

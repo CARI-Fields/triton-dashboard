@@ -19,11 +19,13 @@ const mdComponents = {
 export default function MarkdownField({
   value,
   onSave,
+  onEditingChange,
   placeholder = "Click to edit — Markdown supported",
   minHeight = 76,
 }: {
   value: string;
   onSave: (v: string) => void;
+  onEditingChange?: (editing: boolean) => void;
   placeholder?: string;
   minHeight?: number;
 }) {
@@ -46,8 +48,14 @@ export default function MarkdownField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
+  function beginEditing() {
+    setEditing(true);
+    onEditingChange?.(true);
+  }
+
   function commit() {
     setEditing(false);
+    onEditingChange?.(false);
     const t = draft.replace(/\s+$/, "");
     if (t !== value) onSave(t);
   }
@@ -74,6 +82,7 @@ export default function MarkdownField({
             if (e.key === "Escape") {
               setDraft(value);
               setEditing(false);
+              onEditingChange?.(false);
             }
           }}
         />
@@ -88,11 +97,11 @@ export default function MarkdownField({
       role="button"
       tabIndex={0}
       title="Click to edit"
-      onClick={() => setEditing(true)}
+      onClick={beginEditing}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          setEditing(true);
+          beginEditing();
         }
       }}
     >

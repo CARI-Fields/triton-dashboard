@@ -135,6 +135,9 @@ Current migrations (run in order on a fresh database):
 3. `0003_plots_per_experiment.sql` — `attachments.experiment_id`
 4. `0004_auth_lockdown.sql` — locks every table to the `authenticated` role
 5. `0005_activity_and_timestamps.sql` — `activity` table (task timeline) + `updated_at` on `tasks` / `experiments`
+6. `0006_experiment_workspace.sql` — structured Experiment context, Owner/Status/Baseline,
+   Result/Decision fields, lifecycle timestamps, Experiment Activity linkage, indexes, and
+   transaction-safe anonymous Activity triggers
 
 `supabase/seed.sql` (initial plan data) is optional and separate — run it once via the SQL editor.
 
@@ -162,11 +165,48 @@ Change the password anytime by resetting that user's password in Supabase.
 | `modules` | `kind` (pipeline \| foundation), `name`, `objective` (markdown), `position` |
 | `tasks` | `module_id`, `title`, `status` (todo \| in_progress \| done \| blocked), `assignees` (text[]), `notes` (markdown) |
 | `members` | `name`, `initials` (roster / assignee options) |
-| `experiments` | `task_id`, `name`, `notes` (markdown), `metrics` (jsonb `{ metric: number }`) |
+| `experiments` | `experiment_no`, `task_id`, `owner_id`, `status`, explicit `baseline_experiment_id`, structured `data_spec` / `object_spec` / `environment_spec` / `config`, numeric `metrics`, `featured_metric_keys`, `result_summary`, `decision_outcome`, `decision_notes`, Markdown `notes`, lifecycle timestamps |
 | `attachments` | `experiment_id` (+ `task_id`), `url`, `path`, `caption` — files live in the `task-images` Storage bucket |
-| `activity` | `task_id`, `text`, `kind` (create \| status \| assign \| experiment \| note \| edit \| comment) — the task timeline |
+| `activity` | `task_id`, nullable `experiment_id`, `text`, `kind`, timestamp — automatic Experiment events are anonymous because the Board uses one shared team account |
 
 All tables have realtime enabled and an `"auth access"` RLS policy (`to authenticated`).
+
+## Task + Experiment workflow
+
+The current Board represents one Project:
+
+```text
+Project
+└── Task
+    └── Experiment
+```
+
+- Task is the collaboration and progress unit.
+- Experiment is manually recorded evidence under exactly one Task.
+- New Experiments require Name and Owner and start as `planned`.
+- Before `running`, record at least one Dataset, a Model, NPU/GPU plus Server or Device,
+  and at least one Config property (or `profile: "defaults"`).
+- Before `analyzing`, record a numeric Metric or Result Summary.
+- Before `completed`, record runnable context, Result, and Decision Outcome.
+- Duplicate copies Task, Owner, Data, Object, Environment, and Config; it clears Result,
+  Decision, Note, attachments, timeline, and run times. The Source is shown explicitly as
+  the new Baseline.
+- Baseline is never guessed. Without an explicit Baseline, Triton Board shows no Delta.
+- Delta is always `current - baseline`, is derived at render time, and has no automatic
+  good/bad interpretation.
+
+Routes:
+
+- `/` — Task Board
+- `/task/[id]` — Task Detail with compact Experiment table
+- `/experiments` — global Experiment database and saved views
+- `/experiments/[id]` — full Experiment record and one-to-one Baseline summary
+- `/experiments/compare?ids=<uuid>,<uuid>&baseline=<uuid>` — shareable multi-run comparison
+- `/analytics` — existing Task analytics
+
+Experiment edits use optimistic concurrency on `updated_at`. If a remote change arrives while
+the form is dirty, the local draft is preserved and saving is blocked until the latest version
+is loaded and the edit is reapplied.
 
 ## Not yet built / ideas
 

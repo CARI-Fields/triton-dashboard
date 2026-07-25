@@ -100,10 +100,12 @@ const second = row("00000000-0000-4000-8000-000000000002", 2, "Baseline run");
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 describe("ExperimentsDatabase", () => {
@@ -168,6 +170,53 @@ describe("ExperimentsDatabase", () => {
 
     expect(screen.queryByRole("link", { name: "Guardrail run" })).toBeNull();
     expect(screen.getByRole("link", { name: "Baseline run" })).toBeDefined();
+  });
+
+  it("ignores an older load error after a newer Realtime refresh succeeds", async () => {
+    const olderRows = deferred<ExperimentListRow[]>();
+    let refresh: () => void = () => undefined;
+    vi.mocked(listExperimentRows)
+      .mockImplementationOnce(() => olderRows.promise)
+      .mockResolvedValueOnce([second]);
+    vi.mocked(watchExperimentIndex).mockImplementation((onChange) => {
+      refresh = onChange;
+      return () => undefined;
+    });
+
+    render(<ExperimentsDatabase />);
+    act(() => refresh());
+    expect(await screen.findByRole("link", { name: "Baseline run" })).toBeDefined();
+    await act(async () => {
+      olderRows.reject(new Error("Stale load failed."));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("link", { name: "Baseline run" })).toBeDefined();
+  });
+
+  it("retries both loaders after a failure and recovers the database view", async () => {
+    const retryRows = deferred<ExperimentListRow[]>();
+    vi.mocked(listExperimentRows)
+      .mockRejectedValueOnce(new Error("Database offline."))
+      .mockImplementationOnce(() => retryRows.promise);
+    vi.mocked(watchExperimentIndex).mockReturnValue(() => undefined);
+    render(<ExperimentsDatabase />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not load experiments.");
+    expect(alert.textContent).toContain("Database offline.");
+    const retry = screen.getByRole("button", { name: "Retry" });
+    fireEvent.click(retry);
+    expect((screen.getByRole("button", { name: "Retrying…" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retrying…" }));
+    expect(listExperimentRows).toHaveBeenCalledTimes(2);
+    expect(loadExperimentReferenceData).toHaveBeenCalledTimes(2);
+
+    await act(async () => retryRows.resolve([first]));
+    expect(await screen.findByRole("link", { name: "Guardrail run" })).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("removes deleted experiments from the selected comparison set", async () => {

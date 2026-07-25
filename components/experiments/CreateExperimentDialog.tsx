@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Experiment, Member, Task } from "@/lib/types";
 import { createExperiment } from "@/lib/experiments/repository";
 
@@ -19,6 +19,9 @@ export default function CreateExperimentDialog({
   onClose: () => void;
   onCreated: (experiment: Experiment) => void;
 }) {
+  const mounted = useRef(false);
+  const openGeneration = useRef(0);
+  const pending = useRef(false);
   const [name, setName] = useState("");
   const [taskId, setTaskId] = useState(fixedTaskId ?? "");
   const [ownerId, setOwnerId] = useState("");
@@ -26,23 +29,34 @@ export default function CreateExperimentDialog({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      openGeneration.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    openGeneration.current += 1;
     if (!open) return;
     setName("");
     setTaskId(fixedTaskId ?? "");
     setOwnerId("");
     setError("");
-    setSaving(false);
   }, [fixedTaskId, open]);
 
   if (!open) return null;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending.current) return;
     if (!name.trim() || !taskId || !ownerId) {
       setError("Name, Owner, and Task are required.");
       return;
     }
 
+    const submissionGeneration = openGeneration.current;
+    pending.current = true;
     setSaving(true);
     setError("");
     try {
@@ -51,15 +65,27 @@ export default function CreateExperimentDialog({
         ownerId,
         name: name.trim(),
       });
-      onCreated(experiment);
+      if (mounted.current && submissionGeneration === openGeneration.current) {
+        onCreated(experiment);
+      }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create the experiment.");
-      setSaving(false);
+      if (mounted.current && submissionGeneration === openGeneration.current) {
+        setError(caught instanceof Error ? caught.message : "Could not create the experiment.");
+      }
+    } finally {
+      pending.current = false;
+      if (mounted.current) setSaving(false);
     }
   }
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+    <div
+      className="dialog-backdrop"
+      role="presentation"
+      onMouseDown={() => {
+        if (!pending.current) onClose();
+      }}
+    >
       <section
         className="experiment-dialog"
         role="dialog"
@@ -72,17 +98,24 @@ export default function CreateExperimentDialog({
             <p className="eyebrow">New record</p>
             <h2 id="new-experiment-title">Create experiment</h2>
           </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            aria-label="Close"
+            disabled={saving}
+          >
             ×
           </button>
         </header>
-        <form onSubmit={submit}>
+        <form onSubmit={submit} aria-busy={saving}>
           <label>
             <span>Name</span>
             <input
               aria-label="Experiment name"
               value={name}
               onChange={(event) => setName(event.target.value)}
+              disabled={saving}
               autoFocus
             />
           </label>
@@ -92,7 +125,7 @@ export default function CreateExperimentDialog({
               aria-label="Task"
               value={taskId}
               onChange={(event) => setTaskId(event.target.value)}
-              disabled={Boolean(fixedTaskId)}
+              disabled={saving || Boolean(fixedTaskId)}
             >
               <option value="">Choose a Task</option>
               {tasks.map((task) => (
@@ -106,6 +139,7 @@ export default function CreateExperimentDialog({
               aria-label="Owner"
               value={ownerId}
               onChange={(event) => setOwnerId(event.target.value)}
+              disabled={saving}
             >
               <option value="">Choose an Owner</option>
               {members.map((member) => (
@@ -119,7 +153,9 @@ export default function CreateExperimentDialog({
           </p>
           {error && <p className="form-error" role="alert">{error}</p>}
           <footer>
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
             <button type="submit" className="btn primary" disabled={saving}>
               {saving ? "Creating…" : "Create experiment"}
             </button>

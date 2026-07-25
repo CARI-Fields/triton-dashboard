@@ -22,6 +22,7 @@ import ExperimentTable from "@/components/experiments/ExperimentTable";
 export default function ExperimentsDatabase() {
   const router = useRouter();
   const reloadVersion = useRef(0);
+  const loadingRef = useRef(false);
   const [rows, setRows] = useState<ExperimentListRow[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -33,6 +34,8 @@ export default function ExperimentsDatabase() {
 
   const reload = useCallback(async () => {
     const requestVersion = ++reloadVersion.current;
+    loadingRef.current = true;
+    setLoading(true);
     try {
       const [nextRows, references] = await Promise.all([
         listExperimentRows(),
@@ -50,9 +53,13 @@ export default function ExperimentsDatabase() {
       setError("");
     } catch (caught) {
       if (requestVersion !== reloadVersion.current) return;
-      setError(caught instanceof Error ? caught.message : "Could not load experiments.");
+      const detail = caught instanceof Error ? caught.message : "The request failed.";
+      setError(`Could not load experiments. ${detail}`);
     } finally {
-      if (requestVersion === reloadVersion.current) setLoading(false);
+      if (requestVersion === reloadVersion.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -61,9 +68,14 @@ export default function ExperimentsDatabase() {
     const unsubscribe = watchExperimentIndex(() => void reload());
     return () => {
       reloadVersion.current += 1;
+      loadingRef.current = false;
       unsubscribe();
     };
   }, [reload]);
+
+  function retry() {
+    if (!loadingRef.current) void reload();
+  }
 
   const visibleRows = useMemo(
     () => applyExperimentFilters(rows, filters),
@@ -111,7 +123,14 @@ export default function ExperimentsDatabase() {
       </header>
 
       <ExperimentFilters rows={rows} value={filters} onChange={setFilters} />
-      {error && <div className="error-banner">{error}</div>}
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" className="btn" onClick={retry} disabled={loading}>
+            {loading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
       {loading
         ? <p className="state-note">Loading experiments…</p>
         : (

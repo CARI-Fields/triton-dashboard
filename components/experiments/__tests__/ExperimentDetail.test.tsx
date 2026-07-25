@@ -247,17 +247,27 @@ describe("ExperimentDetail orchestration", () => {
 
   it("preserves edits made while save is pending and advances the server snapshot", async () => {
     const current = experiment();
+    const firstSaved = experiment({
+      name: "First",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const secondSaved = experiment({
+      name: "Second",
+      updated_at: "2026-07-24T03:00:00.000Z",
+    });
     const firstSave = deferred<ExperimentUpdateResult>();
-    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(current));
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValueOnce(bundle(firstSaved))
+      .mockResolvedValueOnce(bundle(firstSaved))
+      .mockResolvedValue(bundle(secondSaved));
     vi.mocked(updateExperiment)
       .mockReturnValueOnce(firstSave.promise)
       .mockResolvedValueOnce({
         ok: true,
-        experiment: experiment({
-          name: "Second",
-          updated_at: "2026-07-24T03:00:00.000Z",
-        }),
+        experiment: secondSaved,
       });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<ExperimentDetail id={current.id} />);
 
     const name = await screen.findByLabelText("Experiment Name");
@@ -269,16 +279,19 @@ describe("ExperimentDetail orchestration", () => {
     await act(async () => {
       firstSave.resolve({
         ok: true,
-        experiment: experiment({
-          name: "First",
-          updated_at: "2026-07-24T02:00:00.000Z",
-        }),
+        experiment: firstSaved,
       });
     });
 
     expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
       .toBe("Second");
     expect(screen.getByText("Unsaved changes")).toBeDefined();
+    expect(await screen.findByText(/Remote: First/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Load latest" }));
+    await waitFor(() => expect(loadExperimentBundle).toHaveBeenCalledTimes(3));
+    fireEvent.change(screen.getByLabelText("Experiment Name"), {
+      target: { value: "Second" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(updateExperiment).toHaveBeenNthCalledWith(
       2,
@@ -395,17 +408,18 @@ describe("ExperimentDetail orchestration", () => {
 
   it("invalidates a pre-save realtime read after save succeeds", async () => {
     const current = experiment();
+    const saved = experiment({
+      name: "Saved",
+      updated_at: "2026-07-24T03:00:00.000Z",
+    });
     const staleRealtime = deferred<ExperimentBundle | null>();
     vi.mocked(loadExperimentBundle)
       .mockResolvedValueOnce(bundle(current))
       .mockReturnValueOnce(staleRealtime.promise)
-      .mockResolvedValue(bundle(current));
+      .mockResolvedValue(bundle(saved));
     vi.mocked(updateExperiment).mockResolvedValue({
       ok: true,
-      experiment: experiment({
-        name: "Saved",
-        updated_at: "2026-07-24T03:00:00.000Z",
-      }),
+      experiment: saved,
     });
     render(<ExperimentDetail id={current.id} />);
 
@@ -424,6 +438,141 @@ describe("ExperimentDetail orchestration", () => {
     });
     expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
       .toBe("Saved");
+    expect(screen.queryByText("This experiment changed remotely.")).toBeNull();
+  });
+
+  it("keeps an observed remote deletion visible until post-save authority resolves", async () => {
+    const current = experiment();
+    const saved = experiment({
+      name: "Saved",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const saveRequest = deferred<ExperimentUpdateResult>();
+    const postSaveAuthority = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValueOnce(null)
+      .mockReturnValueOnce(postSaveAuthority.promise);
+    vi.mocked(updateExperiment).mockReturnValue(saveRequest.promise);
+    render(<ExperimentDetail id={current.id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Saved" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenCalledTimes(1));
+    await act(async () => testState.experimentChanged?.());
+    expect(screen.getByText("This experiment was deleted remotely.")).toBeDefined();
+
+    await act(async () => {
+      saveRequest.resolve({ ok: true, experiment: saved });
+    });
+    await waitFor(() => expect(loadExperimentBundle).toHaveBeenCalledTimes(3));
+    const deletionStayedVisible = Boolean(screen.queryByText(
+      "This experiment was deleted remotely.",
+    ));
+    await act(async () => postSaveAuthority.resolve(null));
+
+    expect(deletionStayedVisible).toBe(true);
+    expect(await screen.findByText(
+      "Experiment not found. It may have been deleted.",
+    )).toBeDefined();
+  });
+
+  it("adopts a newer remote snapshot observed before the save response", async () => {
+    const current = experiment();
+    const saved = experiment({
+      name: "Saved response",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const newer = experiment({
+      name: "Remote v3",
+      updated_at: "2026-07-24T03:00:00.000Z",
+    });
+    const saveRequest = deferred<ExperimentUpdateResult>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValueOnce(bundle(newer))
+      .mockResolvedValueOnce(bundle(newer));
+    vi.mocked(updateExperiment).mockReturnValue(saveRequest.promise);
+    render(<ExperimentDetail id={current.id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Saved response" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenCalledTimes(1));
+    await act(async () => testState.experimentChanged?.());
+    await act(async () => {
+      saveRequest.resolve({ ok: true, experiment: saved });
+    });
+
+    expect(await screen.findByDisplayValue("Remote v3")).toBeDefined();
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+  });
+
+  it("reconciles a deletion whose pre-save read resolves after the save response", async () => {
+    const current = experiment();
+    const saved = experiment({
+      name: "Saved response",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const pendingPreSave = deferred<ExperimentBundle | null>();
+    const saveRequest = deferred<ExperimentUpdateResult>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockReturnValueOnce(pendingPreSave.promise)
+      .mockResolvedValueOnce(null);
+    vi.mocked(updateExperiment).mockReturnValue(saveRequest.promise);
+    render(<ExperimentDetail id={current.id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Saved response" },
+    });
+    act(() => testState.experimentChanged?.());
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await act(async () => {
+      saveRequest.resolve({ ok: true, experiment: saved });
+    });
+    await waitFor(() => expect(loadExperimentBundle).toHaveBeenCalledTimes(3));
+    await act(async () => pendingPreSave.resolve(null));
+
+    expect(await screen.findByText(
+      "Experiment not found. It may have been deleted.",
+    )).toBeDefined();
+  });
+
+  it("reconciles a newer snapshot whose pre-save read resolves after the save response", async () => {
+    const current = experiment();
+    const saved = experiment({
+      name: "Saved response",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const newer = experiment({
+      name: "Remote v3",
+      updated_at: "2026-07-24T03:00:00.000Z",
+    });
+    const pendingPreSave = deferred<ExperimentBundle | null>();
+    const saveRequest = deferred<ExperimentUpdateResult>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockReturnValueOnce(pendingPreSave.promise)
+      .mockResolvedValueOnce(bundle(newer));
+    vi.mocked(updateExperiment).mockReturnValue(saveRequest.promise);
+    render(<ExperimentDetail id={current.id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Saved response" },
+    });
+    act(() => testState.experimentChanged?.());
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await act(async () => {
+      saveRequest.resolve({ ok: true, experiment: saved });
+    });
+    await waitFor(() => expect(loadExperimentBundle).toHaveBeenCalledTimes(3));
+    await act(async () => pendingPreSave.resolve(bundle(newer)));
+
+    expect(await screen.findByDisplayValue("Remote v3")).toBeDefined();
     expect(screen.queryByText("This experiment changed remotely.")).toBeNull();
   });
 
@@ -462,6 +611,36 @@ describe("ExperimentDetail orchestration", () => {
     expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
       .toBe("Local name");
     expect(screen.getByText("This experiment was deleted remotely.")).toBeDefined();
+  });
+
+  it("loads fresh authority when accepting a conflict and sees a pending deletion", async () => {
+    const current = experiment();
+    const displayedConflict = experiment({
+      name: "Displayed conflict",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const pendingDeletion = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValueOnce(bundle(displayedConflict))
+      .mockReturnValueOnce(pendingDeletion.promise)
+      .mockResolvedValueOnce(null);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExperimentDetail id={current.id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Local draft" },
+    });
+    await act(async () => testState.experimentChanged?.());
+    expect(await screen.findByText(/Remote: Displayed conflict/)).toBeDefined();
+    act(() => testState.experimentChanged?.());
+    fireEvent.click(screen.getByRole("button", { name: "Load latest" }));
+    await waitFor(() => expect(loadExperimentBundle).toHaveBeenCalledTimes(4));
+    await act(async () => pendingDeletion.resolve(null));
+
+    expect(await screen.findByText(
+      "Experiment not found. It may have been deleted.",
+    )).toBeDefined();
   });
 
   it("treats active Markdown as local editing during realtime reconciliation", async () => {

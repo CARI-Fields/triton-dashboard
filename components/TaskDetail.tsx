@@ -1,13 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import MarkdownField from "@/components/MarkdownField";
+import TaskExperimentsPanel from "@/components/experiments/TaskExperimentsPanel";
 import { supabase } from "@/lib/supabase";
 import { KIND_COLOR, logActivity } from "@/lib/activity";
 import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
 import { fmtDate, relTime } from "@/lib/time";
-import type { Activity, Attachment, Experiment, Member, Module, Task } from "@/lib/types";
+import type {
+  Activity,
+  ActivityKind,
+  Experiment,
+  Member,
+  Module,
+  Task,
+} from "@/lib/types";
+
+interface Visit {
+  id: string;
+  generation: number;
+}
+
+type LoadPhase = "initial" | "refresh";
+
+interface DetailError {
+  message: string;
+  phase: LoadPhase | null;
+}
+
+interface RetryToken {
+  visit: Visit;
+  requestVersion: number;
+}
 
 function initialsFromName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -15,24 +40,37 @@ function initialsFromName(name: string): string {
   if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
 function avatarText(name: string, members: Member[]): string {
-  return members.find((m) => m.name === name)?.initials || initialsFromName(name);
+  return members.find((member) => member.name === name)?.initials
+    || initialsFromName(name);
 }
-function formatNum(v: number): string {
-  if (!Number.isFinite(v)) return String(v);
-  if (Number.isInteger(v)) return v.toLocaleString();
-  return parseFloat(v.toPrecision(5)).toString();
+
+function errorMessage(caught: unknown): string {
+  return caught instanceof Error ? caught.message : "The request failed.";
 }
-function nextPosition(items: { position: number }[]): number {
-  return items.length ? Math.max(...items.map((i) => i.position)) + 1 : 0;
+
+function throwIfError(error: { message: string } | null): void {
+  if (error) throw new Error(error.message);
+}
+
+async function logActivityChecked(
+  taskId: string,
+  text: string,
+  kind: ActivityKind,
+): Promise<void> {
+  const activityError = await logActivity(taskId, text, kind);
+  if (activityError) throw new Error(activityError);
 }
 
 /** Close a popover when clicking outside of it. */
 function useClickOutside(onOutside: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onOutside();
+    function handle(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        onOutside();
+      }
     }
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
@@ -40,7 +78,6 @@ function useClickOutside(onOutside: () => void) {
   return ref;
 }
 
-/* ---------- Inline editable text ---------- */
 function EditableText({
   value,
   onSave,
@@ -50,7 +87,7 @@ function EditableText({
   ariaLabel,
 }: {
   value: string;
-  onSave: (v: string) => void;
+  onSave: (value: string) => void;
   placeholder?: string;
   multiline?: boolean;
   className?: string;
@@ -58,432 +95,519 @@ function EditableText({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+
   useEffect(() => {
     if (!editing) setDraft(value);
-  }, [value, editing]);
+  }, [editing, value]);
 
   function commit() {
     setEditing(false);
-    const t = draft.trim();
-    if (t !== value) onSave(t);
+    const trimmed = draft.trim();
+    if (trimmed !== value) onSave(trimmed);
   }
+
   if (editing) {
-    const p = {
+    const props = {
       className: `edit-input ${className}`,
       value: draft,
       autoFocus: true,
       "aria-label": ariaLabel,
-      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft(e.target.value),
+      onChange: (
+        event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+      ) => setDraft(event.target.value),
       onBlur: commit,
     };
     return multiline ? (
       <textarea
-        {...p}
+        {...props}
         rows={2}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commit();
-          if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter"
+            && (event.metaKey || event.ctrlKey)
+          ) {
+            commit();
+          }
+          if (event.key === "Escape") {
+            setDraft(value);
+            setEditing(false);
+          }
         }}
       />
     ) : (
       <input
-        {...p}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        {...props}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+          if (event.key === "Escape") {
+            setDraft(value);
+            setEditing(false);
+          }
         }}
       />
     );
   }
+
   return (
     <span
       className={`editable ${className} ${value ? "" : "placeholder"}`}
       role="button"
       tabIndex={0}
       onClick={() => setEditing(true)}
-      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setEditing(true); } }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          setEditing(true);
+        }
+      }}
     >
       {value || placeholder || "Click to edit"}
     </span>
   );
 }
 
-/* ---------- Horizontal bar chart (dependency-free) ---------- */
-function BarChart({ title, data }: { title: string; data: { label: string; value: number }[] }) {
-  const values = data.map((d) => d.value);
-  const lo = Math.min(0, ...values);
-  const hi = Math.max(0, ...values);
-  const span = hi - lo || 1;
-  const pct = (v: number) => ((v - lo) / span) * 100;
-  const zero = pct(0);
-  return (
-    <div className="bar-chart">
-      <div className="chart-title">{title}</div>
-      <div className="bars">
-        {data.map((d, i) => {
-          const p = pct(d.value);
-          return (
-            <div className="bar-row" key={i}>
-              <span className="bar-label" title={d.label}>{d.label}</span>
-              <div className="bar-track">
-                <div
-                  className="bar-fill"
-                  style={{ left: `${Math.min(zero, p)}%`, width: `${Math.abs(p - zero)}%` }}
-                />
-              </div>
-              <span className="bar-value">{formatNum(d.value)}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Metrics editor for one experiment ---------- */
-function MetricsEditor({
-  metrics,
-  onChange,
-}: {
-  metrics: Record<string, number>;
-  onChange: (m: Record<string, number>) => void;
-}) {
-  const [newKey, setNewKey] = useState("");
-  const [newVal, setNewVal] = useState("");
-  const entries = Object.entries(metrics);
-
-  function setValue(k: string, raw: string) {
-    const next = { ...metrics, [k]: raw === "" ? 0 : Number(raw) };
-    onChange(next);
-  }
-  function remove(k: string) {
-    const next = { ...metrics };
-    delete next[k];
-    onChange(next);
-  }
-  function add() {
-    const k = newKey.trim();
-    if (!k) return;
-    onChange({ ...metrics, [k]: newVal === "" ? 0 : Number(newVal) });
-    setNewKey("");
-    setNewVal("");
-  }
-
-  return (
-    <div className="metrics">
-      {entries.length > 0 && (
-        <div className="metric-grid">
-          {entries.map(([k, v]) => (
-            <div className="metric-row" key={k}>
-              <span className="metric-key">{k}</span>
-              <input
-                className="metric-val"
-                type="number"
-                defaultValue={String(v)}
-                onBlur={(e) => setValue(k, e.target.value)}
-                aria-label={`${k} value`}
-              />
-              <button className="icon-btn" onClick={() => remove(k)} aria-label={`Remove ${k}`}>✕</button>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="metric-add">
-        <input
-          placeholder="metric (e.g. reward)"
-          value={newKey}
-          onChange={(e) => setNewKey(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") add(); }}
-        />
-        <input
-          placeholder="value"
-          type="number"
-          value={newVal}
-          onChange={(e) => setNewVal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") add(); }}
-        />
-        <button className="btn" onClick={add}>Add metric</button>
-      </div>
-    </div>
-  );
-}
-
-/* ---------- One experiment card ---------- */
-function ExperimentCard({
-  exp,
-  attachments,
-  uploading,
-  onUpdate,
-  onDelete,
-  onUpload,
-  onDeleteAttachment,
-  onUpdateAttachment,
-}: {
-  exp: Experiment;
-  attachments: Attachment[];
-  uploading: boolean;
-  onUpdate: (patch: Partial<Experiment>) => void;
-  onDelete: () => void;
-  onUpload: (files: FileList) => void;
-  onDeleteAttachment: (att: Attachment) => void;
-  onUpdateAttachment: (attId: string, patch: Partial<Attachment>) => void;
-}) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  return (
-    <div className="exp-card">
-      <div className="exp-head">
-        <EditableText
-          value={exp.name}
-          className="exp-name"
-          ariaLabel="Experiment name"
-          onSave={(v) => onUpdate({ name: v })}
-        />
-        <span className="exp-updated">Updated {relTime(exp.updated_at)}</span>
-        <button className="icon-btn" onClick={onDelete} aria-label="Delete experiment">✕</button>
-      </div>
-      <div className="exp-notes">
-        <MarkdownField
-          value={exp.notes}
-          placeholder="Notes for this run — setup, observations… (Markdown)"
-          onSave={(v) => onUpdate({ notes: v })}
-        />
-      </div>
-      <MetricsEditor metrics={exp.metrics} onChange={(m) => onUpdate({ metrics: m })} />
-
-      <div className="exp-plots">
-        <div className="exp-sub-head">
-          <span className="exp-sub-label">Plots &amp; images</span>
-          <button className="btn" onClick={() => fileRef.current?.click()} disabled={uploading}>
-            {uploading ? "Uploading…" : "⬆ Upload"}
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            onChange={(e) => {
-              if (e.target.files?.length) onUpload(e.target.files);
-              if (fileRef.current) fileRef.current.value = "";
-            }}
-          />
-        </div>
-        {attachments.length === 0 ? (
-          <p className="muted small">No plots yet — upload PNG/JPG (matplotlib output, W&amp;B screenshots).</p>
-        ) : (
-          <div className="img-grid">
-            {attachments.map((att) => (
-              <figure className="img-card" key={att.id}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <a href={att.url} target="_blank" rel="noreferrer">
-                  <img src={att.url} alt={att.caption || "plot"} loading="lazy" />
-                </a>
-                <figcaption>
-                  <EditableText
-                    value={att.caption}
-                    placeholder="Add a caption…"
-                    ariaLabel="Image caption"
-                    onSave={(v) => onUpdateAttachment(att.id, { caption: v })}
-                  />
-                  <button className="icon-btn" onClick={() => onDeleteAttachment(att)} aria-label="Delete image">✕</button>
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Main detail view ---------- */
 export default function TaskDetail({ id }: { id: string }) {
+  const [visit, setVisit] = useState<Visit>({ id, generation: 0 });
+  const visitRef = useRef<Visit | null>(null);
+  const requestVersionRef = useRef(0);
+  const retryTokenRef = useRef<RetryToken | null>(null);
+  const mutationTokenRef = useRef<object | null>(null);
+
+  const [loadedGeneration, setLoadedGeneration] = useState<number | null>(null);
   const [task, setTask] = useState<Task | null>(null);
   const [module, setModule] = useState<Module | null>(null);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [draftNote, setDraftNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [uploadingExpId, setUploadingExpId] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<DetailError | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const assignRef = useClickOutside(() => setAssignOpen(false));
 
-  const reload = useCallback(async () => {
-    if (!supabase || !id) return;
-    const { data: t } = await supabase.from("tasks").select("*").eq("id", id).maybeSingle();
-    if (!t) {
-      setNotFound(true);
-      setLoading(false);
-      return;
+  if (visit.id !== id) {
+    setVisit({ id, generation: visit.generation + 1 });
+  }
+
+  const isCurrentRequest = useCallback((
+    requestedVisit: Visit,
+    requestVersion: number,
+  ) => (
+    visitRef.current === requestedVisit
+    && requestVersionRef.current === requestVersion
+  ), []);
+
+  const finishSupersededRetry = useCallback((
+    requestedVisit: Visit,
+    requestVersion: number,
+  ) => {
+    const retryToken = retryTokenRef.current;
+    if (
+      retryToken?.visit === requestedVisit
+      && requestVersion > retryToken.requestVersion
+    ) {
+      retryTokenRef.current = null;
+      setRetrying(false);
     }
-    setTask(t as Task);
-    const [modRes, expRes, attRes, memRes, actRes] = await Promise.all([
-      supabase.from("modules").select("*").eq("id", (t as Task).module_id).maybeSingle(),
-      supabase.from("experiments").select("*").eq("task_id", id).order("position"),
-      supabase.from("attachments").select("*").eq("task_id", id).order("position"),
-      supabase.from("members").select("*").order("position"),
-      supabase.from("activity").select("*").eq("task_id", id).order("created_at", { ascending: false }),
-    ]);
-    setModule((modRes.data as Module) ?? null);
-    setExperiments((expRes.data ?? []) as Experiment[]);
-    setAttachments((attRes.data ?? []) as Attachment[]);
-    setMembers((memRes.data ?? []) as Member[]);
-    setActivity((actRes.data ?? []) as Activity[]);
-    setLoading(false);
-  }, [id]);
+  }, []);
+
+  const loadTask = useCallback(async (
+    requestedVisit: Visit,
+    phase: LoadPhase,
+    showLoading = false,
+  ) => {
+    if (!supabase) return;
+    const requestVersion = ++requestVersionRef.current;
+    if (showLoading) setLoading(true);
+
+    try {
+      const taskResult = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("id", requestedVisit.id)
+        .maybeSingle();
+      if (!isCurrentRequest(requestedVisit, requestVersion)) return;
+      throwIfError(taskResult.error);
+
+      if (!taskResult.data) {
+        finishSupersededRetry(requestedVisit, requestVersion);
+        setLoadedGeneration(requestedVisit.generation);
+        setTask(null);
+        setModule(null);
+        setExperiments([]);
+        setMembers([]);
+        setActivity([]);
+        setLoading(false);
+        setNotFound(true);
+        setDetailError(null);
+        return;
+      }
+
+      const nextTask = taskResult.data as Task;
+      const [moduleResult, experimentsResult, membersResult, activityResult] =
+        await Promise.all([
+          supabase
+            .from("modules")
+            .select("*")
+            .eq("id", nextTask.module_id)
+            .maybeSingle(),
+          supabase
+            .from("experiments")
+            .select("*")
+            .eq("task_id", requestedVisit.id)
+            .order("position"),
+          supabase.from("members").select("*").order("position"),
+          supabase
+            .from("activity")
+            .select("*")
+            .eq("task_id", requestedVisit.id)
+            .order("created_at", { ascending: false }),
+        ]);
+      if (!isCurrentRequest(requestedVisit, requestVersion)) return;
+      throwIfError(moduleResult.error);
+      throwIfError(experimentsResult.error);
+      throwIfError(membersResult.error);
+      throwIfError(activityResult.error);
+
+      finishSupersededRetry(requestedVisit, requestVersion);
+      setLoadedGeneration(requestedVisit.generation);
+      setTask(nextTask);
+      setModule((moduleResult.data as Module | null) ?? null);
+      setExperiments((experimentsResult.data ?? []) as Experiment[]);
+      setMembers((membersResult.data ?? []) as Member[]);
+      setActivity((activityResult.data ?? []) as Activity[]);
+      setLoading(false);
+      setNotFound(false);
+      setDetailError(null);
+    } catch (caught) {
+      if (!isCurrentRequest(requestedVisit, requestVersion)) return;
+      finishSupersededRetry(requestedVisit, requestVersion);
+      const action = phase === "initial" ? "load" : "refresh";
+      setLoadedGeneration(requestedVisit.generation);
+      setLoading(false);
+      setNotFound(false);
+      setDetailError({
+        message: `Could not ${action} task. ${errorMessage(caught)}`,
+        phase,
+      });
+    }
+  }, [finishSupersededRetry, isCurrentRequest]);
 
   useEffect(() => {
-    if (!supabase || !id) {
+    visitRef.current = visit;
+    requestVersionRef.current += 1;
+    retryTokenRef.current = null;
+    mutationTokenRef.current = null;
+    setLoadedGeneration(null);
+    setTask(null);
+    setModule(null);
+    setExperiments([]);
+    setMembers([]);
+    setActivity([]);
+    setDraftNote("");
+    setLoading(true);
+    setNotFound(false);
+    setDetailError(null);
+    setRetrying(false);
+    setAssignOpen(false);
+
+    if (!id) {
+      setLoadedGeneration(visit.generation);
       setLoading(false);
+      setDetailError({
+        message: "Could not load task. The Task ID is missing.",
+        phase: null,
+      });
       return;
     }
+
+    if (!supabase) {
+      setLoadedGeneration(visit.generation);
+      setLoading(false);
+      setDetailError({
+        message:
+          "Supabase is not configured. Add the public Supabase URL and anon key to use Task Detail.",
+        phase: null,
+      });
+      return;
+    }
+
     const client = supabase;
-    reload();
+    void loadTask(visit, "initial", true);
+    const refresh = () => {
+      void loadTask(visit, "refresh");
+    };
     const channel = client
-      .channel(`task-${id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, reload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "experiments" }, reload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "attachments" }, reload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "activity" }, reload)
+      .channel(`task-${visit.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tasks" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "experiments" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "activity" },
+        refresh,
+      )
       .subscribe();
-    return () => { client.removeChannel(channel); };
-  }, [id, reload]);
 
-  const updateTask = useCallback(
-    async (patch: Partial<Task>) => {
-      if (!supabase) return;
-      await supabase.from("tasks").update(patch).eq("id", id);
-      if (patch.status) logActivity(id, `Status set to ${statusLabel(patch.status)}`, "status");
-      if (patch.title) logActivity(id, `Renamed to “${patch.title}”`, "edit");
-      if (patch.notes !== undefined) logActivity(id, "Updated progress notes", "note");
-      reload();
-    },
-    [id, reload]
-  );
+    return () => {
+      if (visitRef.current === visit) visitRef.current = null;
+      requestVersionRef.current += 1;
+      retryTokenRef.current = null;
+      mutationTokenRef.current = null;
+      client.removeChannel(channel);
+    };
+  }, [id, loadTask, visit]);
 
-  async function addExperiment() {
-    if (!supabase) return;
-    const name = `Experiment ${experiments.length + 1}`;
-    await supabase.from("experiments").insert({
-      task_id: id,
-      name,
-      notes: "",
-      metrics: {},
-      position: nextPosition(experiments),
+  function retry() {
+    if (!detailError?.phase || retryTokenRef.current) return;
+    const requestedVisit = visitRef.current;
+    if (!requestedVisit) return;
+    const token: RetryToken = {
+      visit: requestedVisit,
+      requestVersion: requestVersionRef.current + 1,
+    };
+    retryTokenRef.current = token;
+    setRetrying(true);
+    void loadTask(requestedVisit, detailError.phase).finally(() => {
+      if (
+        visitRef.current === requestedVisit
+        && retryTokenRef.current === token
+      ) {
+        retryTokenRef.current = null;
+        setRetrying(false);
+      }
     });
-    logActivity(id, `Added experiment “${name}”`, "experiment");
-    reload();
   }
-  async function updateExperiment(expId: string, patch: Partial<Experiment>) {
+
+  const updateTask = useCallback(async (
+    patch: Partial<Task>,
+    activityEvent?: { text: string; kind: "assign" },
+  ) => {
     if (!supabase) return;
-    await supabase.from("experiments").update(patch).eq("id", expId);
-    reload();
-  }
-  async function deleteExperiment(expId: string) {
-    if (!supabase) return;
-    const exp = experiments.find((e) => e.id === expId);
-    await supabase.from("experiments").delete().eq("id", expId);
-    if (exp) logActivity(id, `Removed experiment “${exp.name}”`, "experiment");
-    reload();
-  }
+    const requestedVisit = visitRef.current;
+    if (!requestedVisit) return;
+    const token = {};
+    mutationTokenRef.current = token;
+    setDetailError(null);
+
+    try {
+      const result = await supabase
+        .from("tasks")
+        .update(patch)
+        .eq("id", requestedVisit.id);
+      if (
+        visitRef.current !== requestedVisit
+        || mutationTokenRef.current !== token
+      ) {
+        return;
+      }
+      throwIfError(result.error);
+
+      if (activityEvent) {
+        await logActivityChecked(
+          requestedVisit.id,
+          activityEvent.text,
+          activityEvent.kind,
+        );
+      } else if (patch.status) {
+        await logActivityChecked(
+          requestedVisit.id,
+          `Status set to ${statusLabel(patch.status)}`,
+          "status",
+        );
+      } else if (patch.title) {
+        await logActivityChecked(
+          requestedVisit.id,
+          `Renamed to “${patch.title}”`,
+          "edit",
+        );
+      } else if (patch.notes !== undefined) {
+        await logActivityChecked(
+          requestedVisit.id,
+          "Updated progress notes",
+          "note",
+        );
+      }
+      if (
+        visitRef.current === requestedVisit
+        && mutationTokenRef.current === token
+      ) {
+        await loadTask(requestedVisit, "refresh");
+      }
+    } catch (caught) {
+      if (
+        visitRef.current === requestedVisit
+        && mutationTokenRef.current === token
+      ) {
+        setDetailError({
+          message: `Could not update task. ${errorMessage(caught)}`,
+          phase: null,
+        });
+      }
+    } finally {
+      if (
+        visitRef.current === requestedVisit
+        && mutationTokenRef.current === token
+      ) {
+        mutationTokenRef.current = null;
+      }
+    }
+  }, [loadTask]);
 
   function toggleAssignee(name: string) {
     if (!task) return;
-    const had = task.assignees.includes(name);
-    const next = had
-      ? task.assignees.filter((a) => a !== name)
+    const hadAssignee = task.assignees.includes(name);
+    const nextAssignees = hadAssignee
+      ? task.assignees.filter((assignee) => assignee !== name)
       : [...task.assignees, name];
-    updateTask({ assignees: next });
-    logActivity(id, `${had ? "Unassigned" : "Assigned"} ${name}`, "assign");
+    void updateTask(
+      { assignees: nextAssignees },
+      {
+        text: `${hadAssignee ? "Unassigned" : "Assigned"} ${name}`,
+        kind: "assign",
+      },
+    );
   }
 
   async function addTimelineNote() {
-    const v = draftNote.trim();
-    if (!v) return;
-    await logActivity(id, v, "comment");
-    setDraftNote("");
-    reload();
-  }
-
-  async function uploadToExperiment(expId: string, files: FileList) {
-    if (!supabase) return;
-    setUploadingExpId(expId);
-    setErr(null);
-    const client = supabase;
-    const existing = attachments.filter((a) => a.experiment_id === expId);
-    for (const file of Array.from(files)) {
-      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const path = `${id}/${expId}/${crypto.randomUUID()}-${safe}`;
-      const up = await client.storage.from("task-images").upload(path, file, { upsert: false });
-      if (up.error) {
-        setErr(up.error.message);
-        continue;
+    const value = draftNote.trim();
+    const requestedVisit = visitRef.current;
+    if (!value || !requestedVisit) return;
+    const token = {};
+    mutationTokenRef.current = token;
+    setDetailError(null);
+    try {
+      await logActivityChecked(requestedVisit.id, value, "comment");
+      if (
+        visitRef.current !== requestedVisit
+        || mutationTokenRef.current !== token
+      ) {
+        return;
       }
-      const { data: pub } = client.storage.from("task-images").getPublicUrl(path);
-      await client.from("attachments").insert({
-        task_id: id,
-        experiment_id: expId,
-        url: pub.publicUrl,
-        path,
-        caption: "",
-        position: nextPosition(existing),
-      });
+      setDraftNote("");
+      await loadTask(requestedVisit, "refresh");
+    } catch (caught) {
+      if (
+        visitRef.current === requestedVisit
+        && mutationTokenRef.current === token
+      ) {
+        setDetailError({
+          message: `Could not add the timeline note. ${errorMessage(caught)}`,
+          phase: null,
+        });
+      }
+    } finally {
+      if (
+        visitRef.current === requestedVisit
+        && mutationTokenRef.current === token
+      ) {
+        mutationTokenRef.current = null;
+      }
     }
-    setUploadingExpId(null);
-    reload();
   }
 
-  async function deleteAttachment(att: Attachment) {
-    if (!supabase) return;
-    if (att.path) await supabase.storage.from("task-images").remove([att.path]);
-    await supabase.from("attachments").delete().eq("id", att.id);
-    reload();
-  }
-  async function updateAttachment(attId: string, patch: Partial<Attachment>) {
-    if (!supabase) return;
-    await supabase.from("attachments").update(patch).eq("id", attId);
-    reload();
+  const visitLoading =
+    visit.id !== id
+    || loadedGeneration !== visit.generation
+    || loading;
+
+  if (visitLoading) {
+    return (
+      <div className="wrap">
+        <p className="state-note">Loading task…</p>
+      </div>
+    );
   }
 
-  const metricKeys = useMemo(() => {
-    const set = new Set<string>();
-    for (const e of experiments) for (const k of Object.keys(e.metrics || {})) set.add(k);
-    return Array.from(set).sort();
-  }, [experiments]);
-
-  if (loading) return <div className="wrap"><p className="state-note">Loading task…</p></div>;
-  if (notFound || !task)
+  if (!task) {
     return (
       <div className="wrap">
         <Link href="/" className="back-link">← Back to board</Link>
-        <p className="state-note">Task not found. It may have been deleted.</p>
+        {notFound && (
+          <p className="state-note">
+            Task not found. It may have been deleted.
+          </p>
+        )}
+        {detailError && (
+          <div className="error-banner" role="alert">
+            <span>{detailError.message}</span>
+            {detailError.phase && (
+              <button
+                type="button"
+                className="btn"
+                onClick={retry}
+                disabled={retrying}
+              >
+                {retrying ? "Retrying…" : "Retry"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
+  }
 
   return (
     <div className="wrap detail">
       <Link href="/" className="back-link">← Back to board</Link>
 
+      {detailError && (
+        <div className="error-banner" role="alert">
+          <span>{detailError.message}</span>
+          {detailError.phase && (
+            <button
+              type="button"
+              className="btn"
+              onClick={retry}
+              disabled={retrying}
+            >
+              {retrying ? "Retrying…" : "Retry"}
+            </button>
+          )}
+        </div>
+      )}
+
       <header className="detail-head">
         {module && (
-          <span className={`mod-chip ${module.kind === "foundation" ? "found" : ""}`}>{module.name}</span>
+          <span
+            className={`mod-chip ${
+              module.kind === "foundation" ? "found" : ""
+            }`}
+          >
+            {module.name}
+          </span>
         )}
         <h1 className="detail-title">
-          <EditableText value={task.title} ariaLabel="Task title" onSave={(v) => updateTask({ title: v })} />
+          <EditableText
+            value={task.title}
+            ariaLabel="Task title"
+            onSave={(value) => void updateTask({ title: value })}
+          />
         </h1>
         <div className="detail-meta">
           <select
             className={`pill ${task.status}`}
             value={task.status}
             aria-label="Status"
-            onChange={(e) => updateTask({ status: e.target.value as Task["status"] })}
+            onChange={(event) => {
+              void updateTask({
+                status: event.target.value as Task["status"],
+              });
+            }}
           >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
             ))}
           </select>
 
@@ -505,7 +629,7 @@ export default function TaskDetail({ id }: { id: string }) {
               <div className="picker" ref={assignRef}>
                 <button
                   className="add-owner"
-                  onClick={() => setAssignOpen((o) => !o)}
+                  onClick={() => setAssignOpen((open) => !open)}
                   aria-label="Assign people"
                   title="Assign people"
                 >
@@ -514,19 +638,35 @@ export default function TaskDetail({ id }: { id: string }) {
                 {assignOpen && (
                   <div className="menu" role="menu">
                     {members
-                      .filter((m) => !task.assignees.includes(m.name))
-                      .map((m) => (
-                        <button key={m.id} className="menu-item" onClick={() => toggleAssignee(m.name)}>
-                          <span className="av">{m.initials || initialsFromName(m.name)}</span>
-                          {m.name}
+                      .filter(
+                        (member) => !task.assignees.includes(member.name),
+                      )
+                      .map((member) => (
+                        <button
+                          key={member.id}
+                          className="menu-item"
+                          onClick={() => toggleAssignee(member.name)}
+                        >
+                          <span className="av">
+                            {member.initials || initialsFromName(member.name)}
+                          </span>
+                          {member.name}
                         </button>
                       ))}
                     {members.length === 0 && (
-                      <div className="menu-empty">Add teammates on the board first.</div>
+                      <div className="menu-empty">
+                        Add teammates on the board first.
+                      </div>
                     )}
-                    {members.length > 0 && members.every((m) => task.assignees.includes(m.name)) && (
-                      <div className="menu-empty">Everyone is assigned.</div>
-                    )}
+                    {members.length > 0
+                      && members.every(
+                        (member) => task.assignees.includes(member.name),
+                      )
+                      && (
+                        <div className="menu-empty">
+                          Everyone is assigned.
+                        </div>
+                      )}
                   </div>
                 )}
               </div>
@@ -534,92 +674,73 @@ export default function TaskDetail({ id }: { id: string }) {
           </div>
 
           <span className="detail-dates">
-            Created {fmtDate(task.created_at)} · Updated {relTime(task.updated_at)}
+            Created {fmtDate(task.created_at)} · Updated{" "}
+            {relTime(task.updated_at)}
           </span>
         </div>
       </header>
 
-      {err && <div className="error-banner">{err}</div>}
-
-      {/* Notes / progress */}
       <section className="detail-section">
-        <div className="detail-section-head"><h2>Progress &amp; notes</h2></div>
+        <div className="detail-section-head">
+          <h2>Progress &amp; notes</h2>
+        </div>
         <MarkdownField
           value={task.notes}
           minHeight={160}
           placeholder="Click to add progress, findings, and decisions… (Markdown supported: headings, lists, **bold**, tables)"
-          onSave={(v) => updateTask({ notes: v })}
+          onSave={(value) => void updateTask({ notes: value })}
         />
       </section>
 
-      {/* Charts */}
-      {metricKeys.length > 0 && (
-        <section className="detail-section">
-          <div className="detail-section-head"><h2>Results at a glance</h2></div>
-          <div className="chart-grid">
-            {metricKeys.map((key) => {
-              const data = experiments
-                .filter((e) => key in (e.metrics || {}))
-                .map((e) => ({ label: e.name, value: Number(e.metrics[key]) }));
-              return <BarChart key={key} title={key} data={data} />;
-            })}
-          </div>
-        </section>
-      )}
+      <TaskExperimentsPanel
+        task={task}
+        experiments={experiments}
+        members={members}
+      />
 
-      {/* Experiments */}
       <section className="detail-section">
         <div className="detail-section-head">
-          <h2>Experiments</h2>
-          <button className="btn primary" onClick={addExperiment}>+ Add experiment</button>
+          <h2>Activity timeline</h2>
         </div>
-        {experiments.length === 0 ? (
-          <p className="muted">No experiments yet. Add one to log a run and its metrics.</p>
-        ) : (
-          <div className="exp-list">
-            {experiments.map((exp) => (
-              <ExperimentCard
-                key={exp.id}
-                exp={exp}
-                attachments={attachments.filter((a) => a.experiment_id === exp.id)}
-                uploading={uploadingExpId === exp.id}
-                onUpdate={(patch) => updateExperiment(exp.id, patch)}
-                onDelete={() => deleteExperiment(exp.id)}
-                onUpload={(files) => uploadToExperiment(exp.id, files)}
-                onDeleteAttachment={deleteAttachment}
-                onUpdateAttachment={updateAttachment}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Activity timeline */}
-      <section className="detail-section">
-        <div className="detail-section-head"><h2>Activity timeline</h2></div>
         <div className="timeline-add">
           <input
             value={draftNote}
             placeholder="Add a note to the timeline…"
-            onChange={(e) => setDraftNote(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") addTimelineNote(); }}
+            onChange={(event) => setDraftNote(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void addTimelineNote();
+            }}
             aria-label="Add a note to the timeline"
           />
-          <button className="btn primary" onClick={addTimelineNote}>Add note</button>
+          <button
+            className="btn primary"
+            onClick={() => void addTimelineNote()}
+          >
+            Add note
+          </button>
         </div>
         {activity.length === 0 ? (
           <p className="muted">No activity yet.</p>
         ) : (
           <div className="timeline">
-            {activity.map((ev, i) => (
-              <div className="tl-row" key={ev.id}>
+            {activity.map((event, index) => (
+              <div className="tl-row" key={event.id}>
                 <div className="tl-rail">
-                  <span className="tl-dot" style={{ background: KIND_COLOR[ev.kind] ?? "var(--todo)" }} />
-                  {i < activity.length - 1 && <span className="tl-line" />}
+                  <span
+                    className="tl-dot"
+                    style={{
+                      background: KIND_COLOR[event.kind] ?? "var(--todo)",
+                    }}
+                  />
+                  {index < activity.length - 1 && (
+                    <span className="tl-line" />
+                  )}
                 </div>
                 <div className="tl-body">
-                  <div className="tl-text">{ev.text}</div>
-                  <div className="tl-time">{relTime(ev.created_at)} · {fmtDate(ev.created_at)}</div>
+                  <div className="tl-text">{event.text}</div>
+                  <div className="tl-time">
+                    {relTime(event.created_at)} · {fmtDate(event.created_at)}
+                  </div>
                 </div>
               </div>
             ))}

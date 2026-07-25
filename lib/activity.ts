@@ -7,14 +7,15 @@ export async function logActivity(
   text: string,
   kind: ActivityKind,
   experimentId: string | null = null,
-): Promise<void> {
-  if (!supabase) return;
-  await supabase.from("activity").insert({
+): Promise<string | null> {
+  if (!supabase) return "Supabase is not configured.";
+  const { error } = await supabase.from("activity").insert({
     task_id: taskId,
     experiment_id: experimentId,
     text,
     kind,
   });
+  return error?.message ?? null;
 }
 
 export const KIND_COLOR: Record<ActivityKind, string> = {

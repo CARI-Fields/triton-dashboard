@@ -1,15 +1,15 @@
-"use client";
-
-import { useParams } from "next/navigation";
-import TaskDetail from "@/components/TaskDetail";
 import AuthGate from "@/components/AuthGate";
+import TaskDetail from "@/components/TaskDetail";
 
-export default function TaskPage() {
-  const params = useParams();
-  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+export default async function TaskPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
   return (
     <AuthGate>
-      <TaskDetail id={id ?? ""} />
+      <TaskDetail id={id} />
     </AuthGate>
   );
 }

@@ -1,0 +1,863 @@
+"use client";
+
+import Link from "next/link";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useRouter } from "next/navigation";
+import type { Experiment } from "@/lib/types";
+import { fmtDate } from "@/lib/time";
+import MarkdownField from "@/components/MarkdownField";
+import {
+  editableExperimentPatch,
+  reconcileRealtime,
+} from "@/lib/experiments/draft";
+import {
+  allowedTargets,
+  EXPERIMENT_STATUS_LABELS,
+  formatExperimentId,
+  validateBaseline,
+  validateForStatus,
+  type ValidationIssue,
+} from "@/lib/experiments/policy";
+import {
+  deleteExperiment,
+  loadExperimentBundle,
+  updateExperiment,
+  watchExperiment,
+  type ExperimentBundle,
+} from "@/lib/experiments/repository";
+import { serializeCompareSelection } from "@/lib/experiments/compare-url";
+import AttachmentGallery from "@/components/experiments/AttachmentGallery";
+import BaselinePicker from "@/components/experiments/BaselinePicker";
+import BaselineSummary from "@/components/experiments/BaselineSummary";
+import ConfigEditor from "@/components/experiments/ConfigEditor";
+import DataEditor from "@/components/experiments/DataEditor";
+import DecisionEditor from "@/components/experiments/DecisionEditor";
+import DuplicateExperimentDialog from "@/components/experiments/DuplicateExperimentDialog";
+import EnvironmentEditor from "@/components/experiments/EnvironmentEditor";
+import ExperimentSection from "@/components/experiments/ExperimentSection";
+import ExperimentStatusBadge from "@/components/experiments/ExperimentStatusBadge";
+import ExperimentTimeline from "@/components/experiments/ExperimentTimeline";
+import ObjectEditor from "@/components/experiments/ObjectEditor";
+import ResultEditor from "@/components/experiments/ResultEditor";
+
+interface Visit {
+  id: string;
+  generation: number;
+}
+
+type RetryKind = "initial" | "related" | "realtime" | "conflict";
+
+interface DetailError {
+  message: string;
+  retry: RetryKind | null;
+}
+
+function errorDetail(caught: unknown, fallback: string): string {
+  return caught instanceof Error ? caught.message : fallback;
+}
+
+export default function ExperimentDetail({ id }: { id: string }) {
+  const router = useRouter();
+  const visitRef = useRef<Visit>({ id, generation: 0 });
+  const initialPendingRef = useRef<object | null>(null);
+  const relatedVersionRef = useRef(0);
+  const realtimeVersionRef = useRef(0);
+  const conflictVersionRef = useRef(0);
+  const deletePendingRef = useRef<object | null>(null);
+  const draftRef = useRef<Experiment | null>(null);
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const markdownEditorsRef = useRef<Set<string>>(new Set());
+
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [bundle, setBundle] = useState<ExperimentBundle | null>(null);
+  const [server, setServer] = useState<Experiment | null>(null);
+  const [draft, setDraft] = useState<Experiment | null>(null);
+  const [remoteConflict, setRemoteConflict] = useState<Experiment | null>(null);
+  const [remoteDeleted, setRemoteDeleted] = useState(false);
+  const [issues, setIssues] = useState<ValidationIssue[]>([]);
+  const [detailError, setDetailError] = useState<DetailError | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [markdownEditing, setMarkdownEditing] = useState(false);
+  const [markdownEpoch, setMarkdownEpoch] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
+
+  const isCurrentVisit = useCallback(
+    (visit: Visit) => visitRef.current === visit,
+    [],
+  );
+
+  const loadInitial = useCallback(async (visit: Visit) => {
+    if (initialPendingRef.current) return;
+    const operation = {};
+    initialPendingRef.current = operation;
+    setLoading(true);
+    setNotFound(false);
+    setDetailError(null);
+    try {
+      const next = await loadExperimentBundle(visit.id);
+      if (!isCurrentVisit(visit) || initialPendingRef.current !== operation) return;
+      setLoadedId(visit.id);
+      if (!next) {
+        setNotFound(true);
+        setBundle(null);
+        setServer(null);
+        setDraft(null);
+        draftRef.current = null;
+        return;
+      }
+      setBundle(next);
+      setServer(next.experiment);
+      setDraft(structuredClone(next.experiment));
+      draftRef.current = next.experiment;
+      setDirty(false);
+      dirtyRef.current = false;
+      setRemoteConflict(null);
+      setRemoteDeleted(false);
+      setIssues([]);
+    } catch (caught) {
+      if (!isCurrentVisit(visit) || initialPendingRef.current !== operation) return;
+      setLoadedId(visit.id);
+      setDetailError({
+        message: `Could not load the experiment. ${errorDetail(caught, "The request failed.")}`,
+        retry: "initial",
+      });
+    } finally {
+      if (isCurrentVisit(visit) && initialPendingRef.current === operation) {
+        initialPendingRef.current = null;
+        setLoading(false);
+      }
+    }
+  }, [isCurrentVisit]);
+
+  const loadRelated = useCallback(async (visit: Visit) => {
+    const requestVersion = ++relatedVersionRef.current;
+    try {
+      const next = await loadExperimentBundle(visit.id);
+      if (
+        !isCurrentVisit(visit) ||
+        requestVersion !== relatedVersionRef.current ||
+        !next
+      ) {
+        return;
+      }
+      setBundle((current) => (
+        current && current.experiment.id === visit.id
+          ? { ...next, experiment: current.experiment }
+          : current
+      ));
+      setDetailError((current) => (
+        current?.retry === "related" ? null : current
+      ));
+    } catch (caught) {
+      if (!isCurrentVisit(visit) || requestVersion !== relatedVersionRef.current) {
+        return;
+      }
+      setDetailError({
+        message: `Could not refresh related evidence. ${errorDetail(caught, "The request failed.")}`,
+        retry: "related",
+      });
+    }
+  }, [isCurrentVisit]);
+
+  const loadRealtimeExperiment = useCallback(async (visit: Visit) => {
+    const requestVersion = ++realtimeVersionRef.current;
+    try {
+      const next = await loadExperimentBundle(visit.id);
+      if (
+        !isCurrentVisit(visit) ||
+        requestVersion !== realtimeVersionRef.current
+      ) {
+        return;
+      }
+      if (!next) {
+        if (
+          dirtyRef.current ||
+          markdownEditorsRef.current.size > 0 ||
+          savingRef.current
+        ) {
+          setRemoteConflict(null);
+          setRemoteDeleted(true);
+          return;
+        }
+        setLoadedId(visit.id);
+        setNotFound(true);
+        setBundle(null);
+        setServer(null);
+        setDraft(null);
+        draftRef.current = null;
+        setRemoteDeleted(false);
+        return;
+      }
+      const currentDraft = draftRef.current;
+      if (!currentDraft) return;
+      const resolution = reconcileRealtime(
+        currentDraft,
+        next.experiment,
+        dirtyRef.current || markdownEditorsRef.current.size > 0,
+        savingRef.current,
+      );
+      setBundle((current) => ({
+        ...next,
+        experiment: resolution.kind === "replace"
+          ? next.experiment
+          : current?.experiment ?? next.experiment,
+      }));
+      if (resolution.kind === "replace") {
+        setServer(next.experiment);
+        setDraft(structuredClone(next.experiment));
+        draftRef.current = next.experiment;
+        setDirty(false);
+        dirtyRef.current = false;
+        setRemoteConflict(null);
+        setRemoteDeleted(false);
+        setIssues([]);
+      } else if (resolution.kind === "conflict") {
+        setRemoteConflict(next.experiment);
+        setRemoteDeleted(false);
+      }
+      setDetailError((current) => (
+        current?.retry === "realtime" ? null : current
+      ));
+    } catch (caught) {
+      if (!isCurrentVisit(visit) || requestVersion !== realtimeVersionRef.current) {
+        return;
+      }
+      setDetailError({
+        message: `Could not refresh the experiment. ${errorDetail(caught, "The request failed.")}`,
+        retry: "realtime",
+      });
+    }
+  }, [isCurrentVisit]);
+
+  const refreshConflictComparison = useCallback(async (visit: Visit) => {
+    const requestVersion = ++conflictVersionRef.current;
+    try {
+      const next = await loadExperimentBundle(visit.id);
+      if (
+        !isCurrentVisit(visit) ||
+        requestVersion !== conflictVersionRef.current
+      ) {
+        return;
+      }
+      if (!next) {
+        setRemoteConflict(null);
+        setRemoteDeleted(true);
+        setDetailError(null);
+        return;
+      }
+      setBundle((current) => (
+        current
+          ? { ...next, experiment: current.experiment }
+          : current
+      ));
+      setRemoteConflict(next.experiment);
+      setRemoteDeleted(false);
+      setDetailError((current) => (
+        current?.retry === "conflict" ? null : current
+      ));
+    } catch (caught) {
+      if (!isCurrentVisit(visit) || requestVersion !== conflictVersionRef.current) {
+        return;
+      }
+      setDetailError({
+        message: `Could not refresh the remote comparison. ${errorDetail(caught, "The request failed.")}`,
+        retry: "conflict",
+      });
+    }
+  }, [isCurrentVisit]);
+
+  useEffect(() => {
+    const visit = {
+      id,
+      generation: visitRef.current.generation + 1,
+    };
+    visitRef.current = visit;
+    initialPendingRef.current = null;
+    relatedVersionRef.current += 1;
+    realtimeVersionRef.current += 1;
+    conflictVersionRef.current += 1;
+    deletePendingRef.current = null;
+    draftRef.current = null;
+    dirtyRef.current = false;
+    savingRef.current = false;
+    markdownEditorsRef.current = new Set();
+    setBundle(null);
+    setServer(null);
+    setDraft(null);
+    setRemoteConflict(null);
+    setRemoteDeleted(false);
+    setIssues([]);
+    setDetailError(null);
+    setLoading(true);
+    setNotFound(false);
+    setDirty(false);
+    setSaving(false);
+    setMarkdownEditing(false);
+    setMarkdownEpoch((current) => current + 1);
+    setDeleting(false);
+    setDuplicateOpen(false);
+    void loadInitial(visit);
+    const unsubscribe = watchExperiment(
+      id,
+      () => void loadRealtimeExperiment(visit),
+      () => void loadRelated(visit),
+    );
+    return () => {
+      if (visitRef.current === visit) {
+        visitRef.current = {
+          id: visit.id,
+          generation: visit.generation + 1,
+        };
+      }
+      initialPendingRef.current = null;
+      relatedVersionRef.current += 1;
+      realtimeVersionRef.current += 1;
+      conflictVersionRef.current += 1;
+      deletePendingRef.current = null;
+      unsubscribe();
+    };
+  }, [id, loadInitial, loadRealtimeExperiment, loadRelated]);
+
+  useEffect(() => {
+    function beforeUnload(event: BeforeUnloadEvent) {
+      if (!dirtyRef.current && markdownEditorsRef.current.size === 0) return;
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, []);
+
+  function patchDraft(patch: Partial<Experiment>) {
+    setDraft((current) => {
+      if (!current) return current;
+      const next = { ...current, ...patch };
+      draftRef.current = next;
+      return next;
+    });
+    setDirty(true);
+    dirtyRef.current = true;
+    setIssues([]);
+  }
+
+  function setMarkdownEditor(key: string, editing: boolean) {
+    const next = new Set(markdownEditorsRef.current);
+    if (editing) next.add(key);
+    else next.delete(key);
+    markdownEditorsRef.current = next;
+    setMarkdownEditing(next.size > 0);
+  }
+
+  async function save() {
+    if (!server || !draft || savingRef.current || markdownEditorsRef.current.size > 0) {
+      return;
+    }
+    const nextIssues: ValidationIssue[] = [];
+    if (!draft.name.trim()) {
+      nextIssues.push({ field: "name", message: "Experiment Name is required." });
+    }
+    if (!draft.owner_id) {
+      nextIssues.push({ field: "owner_id", message: "Experiment Owner is required." });
+    }
+    nextIssues.push(...validateBaseline(draft.id, draft.baseline_experiment_id));
+    nextIssues.push(...validateForStatus(
+      { ...draft, status: server.status },
+      draft.status,
+    ));
+    if (nextIssues.length > 0) {
+      setIssues(nextIssues);
+      return;
+    }
+
+    setSaving(true);
+    savingRef.current = true;
+    setDetailError(null);
+    const visit = visitRef.current;
+    try {
+      const result = await updateExperiment(
+        draft.id,
+        server.updated_at,
+        editableExperimentPatch(draft),
+      );
+      if (!isCurrentVisit(visit)) return;
+      if (!result.ok) {
+        await refreshConflictComparison(visit);
+        return;
+      }
+      setServer(result.experiment);
+      setDraft(structuredClone(result.experiment));
+      draftRef.current = result.experiment;
+      setBundle((current) => (
+        current ? { ...current, experiment: result.experiment } : current
+      ));
+      setDirty(false);
+      dirtyRef.current = false;
+      setRemoteConflict(null);
+      setRemoteDeleted(false);
+      setIssues([]);
+      await loadRelated(visit);
+    } catch (caught) {
+      if (!isCurrentVisit(visit)) return;
+      setDetailError({
+        message: `Could not save the experiment. ${errorDetail(caught, "The request failed.")}`,
+        retry: null,
+      });
+    } finally {
+      if (isCurrentVisit(visit)) {
+        setSaving(false);
+        savingRef.current = false;
+      }
+    }
+  }
+
+  async function removeExperiment() {
+    if (!draft || !bundle || deletePendingRef.current) return;
+    if (!window.confirm(
+      `Delete ${formatExperimentId(draft.experiment_no)}? The record, attachment rows, and stored images will be removed.`,
+    )) {
+      return;
+    }
+    const operation = {};
+    const visit = visitRef.current;
+    const destination = bundle.task ? `/task/${bundle.task.id}` : "/experiments";
+    deletePendingRef.current = operation;
+    setDeleting(true);
+    setDetailError(null);
+    try {
+      await deleteExperiment(draft);
+      if (isCurrentVisit(visit) && deletePendingRef.current === operation) {
+        router.push(destination);
+      }
+    } catch (caught) {
+      if (isCurrentVisit(visit) && deletePendingRef.current === operation) {
+        setDetailError({
+          message: `Could not delete the experiment. ${errorDetail(caught, "The request failed.")}`,
+          retry: null,
+        });
+      }
+    } finally {
+      if (isCurrentVisit(visit) && deletePendingRef.current === operation) {
+        deletePendingRef.current = null;
+        setDeleting(false);
+      }
+    }
+  }
+
+  function retry() {
+    const visit = visitRef.current;
+    if (!detailError?.retry) return;
+    if (detailError.retry === "initial") void loadInitial(visit);
+    if (detailError.retry === "related") void loadRelated(visit);
+    if (detailError.retry === "realtime") void loadRealtimeExperiment(visit);
+    if (detailError.retry === "conflict") void refreshConflictComparison(visit);
+  }
+
+  const baseline = useMemo(() => {
+    if (!draft?.baseline_experiment_id || !bundle) return null;
+    return bundle.candidates.find(
+      (candidate) => candidate.id === draft.baseline_experiment_id,
+    ) ?? null;
+  }, [bundle, draft?.baseline_experiment_id]);
+
+  const hasLocalChanges = dirty || markdownEditing;
+  const visitLoading = loadedId !== id || loading;
+
+  if (visitLoading) {
+    return (
+      <div className="workspace-page">
+        <p className="state-note">Loading experiment…</p>
+      </div>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <div className="workspace-page">
+        <Link href="/experiments" className="back-link">← Experiments</Link>
+        <p className="state-note">Experiment not found. It may have been deleted.</p>
+      </div>
+    );
+  }
+
+  if (!bundle || !server || !draft) {
+    return (
+      <div className="workspace-page">
+        <Link href="/experiments" className="back-link">← Experiments</Link>
+        {detailError && (
+          <div className="error-banner" role="alert">
+            <span>{detailError.message}</span>
+            {detailError.retry && (
+              <button type="button" className="btn" onClick={retry}>Retry</button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const compareQuery = serializeCompareSelection({
+    ids: baseline ? [baseline.id, draft.id] : [draft.id],
+    baselineId: baseline?.id ?? null,
+  });
+  const taskHref = bundle.task ? `/task/${bundle.task.id}` : "/experiments";
+
+  return (
+    <div className="workspace-page experiment-detail-page">
+      <div className="experiment-main-column">
+        <Link href={taskHref} className="back-link">
+          ← {bundle.task?.title ?? "Experiments"}
+        </Link>
+
+        {(remoteConflict || remoteDeleted) && (
+          <div className="conflict-banner" role="alert">
+            <div>
+              <strong>
+                {remoteDeleted
+                  ? "This experiment was deleted remotely."
+                  : "This experiment changed remotely."}
+              </strong>
+              <p>Your local draft was not overwritten.</p>
+              {remoteConflict && (
+                <p>
+                  Remote: {remoteConflict.name} ·{" "}
+                  {EXPERIMENT_STATUS_LABELS[remoteConflict.status]} · updated{" "}
+                  {fmtDate(remoteConflict.updated_at)}
+                </p>
+              )}
+            </div>
+            <div className="workspace-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void refreshConflictComparison(visitRef.current)}
+              >
+                Keep editing / refresh comparison
+              </button>
+              {remoteConflict && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    if (!window.confirm(
+                      "Discard the local draft and reload the remote version?",
+                    )) {
+                      return;
+                    }
+                    setServer(remoteConflict);
+                    setDraft(structuredClone(remoteConflict));
+                    draftRef.current = remoteConflict;
+                    setBundle((current) => (
+                      current
+                        ? { ...current, experiment: remoteConflict }
+                        : current
+                    ));
+                    setDirty(false);
+                    dirtyRef.current = false;
+                    markdownEditorsRef.current = new Set();
+                    setMarkdownEditing(false);
+                    setMarkdownEpoch((current) => current + 1);
+                    setRemoteConflict(null);
+                    setRemoteDeleted(false);
+                    setIssues([]);
+                  }}
+                >
+                  Load latest
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {detailError && (
+          <div className="error-banner" role="alert">
+            <span>{detailError.message}</span>
+            {detailError.retry && (
+              <button type="button" className="btn" onClick={retry}>Retry</button>
+            )}
+          </div>
+        )}
+
+        <header className="experiment-detail-header">
+          <div className="experiment-title-line">
+            <span className="experiment-display-id">
+              {formatExperimentId(draft.experiment_no)}
+            </span>
+            <input
+              className="experiment-title-input"
+              aria-label="Experiment Name"
+              value={draft.name}
+              onChange={(event) => patchDraft({ name: event.target.value })}
+            />
+          </div>
+          <div className="workspace-actions">
+            <Link
+              className={`btn ${hasLocalChanges ? "disabled" : ""}`}
+              aria-disabled={hasLocalChanges}
+              title={hasLocalChanges
+                ? "Finish and save changes before comparing."
+                : "Compare saved data."}
+              href={hasLocalChanges
+                ? `/experiments/${draft.id}`
+                : `/experiments/compare?${compareQuery}`}
+              onClick={(event) => {
+                if (hasLocalChanges) event.preventDefault();
+              }}
+            >
+              Compare
+            </Link>
+            <button
+              type="button"
+              className="btn"
+              disabled={hasLocalChanges || deleting}
+              title={hasLocalChanges
+                ? "Finish and save changes before duplicating."
+                : "Duplicate saved context."}
+              onClick={() => setDuplicateOpen(true)}
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              className="btn danger-subtle"
+              disabled={deleting}
+              onClick={() => void removeExperiment()}
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+          </div>
+        </header>
+
+        <section className="experiment-properties" aria-label="Experiment properties">
+          <label>
+            <span>Task</span>
+            <Link href={taskHref}>{bundle.task?.title ?? "Deleted task"}</Link>
+          </label>
+          <label>
+            <span>Owner</span>
+            <select
+              aria-label="Experiment Owner"
+              value={draft.owner_id ?? ""}
+              onChange={(event) => patchDraft({
+                owner_id: event.target.value || null,
+              })}
+            >
+              <option value="">Choose an Owner</option>
+              {bundle.members.map((member) => (
+                <option key={member.id} value={member.id}>{member.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              aria-label="Experiment Status"
+              value={draft.status}
+              onChange={(event) => patchDraft({
+                status: event.target.value as Experiment["status"],
+              })}
+            >
+              {allowedTargets(server.status).map((status) => (
+                <option key={status} value={status}>
+                  {EXPERIMENT_STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <span>Current status</span>
+            <ExperimentStatusBadge status={server.status} />
+          </div>
+          <div><span>Created</span><strong>{fmtDate(server.created_at)}</strong></div>
+          <div><span>Started</span><strong>{fmtDate(server.started_at) || "—"}</strong></div>
+          <div><span>Completed</span><strong>{fmtDate(server.completed_at) || "—"}</strong></div>
+          <BaselinePicker
+            current={draft}
+            candidates={bundle.candidates}
+            value={draft.baseline_experiment_id}
+            onChange={(baselineId) => patchDraft({
+              baseline_experiment_id: baselineId,
+            })}
+          />
+        </section>
+
+        <ExperimentSection
+          id="data"
+          title="Data"
+          description="Training and evaluation datasets used by this run."
+        >
+          <DataEditor
+            value={draft.data_spec}
+            onChange={(data_spec) => patchDraft({ data_spec })}
+          />
+        </ExperimentSection>
+        <ExperimentSection
+          id="object"
+          title="Object"
+          description="Model plus the Prompt, Skills, and Tools that make up the Harness."
+        >
+          <ObjectEditor
+            value={draft.object_spec}
+            onChange={(object_spec) => patchDraft({ object_spec })}
+          />
+        </ExperimentSection>
+        <ExperimentSection
+          id="environment"
+          title="Environment"
+          description="NPU or GPU placement and evaluator context."
+        >
+          <EnvironmentEditor
+            value={draft.environment_spec}
+            onChange={(environment_spec) => patchDraft({ environment_spec })}
+          />
+        </ExperimentSection>
+        <ExperimentSection
+          id="config"
+          title="Config"
+          description="Typed experiment parameters; values are stored as structured JSON properties."
+        >
+          <ConfigEditor
+            value={draft.config}
+            onChange={(config) => patchDraft({ config })}
+          />
+        </ExperimentSection>
+        <ExperimentSection
+          id="result"
+          title="Result"
+          description="Manual numeric metrics, qualitative summary, plots, and captions."
+        >
+          <ResultEditor
+            metrics={draft.metrics}
+            featuredMetricKeys={draft.featured_metric_keys}
+            resultSummary={draft.result_summary}
+            onChange={(result) => patchDraft({
+              metrics: result.metrics,
+              featured_metric_keys: result.featuredMetricKeys,
+              result_summary: result.resultSummary,
+            })}
+          />
+          <AttachmentGallery
+            experiment={server}
+            attachments={bundle.attachments}
+            onChanged={() => void loadRelated(visitRef.current)}
+          />
+        </ExperimentSection>
+        <ExperimentSection
+          id="decision"
+          title="Decision"
+          description="A structured outcome and the reasoning that should guide the Task."
+        >
+          <DecisionEditor
+            key={`${draft.id}-decision-${markdownEpoch}`}
+            outcome={draft.decision_outcome}
+            notes={draft.decision_notes}
+            onChange={(decision_outcome, decision_notes) => patchDraft({
+              decision_outcome,
+              decision_notes,
+            })}
+            onEditingChange={(editing) => setMarkdownEditor("decision", editing)}
+          />
+        </ExperimentSection>
+        <ExperimentSection
+          id="note"
+          title="Note"
+          description="Freeform experiment-specific Markdown source."
+        >
+          <div className="stacked-field">
+            <span>Experiment Note</span>
+            <MarkdownField
+              key={`${draft.id}-note-${markdownEpoch}`}
+              value={draft.notes}
+              minHeight={180}
+              onSave={(notes) => patchDraft({ notes })}
+              onEditingChange={(editing) => setMarkdownEditor("note", editing)}
+              placeholder="Observations, caveats, links, and follow-up ideas"
+            />
+          </div>
+        </ExperimentSection>
+
+        {baseline && <BaselineSummary current={draft} baseline={baseline} />}
+
+        {issues.length > 0 && (
+          <div className="validation-summary" role="alert">
+            <strong>Resolve these fields before saving:</strong>
+            <ul>
+              {issues.map((issue) => (
+                <li key={`${issue.field}-${issue.message}`}>{issue.message}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <div className="experiment-save-bar">
+          <span>
+            {markdownEditing
+              ? "Finish Markdown editing before saving"
+              : dirty
+                ? "Unsaved changes"
+                : `Saved · updated ${fmtDate(server.updated_at)}`}
+          </span>
+          <button
+            type="button"
+            className="btn"
+            disabled={!dirty || saving || markdownEditing}
+            onClick={() => {
+              setDraft(structuredClone(server));
+              draftRef.current = server;
+              setDirty(false);
+              dirtyRef.current = false;
+              setIssues([]);
+            }}
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={
+              !dirty ||
+              saving ||
+              markdownEditing ||
+              Boolean(remoteConflict) ||
+              remoteDeleted
+            }
+            onClick={() => void save()}
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </div>
+
+      <ExperimentTimeline
+        experiment={server}
+        activity={bundle.activity}
+        onChanged={() => void loadRelated(visitRef.current)}
+      />
+
+      <DuplicateExperimentDialog
+        open={duplicateOpen}
+        source={server}
+        members={bundle.members}
+        onClose={() => setDuplicateOpen(false)}
+        onCreated={(experiment) => router.push(`/experiments/${experiment.id}`)}
+      />
+    </div>
+  );
+}

@@ -62,6 +62,13 @@ function errorDetail(caught: unknown, fallback: string): string {
   return caught instanceof Error ? caught.message : fallback;
 }
 
+function isSameExperimentRevision(
+  left: Experiment,
+  right: Experiment,
+): boolean {
+  return left.id === right.id && left.updated_at === right.updated_at;
+}
+
 export default function ExperimentDetail({ id }: { id: string }) {
   const router = useRouter();
   const visitRef = useRef<Visit>({ id, generation: 0 });
@@ -76,6 +83,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
   } | null>(null);
   const draftRevisionRef = useRef(0);
   const draftRef = useRef<Experiment | null>(null);
+  const committedRef = useRef<Experiment | null>(null);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
   const markdownEditorsRef = useRef<Set<string>>(new Set());
@@ -181,6 +189,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
         setNotFound(true);
         setBundle(null);
         setServer(null);
+        committedRef.current = null;
         setDraft(null);
         draftRef.current = null;
         draftRevisionRef.current = 0;
@@ -189,6 +198,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
       setNotFound(false);
       setBundle(next);
       setServer(next.experiment);
+      committedRef.current = next.experiment;
       setDraft(structuredClone(next.experiment));
       draftRef.current = next.experiment;
       draftRevisionRef.current = 0;
@@ -239,10 +249,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
     }
   }, [isCurrentVisit]);
 
-  const loadRealtimeExperiment = useCallback(async (
-    visit: Visit,
-    acknowledged?: Experiment,
-  ) => {
+  const loadRealtimeExperiment = useCallback(async (visit: Visit) => {
     const sequence = ++snapshotIssuedRef.current;
     try {
       const next = await loadExperimentBundle(visit.id);
@@ -250,6 +257,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
       setLoadedId(visit.id);
       setLoading(false);
       if (!next) {
+        committedRef.current = null;
         if (
           dirtyRef.current ||
           markdownEditorsRef.current.size > 0 ||
@@ -269,14 +277,27 @@ export default function ExperimentDetail({ id }: { id: string }) {
         setRemoteDeleted(false);
         return;
       }
+      const committed = committedRef.current;
       if (
-        acknowledged &&
-        next.experiment.id === acknowledged.id &&
-        next.experiment.updated_at === acknowledged.updated_at
+        committed &&
+        isSameExperimentRevision(next.experiment, committed)
       ) {
+        const preserveDraft =
+          dirtyRef.current ||
+          markdownEditorsRef.current.size > 0 ||
+          savingRef.current;
+        committedRef.current = next.experiment;
         setNotFound(false);
-        setBundle({ ...next, experiment: acknowledged });
-        setServer(acknowledged);
+        setBundle(next);
+        setServer(next.experiment);
+        if (!preserveDraft) {
+          setDraft(structuredClone(next.experiment));
+          draftRef.current = next.experiment;
+          draftRevisionRef.current = 0;
+          setDirty(false);
+          dirtyRef.current = false;
+          setIssues([]);
+        }
         setRemoteConflict(null);
         setRemoteDeleted(false);
         return;
@@ -286,6 +307,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
         setNotFound(false);
         setBundle(next);
         setServer(next.experiment);
+        committedRef.current = next.experiment;
         setDraft(structuredClone(next.experiment));
         draftRef.current = next.experiment;
         draftRevisionRef.current = 0;
@@ -310,6 +332,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
       }));
       if (resolution.kind === "replace") {
         setServer(next.experiment);
+        committedRef.current = next.experiment;
         setDraft(structuredClone(next.experiment));
         draftRef.current = next.experiment;
         draftRevisionRef.current = 0;
@@ -368,6 +391,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
     snapshotErrorRef.current = 0;
     mutationRef.current = null;
     draftRef.current = null;
+    committedRef.current = null;
     draftRevisionRef.current = 0;
     dirtyRef.current = false;
     savingRef.current = false;
@@ -407,6 +431,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
       snapshotAcceptedRef.current = cleanupBarrier;
       snapshotErrorRef.current = 0;
       mutationRef.current = null;
+      committedRef.current = null;
       unsubscribe();
     };
   }, [id, loadInitial, loadRealtimeExperiment, loadRelated]);
@@ -488,6 +513,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
       }
       establishSnapshotBarrier();
       setServer(result.experiment);
+      committedRef.current = result.experiment;
       setBundle((current) => (
         current ? { ...current, experiment: result.experiment } : current
       ));
@@ -503,7 +529,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
       }
       setIssues([]);
       savingRef.current = false;
-      await loadRealtimeExperiment(visit, result.experiment);
+      await loadRealtimeExperiment(visit);
     } catch (caught) {
       if (!isCurrentVisit(visit) || mutationRef.current !== mutation) return;
       setDetailError({
@@ -537,6 +563,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
     setDetailError(null);
     establishSnapshotBarrier();
     setServer(displayedRemote);
+    committedRef.current = displayedRemote;
     setDraft(structuredClone(displayedRemote));
     draftRef.current = displayedRemote;
     draftRevisionRef.current = 0;
@@ -579,6 +606,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
     try {
       await deleteExperiment(draft);
       if (isCurrentVisit(visit) && mutationRef.current === mutation) {
+        committedRef.current = null;
         router.push(destination);
       }
     } catch (caught) {

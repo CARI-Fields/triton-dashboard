@@ -63,6 +63,33 @@ function throwIfError(error: { message: string } | null): void {
   if (error) throw new Error(error.message);
 }
 
+function requiredValue(value: string, message: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(message);
+  return trimmed;
+}
+
+function updatePayload(
+  patch: EditableExperimentPatch,
+): EditableExperimentPatch {
+  return {
+    owner_id: patch.owner_id,
+    name: patch.name,
+    status: patch.status,
+    baseline_experiment_id: patch.baseline_experiment_id,
+    data_spec: structuredClone(patch.data_spec),
+    object_spec: structuredClone(patch.object_spec),
+    environment_spec: structuredClone(patch.environment_spec),
+    config: structuredClone(patch.config),
+    metrics: { ...patch.metrics },
+    featured_metric_keys: [...patch.featured_metric_keys],
+    result_summary: patch.result_summary,
+    decision_outcome: patch.decision_outcome,
+    decision_notes: patch.decision_notes,
+    notes: patch.notes,
+  };
+}
+
 const MEMBER_SELECT = "id,name,initials,position,created_at";
 const LIST_SELECT = [
   "*",
@@ -154,11 +181,14 @@ async function nextPosition(taskId: string): Promise<number> {
 export async function createExperiment(
   input: NewExperimentInput,
 ): Promise<Experiment> {
-  const position = await nextPosition(input.taskId);
+  const taskId = requiredValue(input.taskId, "Task is required.");
+  const name = requiredValue(input.name, "Experiment name is required.");
+  const ownerId = requiredValue(input.ownerId, "Experiment owner is required.");
+  const position = await nextPosition(taskId);
   const insert: ExperimentInsert = {
-    task_id: input.taskId,
-    owner_id: input.ownerId,
-    name: input.name.trim(),
+    task_id: taskId,
+    owner_id: ownerId,
+    name,
     status: "planned",
     baseline_experiment_id: null,
     data_spec: { datasets: [] },
@@ -204,9 +234,11 @@ export async function duplicateExperiment(
   source: Experiment,
   input: DuplicateExperimentInput,
 ): Promise<Experiment> {
+  const name = requiredValue(input.name, "Experiment name is required.");
+  const ownerId = requiredValue(input.ownerId, "Experiment owner is required.");
   const duplicateInput: DuplicateInput = {
-    name: input.name,
-    ownerId: input.ownerId,
+    name,
+    ownerId,
     position: await nextPosition(source.task_id),
   };
   const { data, error } = await client()
@@ -225,7 +257,7 @@ export async function updateExperiment(
 ): Promise<ExperimentUpdateResult> {
   const { data, error } = await client()
     .from("experiments")
-    .update(patch)
+    .update(updatePayload(patch))
     .eq("id", id)
     .eq("updated_at", expectedUpdatedAt)
     .select("*")

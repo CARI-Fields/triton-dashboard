@@ -89,7 +89,7 @@ function displayValue(
   if (
     columnKey === "decision.outcome"
     && typeof value === "string"
-    && value in DECISION_LABELS
+    && Object.hasOwn(DECISION_LABELS, value)
   ) {
     return DECISION_LABELS[value as keyof typeof DECISION_LABELS];
   }

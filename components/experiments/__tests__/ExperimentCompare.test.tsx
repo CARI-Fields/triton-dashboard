@@ -547,6 +547,22 @@ describe("ExperimentCompare", () => {
     expect(within(experimentRow).queryByText("accepted")).toBeNull();
   });
 
+  it("renders a malformed __proto__ Decision as plain text without crashing", async () => {
+    const malformed = row(1, {
+      decisionOutcome: "__proto__" as ExperimentListRow["decision_outcome"],
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([malformed]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [malformed.id], baselineId: null }}
+      />,
+    );
+
+    const experimentRow = await screen.findByRole("row", { name: /EXP-0001/ });
+    expect(within(experimentRow).getByText("__proto__")).toBeDefined();
+  });
+
   it("clears a candidate that becomes selected through URL prop reconciliation", async () => {
     const first = row(1);
     const second = row(2);

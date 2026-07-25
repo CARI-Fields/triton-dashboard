@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import "./globals.css";
+import "./experiment-workspace.css";
 
 export const metadata: Metadata = {
-  title: "Triton Kernel Agent — RL Training Board",
-  description: "Live project board for the Triton kernel agent RL training project",
+  title: "Triton Board — Team Experiment Workspace",
+  description: "Task-centered experiment context, evidence, comparison, and decisions.",
 };
 
 export default function RootLayout({
@@ -15,8 +16,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <Navbar />
-        {children}
+        <div className="app-shell">
+          <Navbar />
+          <main className="app-content">{children}</main>
+        </div>
       </body>
     </html>
   );

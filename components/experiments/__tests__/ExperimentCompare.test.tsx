@@ -35,6 +35,7 @@ function id(no: number): string {
 function row(
   no: number,
   options: {
+    decisionOutcome?: ExperimentListRow["decision_outcome"];
     device?: string;
     metrics?: Record<string, number>;
     model?: string;
@@ -82,7 +83,7 @@ function row(
     metrics: options.metrics ?? { "pass@1": no / 100 },
     featured_metric_keys: ["pass@1"],
     result_summary: options.resultSummary ?? "",
-    decision_outcome: null,
+    decision_outcome: options.decisionOutcome ?? null,
     decision_notes: "",
     notes: "",
     position: no,
@@ -141,8 +142,13 @@ describe("ExperimentCompare", () => {
     expect(within(tableRows[2]).getByText("+0.15")).toBeDefined();
     expect(screen.getByRole("columnheader", { name: /Experiment/ }).classList)
       .toContain("compare-identity");
-    expect(within(tableRows[1]).getAllByRole("cell")[0].classList)
+    const baselineIdentity = within(tableRows[1]).getByRole("rowheader");
+    expect(baselineIdentity.getAttribute("scope")).toBe("row");
+    expect(baselineIdentity.classList)
       .toContain("compare-identity");
+    expect(screen.getAllByRole("columnheader").every(
+      (header) => header.getAttribute("scope") === "col",
+    )).toBe(true);
   });
 
   it("removes every Delta column when Baseline is off", async () => {
@@ -191,6 +197,37 @@ describe("ExperimentCompare", () => {
     expect(document.querySelector(".baseline-chip")).toBeNull();
     expect((screen.getByRole("combobox", { name: "Compare Baseline" }) as HTMLSelectElement).value)
       .toBe("");
+  });
+
+  it("matches uppercase URL identities to lowercase rows and writes lowercase URLs", async () => {
+    const baseline = {
+      ...row(1, { metrics: { "pass@1": 0.1 } }),
+      id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1",
+    };
+    const current = {
+      ...row(2, { metrics: { "pass@1": 0.25 } }),
+      id: "ffffffff-eeee-4ddd-8ccc-bbbbbbbbbbb2",
+    };
+    vi.mocked(listExperimentRows).mockResolvedValue([current, baseline]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [current.id.toUpperCase(), baseline.id.toUpperCase()],
+          baselineId: baseline.id.toUpperCase(),
+        }}
+      />,
+    );
+
+    const tableRows = await screen.findAllByRole("row");
+    expect(within(tableRows[1]).getByText("EXP-0001")).toBeDefined();
+    expect(within(tableRows[1]).getByText("Baseline")).toBeDefined();
+    fireEvent.change(screen.getByRole("combobox", { name: "Compare Baseline" }), {
+      target: { value: "" },
+    });
+    expect(routerReplace).toHaveBeenLastCalledWith(
+      `/experiments/compare?ids=${encodeURIComponent(`${baseline.id},${current.id}`)}`,
+    );
   });
 
   it("toggles field groups, hides only identical fields, and renders missing values as em dashes", async () => {
@@ -374,6 +411,44 @@ describe("ExperimentCompare", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("does not claim the selection is empty when its initial load fails", async () => {
+    vi.mocked(listExperimentRows).mockRejectedValue(
+      new Error("Database offline."),
+    );
+
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [id(1)], baselineId: null }}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toBeDefined();
+    expect(screen.queryByText("Add experiments to build a comparison.")).toBeNull();
+    expect(screen.queryByText(/No selected experiments could be found/i)).toBeNull();
+  });
+
+  it("retains the last good comparison when a Realtime refresh fails", async () => {
+    let refresh: () => void = () => undefined;
+    vi.mocked(listExperimentRows)
+      .mockResolvedValueOnce([row(1)])
+      .mockRejectedValueOnce(new Error("Refresh failed."));
+    vi.mocked(watchExperimentIndex).mockImplementation((onChange) => {
+      refresh = onChange;
+      return () => undefined;
+    });
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [id(1)], baselineId: null }}
+      />,
+    );
+    await screen.findByText("EXP-0001");
+
+    act(() => refresh());
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Refresh failed.");
+    expect(screen.getByText("EXP-0001")).toBeDefined();
+  });
+
   it("invalidates pending completions and unsubscribes on unmount", async () => {
     const pending = deferred<ExperimentListRow[]>();
     const unsubscribe = vi.fn();
@@ -455,5 +530,76 @@ describe("ExperimentCompare", () => {
       .toBe("");
     expect(document.querySelector(".baseline-chip")).toBeNull();
     expect(routerReplace).toHaveBeenLastCalledWith("/experiments/compare");
+  });
+
+  it("renders the existing Decision label while retaining raw compare equality", async () => {
+    const accepted = row(1, { decisionOutcome: "accepted" });
+    vi.mocked(listExperimentRows).mockResolvedValue([accepted]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [accepted.id], baselineId: null }}
+      />,
+    );
+
+    const experimentRow = await screen.findByRole("row", { name: /EXP-0001/ });
+    expect(within(experimentRow).getByText("Accepted")).toBeDefined();
+    expect(within(experimentRow).queryByText("accepted")).toBeNull();
+  });
+
+  it("clears a candidate that becomes selected through URL prop reconciliation", async () => {
+    const first = row(1);
+    const second = row(2);
+    vi.mocked(listExperimentRows).mockResolvedValue([first, second]);
+    const { rerender } = render(
+      <ExperimentCompare
+        initialSelection={{ ids: [first.id], baselineId: null }}
+      />,
+    );
+    await screen.findByText("EXP-0001");
+    const picker = screen.getByRole("combobox", { name: "Add experiment" });
+    fireEvent.change(picker, { target: { value: second.id } });
+    expect((screen.getByRole("button", { name: "Add" }) as HTMLButtonElement).disabled)
+      .toBe(false);
+
+    rerender(
+      <ExperimentCompare
+        initialSelection={{ ids: [first.id, second.id], baselineId: null }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect((picker as HTMLSelectElement).value).toBe("");
+      expect((screen.getByRole("button", { name: "Add" }) as HTMLButtonElement).disabled)
+        .toBe(true);
+    });
+  });
+
+  it("clears a candidate deleted by a Realtime reload", async () => {
+    const first = row(1);
+    const candidate = row(2);
+    let refresh: () => void = () => undefined;
+    vi.mocked(listExperimentRows)
+      .mockResolvedValueOnce([first, candidate])
+      .mockResolvedValueOnce([first]);
+    vi.mocked(watchExperimentIndex).mockImplementation((onChange) => {
+      refresh = onChange;
+      return () => undefined;
+    });
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [first.id], baselineId: null }}
+      />,
+    );
+    await screen.findByText("EXP-0001");
+    const picker = screen.getByRole("combobox", { name: "Add experiment" });
+    fireEvent.change(picker, { target: { value: candidate.id } });
+
+    act(() => refresh());
+    await waitFor(() => {
+      expect((picker as HTMLSelectElement).value).toBe("");
+      expect((screen.getByRole("button", { name: "Add" }) as HTMLButtonElement).disabled)
+        .toBe(true);
+    });
   });
 });

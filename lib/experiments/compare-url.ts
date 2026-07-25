@@ -14,15 +14,19 @@ function first(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
+function normalizeUuid(value: string): string | null {
+  const trimmed = value.trim();
+  return UUID.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
 export function parseCompareSearchParams(params: CompareSearchParams): CompareSelection {
   const ids = [...new Set(
     first(params.ids)
       .split(",")
-      .map((id) => id.trim())
-      .filter((id) => UUID.test(id)),
+      .map(normalizeUuid)
+      .filter((id): id is string => id !== null),
   )];
-  const baselineCandidate = first(params.baseline).trim();
-  const baselineId = UUID.test(baselineCandidate) ? baselineCandidate : null;
+  const baselineId = normalizeUuid(first(params.baseline));
   if (baselineId && !ids.includes(baselineId)) ids.unshift(baselineId);
   if (baselineId) {
     return {
@@ -35,10 +39,14 @@ export function parseCompareSearchParams(params: CompareSearchParams): CompareSe
 
 export function serializeCompareSelection(selection: CompareSelection): string {
   const params = new URLSearchParams();
-  const baselineId = selection.baselineId && UUID.test(selection.baselineId)
-    ? selection.baselineId
+  const baselineId = selection.baselineId
+    ? normalizeUuid(selection.baselineId)
     : null;
-  const ids = [...new Set(selection.ids.filter((id) => UUID.test(id)))];
+  const ids = [...new Set(
+    selection.ids
+      .map(normalizeUuid)
+      .filter((id): id is string => id !== null),
+  )];
   const orderedIds = baselineId
     ? [baselineId, ...ids.filter((id) => id !== baselineId)]
     : ids;

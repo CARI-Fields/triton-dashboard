@@ -26,6 +26,7 @@ import {
   watchExperimentIndex,
 } from "@/lib/experiments/repository";
 import {
+  DECISION_LABELS,
   EXPERIMENT_STATUS_LABELS,
   formatExperimentId,
 } from "@/lib/experiments/policy";
@@ -79,8 +80,19 @@ function compareHref(selection: CompareSelection): string {
   return query ? `/experiments/compare?${query}` : "/experiments/compare";
 }
 
-function displayValue(value: CompareValue, delta: boolean): string {
+function displayValue(
+  value: CompareValue,
+  delta: boolean,
+  columnKey: string,
+): string {
   if (value === null) return "—";
+  if (
+    columnKey === "decision.outcome"
+    && typeof value === "string"
+    && value in DECISION_LABELS
+  ) {
+    return DECISION_LABELS[value as keyof typeof DECISION_LABELS];
+  }
   if (typeof value !== "number") return String(value);
   const rounded = Number(value.toPrecision(6));
   if (!delta || rounded === 0) return rounded.toString();
@@ -207,7 +219,14 @@ export default function ExperimentCompare({
   );
 
   const available = rows.filter((row) => !selection.ids.includes(row.id));
+  const candidateAvailable = candidateId !== ""
+    && available.some((row) => row.id === candidateId);
   const noMatchingSelection = unavailableIds.length > 0 && selection.ids.length === 0;
+  const initialLoadFailed = Boolean(error) && !loadedRef.current;
+
+  useEffect(() => {
+    if (candidateId && !candidateAvailable) setCandidateId("");
+  }, [candidateAvailable, candidateId]);
 
   return (
     <div className="workspace-page compare-page">
@@ -241,9 +260,12 @@ export default function ExperimentCompare({
           <button
             type="button"
             className="btn"
-            disabled={!candidateId}
+            disabled={!candidateAvailable}
             onClick={() => {
-              if (!candidateId) return;
+              if (!candidateAvailable) {
+                setCandidateId("");
+                return;
+              }
               replaceSelection({
                 ...selectionRef.current,
                 ids: [...selectionRef.current.ids, candidateId],
@@ -328,14 +350,14 @@ export default function ExperimentCompare({
         </p>
       )}
 
-      {!loading && noMatchingSelection
+      {!loading && !initialLoadFailed && noMatchingSelection
         ? (
           <div className="experiment-empty">
             No selected experiments could be found. They may have been deleted
             or are unavailable. Choose another experiment to continue.
           </div>
         )
-        : !loading && selected.length === 0
+        : !loading && !initialLoadFailed && selected.length === 0
           ? (
             <div className="experiment-empty">
               Add experiments to build a comparison.
@@ -346,12 +368,13 @@ export default function ExperimentCompare({
               <table className="compare-table">
                 <thead>
                   <tr>
-                    <th className="compare-identity">Experiment</th>
-                    <th>Task</th>
-                    <th>Status</th>
+                    <th scope="col" className="compare-identity">Experiment</th>
+                    <th scope="col">Task</th>
+                    <th scope="col">Status</th>
                     {columns.map((column) => (
                       <th
                         key={column.key}
+                        scope="col"
                         className={column.kind === "delta" ? "neutral-delta" : ""}
                       >
                         <span>{column.label}</span>
@@ -368,7 +391,7 @@ export default function ExperimentCompare({
                       key={row.id}
                       className={row.id === selection.baselineId ? "baseline-row" : ""}
                     >
-                      <td className="compare-identity">
+                      <th scope="row" className="compare-identity">
                         <Link href={`/experiments/${row.id}`}>
                           {formatExperimentId(row.experiment_no)}
                         </Link>
@@ -389,7 +412,7 @@ export default function ExperimentCompare({
                         >
                           Remove
                         </button>
-                      </td>
+                      </th>
                       <td>{row.task?.title ?? "—"}</td>
                       <td>{EXPERIMENT_STATUS_LABELS[row.status]}</td>
                       {columns.map((column) => (
@@ -400,6 +423,7 @@ export default function ExperimentCompare({
                           {displayValue(
                             column.values[row.id] ?? null,
                             column.kind === "delta",
+                            column.key,
                           )}
                         </td>
                       ))}

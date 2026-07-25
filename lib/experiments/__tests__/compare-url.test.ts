@@ -6,6 +6,8 @@ import {
 
 const first = "00000000-0000-4000-8000-000000000001";
 const second = "00000000-0000-4000-8000-000000000002";
+const alphaFirst = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1";
+const alphaSecond = "ffffffff-eeee-4ddd-8ccc-bbbbbbbbbbb2";
 
 describe("compare URL state", () => {
   it("deduplicates IDs, rejects invalid IDs, and includes the Baseline", () => {
@@ -61,5 +63,29 @@ describe("compare URL state", () => {
     }));
     expect(invalid.get("ids")).toBe(second);
     expect(invalid.has("baseline")).toBe(false);
+  });
+
+  it("normalizes UUID identity to lowercase and deduplicates case-insensitively", () => {
+    expect(parseCompareSearchParams({
+      ids: `${alphaSecond.toUpperCase()},${alphaSecond}`,
+      baseline: alphaFirst.toUpperCase(),
+    })).toEqual({
+      ids: [alphaFirst, alphaSecond],
+      baselineId: alphaFirst,
+    });
+  });
+
+  it("serializes uppercase UUIDs as one canonical lowercase identity", () => {
+    const params = new URLSearchParams(serializeCompareSelection({
+      ids: [
+        alphaSecond.toUpperCase(),
+        alphaFirst.toUpperCase(),
+        alphaSecond,
+      ],
+      baselineId: alphaFirst.toUpperCase(),
+    }));
+
+    expect(params.get("ids")).toBe(`${alphaFirst},${alphaSecond}`);
+    expect(params.get("baseline")).toBe(alphaFirst);
   });
 });

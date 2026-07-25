@@ -16,13 +16,18 @@ export default function ExperimentTimeline({
   onChanged: () => void;
 }) {
   const mounted = useRef(false);
-  const currentExperimentId = useRef(experiment.id);
+  const identity = useRef({ id: experiment.id, generation: 0 });
   const pending = useRef(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  currentExperimentId.current = experiment.id;
+  if (identity.current.id !== experiment.id) {
+    identity.current = {
+      id: experiment.id,
+      generation: identity.current.generation + 1,
+    };
+  }
 
   useEffect(() => {
     mounted.current = true;
@@ -40,7 +45,7 @@ export default function ExperimentTimeline({
 
   async function addNote() {
     if (!note.trim() || pending.current) return;
-    const operationExperimentId = experiment.id;
+    const operationGeneration = identity.current.generation;
     pending.current = true;
     setSaving(true);
     setError("");
@@ -48,7 +53,7 @@ export default function ExperimentTimeline({
       await addExperimentTimelineNote(experiment, note);
       if (
         mounted.current &&
-        currentExperimentId.current === operationExperimentId
+        identity.current.generation === operationGeneration
       ) {
         setNote("");
         onChanged();
@@ -56,7 +61,7 @@ export default function ExperimentTimeline({
     } catch (caught) {
       if (
         mounted.current &&
-        currentExperimentId.current === operationExperimentId
+        identity.current.generation === operationGeneration
       ) {
         setError(
           caught instanceof Error
@@ -65,7 +70,7 @@ export default function ExperimentTimeline({
         );
       }
     } finally {
-      if (currentExperimentId.current === operationExperimentId) {
+      if (identity.current.generation === operationGeneration) {
         pending.current = false;
         if (mounted.current) setSaving(false);
       }

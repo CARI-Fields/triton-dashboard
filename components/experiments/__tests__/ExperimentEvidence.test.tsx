@@ -495,12 +495,19 @@ describe("experiment evidence", () => {
   it("isolates pending async work when the controlled experiment identity changes", async () => {
     const experimentA = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
     const experimentB = row("00000000-0000-4000-8000-000000000003", 0.3, "npu:2");
-    const upload = deferred<void>();
-    const note = deferred<void>();
-    vi.mocked(uploadExperimentAttachment).mockReturnValue(upload.promise);
-    vi.mocked(addExperimentTimelineNote).mockReturnValue(note.promise);
+    const oldUpload = deferred<void>();
+    const newUpload = deferred<void>();
+    const oldNote = deferred<void>();
+    const newNote = deferred<void>();
+    vi.mocked(uploadExperimentAttachment)
+      .mockReturnValueOnce(oldUpload.promise)
+      .mockReturnValueOnce(newUpload.promise);
+    vi.mocked(addExperimentTimelineNote)
+      .mockReturnValueOnce(oldNote.promise)
+      .mockReturnValueOnce(newNote.promise);
     const onAttachmentA = vi.fn();
     const onAttachmentB = vi.fn();
+    const onAttachmentA2 = vi.fn();
     const attachmentRender = render(
       <AttachmentGallery
         experiment={experimentA}
@@ -525,9 +532,25 @@ describe("experiment evidence", () => {
     );
     expect((screen.getByRole("button", { name: "Upload images" }) as HTMLButtonElement).disabled)
       .toBe(false);
+    attachmentRender.rerender(
+      <AttachmentGallery
+        experiment={experimentA}
+        attachments={[]}
+        onChanged={onAttachmentA2}
+      />,
+    );
+    fireEvent.change(
+      attachmentRender.container.querySelector('input[type="file"]')!,
+      {
+        target: {
+          files: [new File(["new plot"], "new-plot.png", { type: "image/png" })],
+        },
+      },
+    );
 
     const onTimelineA = vi.fn();
     const onTimelineB = vi.fn();
+    const onTimelineA2 = vi.fn();
     const timelineRender = render(
       <ExperimentTimeline
         experiment={experimentA}
@@ -550,16 +573,36 @@ describe("experiment evidence", () => {
       "Experiment timeline note",
     ) as HTMLTextAreaElement;
     fireEvent.change(noteInput, { target: { value: "B draft" } });
+    timelineRender.rerender(
+      <ExperimentTimeline
+        experiment={experimentA}
+        activity={[]}
+        onChanged={onTimelineA2}
+      />,
+    );
+    fireEvent.change(noteInput, { target: { value: "Fresh A note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
 
     await act(async () => {
-      upload.resolve();
-      note.resolve();
-      await Promise.all([upload.promise, note.promise]);
+      oldUpload.resolve();
+      oldNote.resolve();
+      await Promise.all([oldUpload.promise, oldNote.promise]);
     });
     expect(onAttachmentA).not.toHaveBeenCalled();
     expect(onAttachmentB).not.toHaveBeenCalled();
+    expect(onAttachmentA2).not.toHaveBeenCalled();
     expect(onTimelineA).not.toHaveBeenCalled();
     expect(onTimelineB).not.toHaveBeenCalled();
-    expect(noteInput.value).toBe("B draft");
+    expect(onTimelineA2).not.toHaveBeenCalled();
+    expect(noteInput.value).toBe("Fresh A note");
+    expect(screen.getByRole("button", { name: "Uploading…" })).toBeDefined();
+
+    await act(async () => {
+      newUpload.resolve();
+      newNote.resolve();
+      await Promise.all([newUpload.promise, newNote.promise]);
+    });
+    expect(onAttachmentA2).toHaveBeenCalledTimes(1);
+    expect(onTimelineA2).toHaveBeenCalledTimes(1);
   });
 });

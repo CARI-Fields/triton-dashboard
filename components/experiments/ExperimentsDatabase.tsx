@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ExperimentListRow, Member, Task } from "@/lib/types";
 import {
@@ -21,6 +21,7 @@ import ExperimentTable from "@/components/experiments/ExperimentTable";
 
 export default function ExperimentsDatabase() {
   const router = useRouter();
+  const reloadVersion = useRef(0);
   const [rows, setRows] = useState<ExperimentListRow[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -31,25 +32,37 @@ export default function ExperimentsDatabase() {
   const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
+    const requestVersion = ++reloadVersion.current;
     try {
       const [nextRows, references] = await Promise.all([
         listExperimentRows(),
         loadExperimentReferenceData(),
       ]);
+      if (requestVersion !== reloadVersion.current) return;
       setRows(nextRows);
       setTasks(references.tasks);
       setMembers(references.members);
+      setSelectedIds((current) => {
+        const availableIds = new Set(nextRows.map((row) => row.id));
+        const next = new Set([...current].filter((id) => availableIds.has(id)));
+        return next.size === current.size ? current : next;
+      });
       setError("");
     } catch (caught) {
+      if (requestVersion !== reloadVersion.current) return;
       setError(caught instanceof Error ? caught.message : "Could not load experiments.");
     } finally {
-      setLoading(false);
+      if (requestVersion === reloadVersion.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void reload();
-    return watchExperimentIndex(() => void reload());
+    const unsubscribe = watchExperimentIndex(() => void reload());
+    return () => {
+      reloadVersion.current += 1;
+      unsubscribe();
+    };
   }, [reload]);
 
   const visibleRows = useMemo(

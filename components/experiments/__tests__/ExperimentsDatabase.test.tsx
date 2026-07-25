@@ -98,6 +98,14 @@ function row(id: string, experimentNo: number, name: string): ExperimentListRow 
 const first = row("00000000-0000-4000-8000-000000000001", 1, "Guardrail run");
 const second = row("00000000-0000-4000-8000-000000000002", 2, "Baseline run");
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 describe("ExperimentsDatabase", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -131,6 +139,58 @@ describe("ExperimentsDatabase", () => {
 
     unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("ignores an older reload that resolves after a newer Realtime refresh", async () => {
+    const olderRows = deferred<ExperimentListRow[]>();
+    const olderReferences = deferred<{ tasks: Task[]; members: Member[] }>();
+    let refresh: () => void = () => undefined;
+    vi.mocked(listExperimentRows)
+      .mockImplementationOnce(() => olderRows.promise)
+      .mockResolvedValueOnce([second]);
+    vi.mocked(loadExperimentReferenceData)
+      .mockImplementationOnce(() => olderReferences.promise)
+      .mockResolvedValueOnce({ tasks: [task], members: [member] });
+    vi.mocked(watchExperimentIndex).mockImplementation((onChange) => {
+      refresh = onChange;
+      return () => undefined;
+    });
+
+    render(<ExperimentsDatabase />);
+    act(() => refresh());
+    expect(await screen.findByRole("link", { name: "Baseline run" })).toBeDefined();
+
+    await act(async () => {
+      olderRows.resolve([first]);
+      olderReferences.resolve({ tasks: [task], members: [member] });
+      await olderRows.promise;
+    });
+
+    expect(screen.queryByRole("link", { name: "Guardrail run" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Baseline run" })).toBeDefined();
+  });
+
+  it("removes deleted experiments from the selected comparison set", async () => {
+    let refresh: () => void = () => undefined;
+    vi.mocked(watchExperimentIndex).mockImplementation((onChange) => {
+      refresh = onChange;
+      return () => undefined;
+    });
+    render(<ExperimentsDatabase />);
+    await screen.findByRole("link", { name: "Guardrail run" });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0001" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0002" }));
+    expect(screen.getByRole("link", { name: "Compare selected (2)" })).toBeDefined();
+
+    vi.mocked(listExperimentRows).mockResolvedValueOnce([first]);
+    act(() => refresh());
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "Baseline run" })).toBeNull();
+    });
+
+    const compare = screen.getByRole("link", { name: "Compare selected (1)" });
+    expect(compare.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("keeps Compare inert until two rows produce a canonical selection URL", async () => {

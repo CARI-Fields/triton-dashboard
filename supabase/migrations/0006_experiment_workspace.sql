@@ -17,12 +17,22 @@ alter table experiments add column if not exists decision_notes text not null de
 alter table experiments add column if not exists started_at timestamptz;
 alter table experiments add column if not exists completed_at timestamptz;
 
-update experiments
-set status = case
-  when jsonb_typeof(metrics) = 'object' and metrics <> '{}'::jsonb then 'analyzing'
-  else 'planned'
+-- Preserve historical updated_at values: 0005's trigger updates every row touched
+-- by this one-time status backfill. The DO block makes trigger state atomic on error.
+do $status_backfill$
+begin
+  execute 'alter table experiments disable trigger experiments_set_updated_at';
+
+  update experiments
+  set status = case
+    when jsonb_typeof(metrics) = 'object' and metrics <> '{}'::jsonb then 'analyzing'
+    else 'planned'
+  end
+  where status is null;
+
+  execute 'alter table experiments enable trigger experiments_set_updated_at';
 end
-where status is null;
+$status_backfill$;
 
 alter table experiments alter column status set default 'planned';
 alter table experiments alter column status set not null;

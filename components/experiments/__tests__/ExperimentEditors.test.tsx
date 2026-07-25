@@ -230,6 +230,17 @@ describe("structured experiment editors", () => {
     expect(key.value).toBe("temperature");
   });
 
+  it("keeps the persisted Config key visible after an unchanged blur", () => {
+    const onChange = vi.fn();
+    render(<ConfigEditor value={{ temperature: 0.1 }} onChange={onChange} />);
+
+    const key = screen.getByLabelText("temperature key") as HTMLInputElement;
+    fireEvent.blur(key);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(key.value).toBe("temperature");
+  });
+
   it("resets a colliding Config key draft after blur", () => {
     const onChange = vi.fn();
     render(<ConfigEditor value={{ temperature: 0.1, top_p: 0.9 }} onChange={onChange} />);
@@ -252,6 +263,19 @@ describe("structured experiment editors", () => {
     rerender(<ConfigEditor value={{ top_p: 0.1 }} onChange={onChange} />);
 
     expect((screen.getByLabelText("top_p key") as HTMLInputElement).value).toBe("top_p");
+  });
+
+  it("keeps sibling ordering when renaming a Config key", () => {
+    const onChange = vi.fn();
+    render(<ConfigEditor value={{ first: "a", middle: "b", last: "c" }} onChange={onChange} />);
+
+    const key = screen.getByLabelText("middle key");
+    fireEvent.change(key, { target: { value: "renamed" } });
+    fireEvent.blur(key);
+
+    const result = onChange.mock.lastCall![0];
+    expect(Object.keys(result)).toEqual(["first", "renamed", "last"]);
+    expect(result).toEqual({ first: "a", renamed: "b", last: "c" });
   });
 
   it("adds a collision-safe Config parameter and deletes a parameter", () => {

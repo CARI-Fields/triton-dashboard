@@ -67,9 +67,14 @@ export default function ExperimentDetail({ id }: { id: string }) {
   const visitRef = useRef<Visit>({ id, generation: 0 });
   const initialPendingRef = useRef<object | null>(null);
   const relatedVersionRef = useRef(0);
-  const realtimeVersionRef = useRef(0);
-  const conflictVersionRef = useRef(0);
-  const deletePendingRef = useRef<object | null>(null);
+  const snapshotIssuedRef = useRef(0);
+  const snapshotAcceptedRef = useRef(0);
+  const snapshotErrorRef = useRef(0);
+  const mutationRef = useRef<{
+    kind: "save" | "delete";
+    token: object;
+  } | null>(null);
+  const draftRevisionRef = useRef(0);
   const draftRef = useRef<Experiment | null>(null);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
@@ -107,48 +112,101 @@ export default function ExperimentDetail({ id }: { id: string }) {
     [],
   );
 
+  const clearSnapshotError = useCallback(() => {
+    snapshotErrorRef.current = 0;
+    setDetailError((current) => (
+      current?.retry === "initial" ||
+      current?.retry === "realtime" ||
+      current?.retry === "conflict"
+        ? null
+        : current
+    ));
+  }, []);
+
+  const acceptSnapshot = useCallback((visit: Visit, sequence: number) => {
+    if (
+      !isCurrentVisit(visit) ||
+      sequence < snapshotAcceptedRef.current
+    ) {
+      return false;
+    }
+    snapshotAcceptedRef.current = sequence;
+    clearSnapshotError();
+    return true;
+  }, [clearSnapshotError, isCurrentVisit]);
+
+  const reportSnapshotError = useCallback((
+    visit: Visit,
+    sequence: number,
+    nextError: DetailError,
+  ) => {
+    if (
+      !isCurrentVisit(visit) ||
+      sequence < snapshotAcceptedRef.current ||
+      sequence < snapshotErrorRef.current
+    ) {
+      return;
+    }
+    snapshotErrorRef.current = sequence;
+    setLoadedId(visit.id);
+    setLoading(false);
+    setDetailError((current) => (
+      current?.retry === null ? current : nextError
+    ));
+  }, [isCurrentVisit]);
+
+  const establishSnapshotBarrier = useCallback(() => {
+    const sequence = ++snapshotIssuedRef.current;
+    snapshotAcceptedRef.current = sequence;
+    clearSnapshotError();
+  }, [clearSnapshotError]);
+
   const loadInitial = useCallback(async (visit: Visit) => {
     if (initialPendingRef.current) return;
     const operation = {};
+    const sequence = ++snapshotIssuedRef.current;
     initialPendingRef.current = operation;
     setLoading(true);
     setNotFound(false);
-    setDetailError(null);
+    setDetailError((current) => (
+      current?.retry === "initial" ? null : current
+    ));
     try {
       const next = await loadExperimentBundle(visit.id);
-      if (!isCurrentVisit(visit) || initialPendingRef.current !== operation) return;
+      if (!acceptSnapshot(visit, sequence)) return;
       setLoadedId(visit.id);
+      setLoading(false);
       if (!next) {
         setNotFound(true);
         setBundle(null);
         setServer(null);
         setDraft(null);
         draftRef.current = null;
+        draftRevisionRef.current = 0;
         return;
       }
+      setNotFound(false);
       setBundle(next);
       setServer(next.experiment);
       setDraft(structuredClone(next.experiment));
       draftRef.current = next.experiment;
+      draftRevisionRef.current = 0;
       setDirty(false);
       dirtyRef.current = false;
       setRemoteConflict(null);
       setRemoteDeleted(false);
       setIssues([]);
     } catch (caught) {
-      if (!isCurrentVisit(visit) || initialPendingRef.current !== operation) return;
-      setLoadedId(visit.id);
-      setDetailError({
+      reportSnapshotError(visit, sequence, {
         message: `Could not load the experiment. ${errorDetail(caught, "The request failed.")}`,
         retry: "initial",
       });
     } finally {
-      if (isCurrentVisit(visit) && initialPendingRef.current === operation) {
+      if (initialPendingRef.current === operation) {
         initialPendingRef.current = null;
-        setLoading(false);
       }
     }
-  }, [isCurrentVisit]);
+  }, [acceptSnapshot, reportSnapshotError]);
 
   const loadRelated = useCallback(async (visit: Visit) => {
     const requestVersion = ++relatedVersionRef.current;
@@ -181,15 +239,12 @@ export default function ExperimentDetail({ id }: { id: string }) {
   }, [isCurrentVisit]);
 
   const loadRealtimeExperiment = useCallback(async (visit: Visit) => {
-    const requestVersion = ++realtimeVersionRef.current;
+    const sequence = ++snapshotIssuedRef.current;
     try {
       const next = await loadExperimentBundle(visit.id);
-      if (
-        !isCurrentVisit(visit) ||
-        requestVersion !== realtimeVersionRef.current
-      ) {
-        return;
-      }
+      if (!acceptSnapshot(visit, sequence)) return;
+      setLoadedId(visit.id);
+      setLoading(false);
       if (!next) {
         if (
           dirtyRef.current ||
@@ -206,11 +261,25 @@ export default function ExperimentDetail({ id }: { id: string }) {
         setServer(null);
         setDraft(null);
         draftRef.current = null;
+        draftRevisionRef.current = 0;
         setRemoteDeleted(false);
         return;
       }
       const currentDraft = draftRef.current;
-      if (!currentDraft) return;
+      if (!currentDraft) {
+        setNotFound(false);
+        setBundle(next);
+        setServer(next.experiment);
+        setDraft(structuredClone(next.experiment));
+        draftRef.current = next.experiment;
+        draftRevisionRef.current = 0;
+        setDirty(false);
+        dirtyRef.current = false;
+        setRemoteConflict(null);
+        setRemoteDeleted(false);
+        setIssues([]);
+        return;
+      }
       const resolution = reconcileRealtime(
         currentDraft,
         next.experiment,
@@ -227,6 +296,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
         setServer(next.experiment);
         setDraft(structuredClone(next.experiment));
         draftRef.current = next.experiment;
+        draftRevisionRef.current = 0;
         setDirty(false);
         dirtyRef.current = false;
         setRemoteConflict(null);
@@ -236,34 +306,22 @@ export default function ExperimentDetail({ id }: { id: string }) {
         setRemoteConflict(next.experiment);
         setRemoteDeleted(false);
       }
-      setDetailError((current) => (
-        current?.retry === "realtime" ? null : current
-      ));
     } catch (caught) {
-      if (!isCurrentVisit(visit) || requestVersion !== realtimeVersionRef.current) {
-        return;
-      }
-      setDetailError({
+      reportSnapshotError(visit, sequence, {
         message: `Could not refresh the experiment. ${errorDetail(caught, "The request failed.")}`,
         retry: "realtime",
       });
     }
-  }, [isCurrentVisit]);
+  }, [acceptSnapshot, reportSnapshotError]);
 
   const refreshConflictComparison = useCallback(async (visit: Visit) => {
-    const requestVersion = ++conflictVersionRef.current;
+    const sequence = ++snapshotIssuedRef.current;
     try {
       const next = await loadExperimentBundle(visit.id);
-      if (
-        !isCurrentVisit(visit) ||
-        requestVersion !== conflictVersionRef.current
-      ) {
-        return;
-      }
+      if (!acceptSnapshot(visit, sequence)) return;
       if (!next) {
         setRemoteConflict(null);
         setRemoteDeleted(true);
-        setDetailError(null);
         return;
       }
       setBundle((current) => (
@@ -273,19 +331,13 @@ export default function ExperimentDetail({ id }: { id: string }) {
       ));
       setRemoteConflict(next.experiment);
       setRemoteDeleted(false);
-      setDetailError((current) => (
-        current?.retry === "conflict" ? null : current
-      ));
     } catch (caught) {
-      if (!isCurrentVisit(visit) || requestVersion !== conflictVersionRef.current) {
-        return;
-      }
-      setDetailError({
+      reportSnapshotError(visit, sequence, {
         message: `Could not refresh the remote comparison. ${errorDetail(caught, "The request failed.")}`,
         retry: "conflict",
       });
     }
-  }, [isCurrentVisit]);
+  }, [acceptSnapshot, reportSnapshotError]);
 
   useEffect(() => {
     const visit = {
@@ -295,10 +347,12 @@ export default function ExperimentDetail({ id }: { id: string }) {
     visitRef.current = visit;
     initialPendingRef.current = null;
     relatedVersionRef.current += 1;
-    realtimeVersionRef.current += 1;
-    conflictVersionRef.current += 1;
-    deletePendingRef.current = null;
+    const snapshotBarrier = ++snapshotIssuedRef.current;
+    snapshotAcceptedRef.current = snapshotBarrier;
+    snapshotErrorRef.current = 0;
+    mutationRef.current = null;
     draftRef.current = null;
+    draftRevisionRef.current = 0;
     dirtyRef.current = false;
     savingRef.current = false;
     markdownEditorsRef.current = new Set();
@@ -332,9 +386,10 @@ export default function ExperimentDetail({ id }: { id: string }) {
       }
       initialPendingRef.current = null;
       relatedVersionRef.current += 1;
-      realtimeVersionRef.current += 1;
-      conflictVersionRef.current += 1;
-      deletePendingRef.current = null;
+      const cleanupBarrier = ++snapshotIssuedRef.current;
+      snapshotAcceptedRef.current = cleanupBarrier;
+      snapshotErrorRef.current = 0;
+      mutationRef.current = null;
       unsubscribe();
     };
   }, [id, loadInitial, loadRealtimeExperiment, loadRelated]);
@@ -349,6 +404,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
   }, []);
 
   function patchDraft(patch: Partial<Experiment>) {
+    draftRevisionRef.current += 1;
     setDraft((current) => {
       if (!current) return current;
       const next = { ...current, ...patch };
@@ -369,7 +425,12 @@ export default function ExperimentDetail({ id }: { id: string }) {
   }
 
   async function save() {
-    if (!server || !draft || savingRef.current || markdownEditorsRef.current.size > 0) {
+    if (
+      !server ||
+      !draft ||
+      mutationRef.current ||
+      markdownEditorsRef.current.size > 0
+    ) {
       return;
     }
     const nextIssues: ValidationIssue[] = [];
@@ -389,6 +450,10 @@ export default function ExperimentDetail({ id }: { id: string }) {
       return;
     }
 
+    const token = {};
+    const mutation = { kind: "save" as const, token };
+    const submissionRevision = draftRevisionRef.current;
+    mutationRef.current = mutation;
     setSaving(true);
     savingRef.current = true;
     setDetailError(null);
@@ -399,31 +464,39 @@ export default function ExperimentDetail({ id }: { id: string }) {
         server.updated_at,
         editableExperimentPatch(draft),
       );
-      if (!isCurrentVisit(visit)) return;
+      if (!isCurrentVisit(visit) || mutationRef.current !== mutation) return;
       if (!result.ok) {
         await refreshConflictComparison(visit);
         return;
       }
+      establishSnapshotBarrier();
       setServer(result.experiment);
-      setDraft(structuredClone(result.experiment));
-      draftRef.current = result.experiment;
       setBundle((current) => (
         current ? { ...current, experiment: result.experiment } : current
       ));
-      setDirty(false);
-      dirtyRef.current = false;
+      if (draftRevisionRef.current === submissionRevision) {
+        setDraft(structuredClone(result.experiment));
+        draftRef.current = result.experiment;
+        draftRevisionRef.current = 0;
+        setDirty(false);
+        dirtyRef.current = false;
+      } else {
+        setDirty(true);
+        dirtyRef.current = true;
+      }
       setRemoteConflict(null);
       setRemoteDeleted(false);
       setIssues([]);
       await loadRelated(visit);
     } catch (caught) {
-      if (!isCurrentVisit(visit)) return;
+      if (!isCurrentVisit(visit) || mutationRef.current !== mutation) return;
       setDetailError({
         message: `Could not save the experiment. ${errorDetail(caught, "The request failed.")}`,
         retry: null,
       });
     } finally {
-      if (isCurrentVisit(visit)) {
+      if (isCurrentVisit(visit) && mutationRef.current === mutation) {
+        mutationRef.current = null;
         setSaving(false);
         savingRef.current = false;
       }
@@ -431,33 +504,35 @@ export default function ExperimentDetail({ id }: { id: string }) {
   }
 
   async function removeExperiment() {
-    if (!draft || !bundle || deletePendingRef.current) return;
+    if (!draft || !bundle || mutationRef.current) return;
     if (!window.confirm(
       `Delete ${formatExperimentId(draft.experiment_no)}? The record, attachment rows, and stored images will be removed.`,
     )) {
       return;
     }
-    const operation = {};
+    if (mutationRef.current) return;
+    const token = {};
+    const mutation = { kind: "delete" as const, token };
     const visit = visitRef.current;
     const destination = bundle.task ? `/task/${bundle.task.id}` : "/experiments";
-    deletePendingRef.current = operation;
+    mutationRef.current = mutation;
     setDeleting(true);
     setDetailError(null);
     try {
       await deleteExperiment(draft);
-      if (isCurrentVisit(visit) && deletePendingRef.current === operation) {
+      if (isCurrentVisit(visit) && mutationRef.current === mutation) {
         router.push(destination);
       }
     } catch (caught) {
-      if (isCurrentVisit(visit) && deletePendingRef.current === operation) {
+      if (isCurrentVisit(visit) && mutationRef.current === mutation) {
         setDetailError({
           message: `Could not delete the experiment. ${errorDetail(caught, "The request failed.")}`,
           retry: null,
         });
       }
     } finally {
-      if (isCurrentVisit(visit) && deletePendingRef.current === operation) {
-        deletePendingRef.current = null;
+      if (isCurrentVisit(visit) && mutationRef.current === mutation) {
+        mutationRef.current = null;
         setDeleting(false);
       }
     }
@@ -495,6 +570,14 @@ export default function ExperimentDetail({ id }: { id: string }) {
       <div className="workspace-page">
         <Link href="/experiments" className="back-link">← Experiments</Link>
         <p className="state-note">Experiment not found. It may have been deleted.</p>
+        {detailError && (
+          <div className="error-banner" role="alert">
+            <span>{detailError.message}</span>
+            {detailError.retry && (
+              <button type="button" className="btn" onClick={retry}>Retry</button>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -563,9 +646,11 @@ export default function ExperimentDetail({ id }: { id: string }) {
                     )) {
                       return;
                     }
+                    establishSnapshotBarrier();
                     setServer(remoteConflict);
                     setDraft(structuredClone(remoteConflict));
                     draftRef.current = remoteConflict;
+                    draftRevisionRef.current = 0;
                     setBundle((current) => (
                       current
                         ? { ...current, experiment: remoteConflict }
@@ -627,7 +712,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
             <button
               type="button"
               className="btn"
-              disabled={hasLocalChanges || deleting}
+              disabled={hasLocalChanges || saving || deleting}
               title={hasLocalChanges
                 ? "Finish and save changes before duplicating."
                 : "Duplicate saved context."}
@@ -638,7 +723,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
             <button
               type="button"
               className="btn danger-subtle"
-              disabled={deleting}
+              disabled={saving || deleting}
               onClick={() => void removeExperiment()}
             >
               {deleting ? "Deleting…" : "Delete"}
@@ -817,10 +902,11 @@ export default function ExperimentDetail({ id }: { id: string }) {
           <button
             type="button"
             className="btn"
-            disabled={!dirty || saving || markdownEditing}
+            disabled={!dirty || saving || deleting || markdownEditing}
             onClick={() => {
               setDraft(structuredClone(server));
               draftRef.current = server;
+              draftRevisionRef.current = 0;
               setDirty(false);
               dirtyRef.current = false;
               setIssues([]);
@@ -834,6 +920,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
             disabled={
               !dirty ||
               saving ||
+              deleting ||
               markdownEditing ||
               Boolean(remoteConflict) ||
               remoteDeleted

@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import type { Experiment, Member } from "@/lib/types";
 import { duplicateExperiment } from "@/lib/experiments/repository";
 import { formatExperimentId } from "@/lib/experiments/policy";
@@ -21,6 +27,9 @@ export default function DuplicateExperimentDialog({
   const mounted = useRef(false);
   const generation = useRef(0);
   const pending = useRef<object | null>(null);
+  const previousOpen = useRef(false);
+  const sessionSourceRef = useRef(source);
+  const [sessionSource, setSessionSource] = useState(source);
   const [name, setName] = useState(`${source.name} copy`);
   const [ownerId, setOwnerId] = useState(source.owner_id ?? "");
   const [saving, setSaving] = useState(false);
@@ -35,15 +44,29 @@ export default function DuplicateExperimentDialog({
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const opening = open && !previousOpen.current;
+    const sourceChanged = open && sessionSourceRef.current.id !== source.id;
+    const closing = !open && previousOpen.current;
+    previousOpen.current = open;
+
+    if (closing) {
+      generation.current += 1;
+      pending.current = null;
+      setSaving(false);
+      return;
+    }
+    if (!opening && !sourceChanged) return;
+
     generation.current += 1;
     pending.current = null;
-    setSaving(false);
-    if (!open) return;
+    sessionSourceRef.current = source;
+    setSessionSource(source);
     setName(`${source.name} copy`);
     setOwnerId(source.owner_id ?? "");
+    setSaving(false);
     setError("");
-  }, [open, source.id, source.name, source.owner_id]);
+  }, [open, source]);
 
   if (!open) return null;
 
@@ -61,7 +84,7 @@ export default function DuplicateExperimentDialog({
     setSaving(true);
     setError("");
     try {
-      const experiment = await duplicateExperiment(source, {
+      const experiment = await duplicateExperiment(sessionSourceRef.current, {
         name: name.trim(),
         ownerId,
       });
@@ -127,7 +150,8 @@ export default function DuplicateExperimentDialog({
         </header>
         <form onSubmit={submit} aria-busy={saving}>
           <div className="baseline-confirmation">
-            Baseline = {formatExperimentId(source.experiment_no)} · {source.name}
+            Baseline = {formatExperimentId(sessionSource.experiment_no)} ·{" "}
+            {sessionSource.name}
           </div>
           <p>Copies: Task, Owner, Data, Object, Environment, Config</p>
           <p>Clears: Result, Decision, Note, attachments, timeline, run times</p>

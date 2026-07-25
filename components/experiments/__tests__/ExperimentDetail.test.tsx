@@ -8,9 +8,13 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Experiment, Member } from "@/lib/types";
-import type { ExperimentBundle } from "@/lib/experiments/repository";
+import type {
+  ExperimentBundle,
+  ExperimentUpdateResult,
+} from "@/lib/experiments/repository";
 import ExperimentDetail from "@/components/experiments/ExperimentDetail";
 import {
+  deleteExperiment,
   loadExperimentBundle,
   updateExperiment,
   watchExperiment,
@@ -106,6 +110,16 @@ vi.mock("@/components/experiments/ResultEditor", () => ({
   default: () => null,
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
+    resolve = next;
+    reject = fail;
+  });
+  return { promise, reject, resolve };
+}
+
 const member = {
   id: "00000000-0000-4000-8000-000000000020",
   name: "Bruce",
@@ -180,7 +194,10 @@ describe("ExperimentDetail orchestration", () => {
     testState.experimentChanged = undefined;
     testState.relatedChanged = undefined;
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("shows a real load error and retries the bundle request", async () => {
     vi.mocked(loadExperimentBundle)
@@ -226,6 +243,188 @@ describe("ExperimentDetail orchestration", () => {
         owner_id: member.id,
       }),
     ));
+  });
+
+  it("preserves edits made while save is pending and advances the server snapshot", async () => {
+    const current = experiment();
+    const firstSave = deferred<ExperimentUpdateResult>();
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(current));
+    vi.mocked(updateExperiment)
+      .mockReturnValueOnce(firstSave.promise)
+      .mockResolvedValueOnce({
+        ok: true,
+        experiment: experiment({
+          name: "Second",
+          updated_at: "2026-07-24T03:00:00.000Z",
+        }),
+      });
+    render(<ExperimentDetail id={current.id} />);
+
+    const name = await screen.findByLabelText("Experiment Name");
+    fireEvent.change(name, { target: { value: "First" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenCalledTimes(1));
+    fireEvent.change(name, { target: { value: "Second" } });
+
+    await act(async () => {
+      firstSave.resolve({
+        ok: true,
+        experiment: experiment({
+          name: "First",
+          updated_at: "2026-07-24T02:00:00.000Z",
+        }),
+      });
+    });
+
+    expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
+      .toBe("Second");
+    expect(screen.getByText("Unsaved changes")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenNthCalledWith(
+      2,
+      current.id,
+      "2026-07-24T02:00:00.000Z",
+      expect.objectContaining({ name: "Second" }),
+    ));
+  });
+
+  it("lets a newer realtime snapshot establish state before initial load resolves", async () => {
+    const initial = deferred<ExperimentBundle | null>();
+    const realtime = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValueOnce(realtime.promise);
+    render(<ExperimentDetail id={experiment().id} />);
+
+    act(() => testState.experimentChanged?.());
+    await act(async () => {
+      realtime.resolve(bundle(experiment({
+        name: "Realtime newer",
+        updated_at: "2026-07-24T02:00:00.000Z",
+      })));
+    });
+    expect(await screen.findByDisplayValue("Realtime newer")).toBeDefined();
+
+    await act(async () => {
+      initial.resolve(bundle(experiment({ name: "Initial older" })));
+    });
+    expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
+      .toBe("Realtime newer");
+  });
+
+  it("does not regress a newer conflict snapshot with an older realtime response", async () => {
+    const current = experiment();
+    const olderRealtime = deferred<ExperimentBundle | null>();
+    const newerConflict = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValueOnce(bundle(experiment({
+        name: "First conflict",
+        updated_at: "2026-07-24T02:00:00.000Z",
+      })))
+      .mockReturnValueOnce(olderRealtime.promise)
+      .mockReturnValueOnce(newerConflict.promise);
+    render(<ExperimentDetail id={current.id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Local" },
+    });
+    act(() => testState.experimentChanged?.());
+    expect(await screen.findByText(/Remote: First conflict/)).toBeDefined();
+    act(() => testState.experimentChanged?.());
+    fireEvent.click(screen.getByRole("button", {
+      name: "Keep editing / refresh comparison",
+    }));
+    await act(async () => {
+      newerConflict.resolve(bundle(experiment({
+        name: "Newer conflict",
+        updated_at: "2026-07-24T04:00:00.000Z",
+      })));
+    });
+    expect(await screen.findByText(/Remote: Newer conflict/)).toBeDefined();
+
+    await act(async () => {
+      olderRealtime.resolve(bundle(experiment({
+        name: "Older realtime",
+        updated_at: "2026-07-24T03:00:00.000Z",
+      })));
+    });
+    expect(screen.getByText(/Remote: Newer conflict/)).toBeDefined();
+    expect(screen.queryByText(/Remote: Older realtime/)).toBeNull();
+  });
+
+  it("ignores a stale initial error after realtime accepted a snapshot", async () => {
+    const initial = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockReturnValueOnce(initial.promise)
+      .mockResolvedValueOnce(bundle(experiment({
+        name: "Realtime accepted",
+        updated_at: "2026-07-24T02:00:00.000Z",
+      })));
+    render(<ExperimentDetail id={experiment().id} />);
+
+    act(() => testState.experimentChanged?.());
+    expect(await screen.findByDisplayValue("Realtime accepted")).toBeDefined();
+    await act(async () => {
+      initial.reject(new Error("stale initial failure"));
+    });
+
+    expect(screen.queryByText(/stale initial failure/)).toBeNull();
+    expect(screen.getByDisplayValue("Realtime accepted")).toBeDefined();
+  });
+
+  it("accepts an older pending initial success after a newer realtime read fails", async () => {
+    const initial = deferred<ExperimentBundle | null>();
+    const realtime = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValueOnce(realtime.promise);
+    render(<ExperimentDetail id={experiment().id} />);
+
+    act(() => testState.experimentChanged?.());
+    await act(async () => {
+      realtime.reject(new Error("newer realtime failure"));
+    });
+    await act(async () => {
+      initial.resolve(bundle(experiment({ name: "Initial usable" })));
+    });
+
+    expect(await screen.findByDisplayValue("Initial usable")).toBeDefined();
+    expect(screen.queryByText(/newer realtime failure/)).toBeNull();
+  });
+
+  it("invalidates a pre-save realtime read after save succeeds", async () => {
+    const current = experiment();
+    const staleRealtime = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockReturnValueOnce(staleRealtime.promise)
+      .mockResolvedValue(bundle(current));
+    vi.mocked(updateExperiment).mockResolvedValue({
+      ok: true,
+      experiment: experiment({
+        name: "Saved",
+        updated_at: "2026-07-24T03:00:00.000Z",
+      }),
+    });
+    render(<ExperimentDetail id={current.id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Saved" },
+    });
+    act(() => testState.experimentChanged?.());
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/Saved · updated/)).toBeDefined();
+
+    await act(async () => {
+      staleRealtime.resolve(bundle(experiment({
+        name: "Pre-save remote",
+        updated_at: "2026-07-24T02:00:00.000Z",
+      })));
+    });
+    expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
+      .toBe("Saved");
+    expect(screen.queryByText("This experiment changed remotely.")).toBeNull();
   });
 
   it("preserves a dirty draft when realtime reports a remote change", async () => {
@@ -308,5 +507,78 @@ describe("ExperimentDetail orchestration", () => {
       expect.any(Function),
       expect.any(Function),
     );
+  });
+
+  it("does not start delete while save is pending", async () => {
+    const saveRequest = deferred<ExperimentUpdateResult>();
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(experiment()));
+    vi.mocked(updateExperiment).mockReturnValue(saveRequest.promise);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExperimentDetail id={experiment().id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Saving" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenCalledTimes(1));
+    const deleteButton = screen.getByRole("button", { name: "Delete" });
+    expect((deleteButton as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(deleteButton);
+    expect(deleteExperiment).not.toHaveBeenCalled();
+
+    await act(async () => {
+      saveRequest.resolve({
+        ok: true,
+        experiment: experiment({
+          name: "Saving",
+          updated_at: "2026-07-24T02:00:00.000Z",
+        }),
+      });
+    });
+  });
+
+  it("does not start save while delete is pending", async () => {
+    const deleteRequest = deferred<void>();
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(experiment()));
+    vi.mocked(deleteExperiment).mockReturnValue(deleteRequest.promise);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExperimentDetail id={experiment().id} />);
+
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Dirty before delete" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleteExperiment).toHaveBeenCalledTimes(1));
+    const saveButton = screen.getByRole("button", { name: "Save changes" });
+    expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(saveButton);
+    expect(updateExperiment).not.toHaveBeenCalled();
+
+    await act(async () => deleteRequest.resolve());
+  });
+
+  it("shows a Storage cleanup error after realtime switches to not-found", async () => {
+    const deleteRequest = deferred<void>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(experiment()))
+      .mockResolvedValueOnce(null);
+    vi.mocked(deleteExperiment).mockReturnValue(deleteRequest.promise);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExperimentDetail id={experiment().id} />);
+
+    await screen.findByLabelText("Experiment Name");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    act(() => testState.experimentChanged?.());
+    expect(await screen.findByText("Experiment not found. It may have been deleted."))
+      .toBeDefined();
+    await act(async () => {
+      deleteRequest.reject(new Error(
+        "Experiment was deleted, but Storage cleanup failed: denied",
+      ));
+    });
+
+    expect(await screen.findByText(
+      /Experiment was deleted, but Storage cleanup failed: denied/,
+    )).toBeDefined();
   });
 });

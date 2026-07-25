@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { KIND_COLOR } from "@/lib/activity";
 import { addExperimentTimelineNote } from "@/lib/experiments/repository";
 import { fmtDate, relTime } from "@/lib/time";
@@ -16,18 +16,11 @@ export default function ExperimentTimeline({
   onChanged: () => void;
 }) {
   const mounted = useRef(false);
-  const identity = useRef({ id: experiment.id, generation: 0 });
+  const committedIdentity = useRef({ id: experiment.id, generation: 0 });
   const pending = useRef(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-
-  if (identity.current.id !== experiment.id) {
-    identity.current = {
-      id: experiment.id,
-      generation: identity.current.generation + 1,
-    };
-  }
 
   useEffect(() => {
     mounted.current = true;
@@ -36,7 +29,13 @@ export default function ExperimentTimeline({
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (committedIdentity.current.id !== experiment.id) {
+      committedIdentity.current = {
+        id: experiment.id,
+        generation: committedIdentity.current.generation + 1,
+      };
+    }
     pending.current = false;
     setNote("");
     setError("");
@@ -45,7 +44,7 @@ export default function ExperimentTimeline({
 
   async function addNote() {
     if (!note.trim() || pending.current) return;
-    const operationGeneration = identity.current.generation;
+    const operationIdentity = committedIdentity.current;
     pending.current = true;
     setSaving(true);
     setError("");
@@ -53,7 +52,7 @@ export default function ExperimentTimeline({
       await addExperimentTimelineNote(experiment, note);
       if (
         mounted.current &&
-        identity.current.generation === operationGeneration
+        committedIdentity.current === operationIdentity
       ) {
         setNote("");
         onChanged();
@@ -61,7 +60,7 @@ export default function ExperimentTimeline({
     } catch (caught) {
       if (
         mounted.current &&
-        identity.current.generation === operationGeneration
+        committedIdentity.current === operationIdentity
       ) {
         setError(
           caught instanceof Error
@@ -70,7 +69,7 @@ export default function ExperimentTimeline({
         );
       }
     } finally {
-      if (identity.current.generation === operationGeneration) {
+      if (committedIdentity.current === operationIdentity) {
         pending.current = false;
         if (mounted.current) setSaving(false);
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   deleteExperimentAttachment,
   updateExperimentAttachment,
@@ -98,20 +98,13 @@ export default function AttachmentGallery({
   onChanged: () => void;
 }) {
   const mounted = useRef(false);
-  const identity = useRef({ id: experiment.id, generation: 0 });
+  const committedIdentity = useRef({ id: experiment.id, generation: 0 });
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadPending = useRef(false);
   const deletingIdsRef = useRef<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState("");
-
-  if (identity.current.id !== experiment.id) {
-    identity.current = {
-      id: experiment.id,
-      generation: identity.current.generation + 1,
-    };
-  }
 
   useEffect(() => {
     mounted.current = true;
@@ -120,7 +113,13 @@ export default function AttachmentGallery({
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (committedIdentity.current.id !== experiment.id) {
+      committedIdentity.current = {
+        id: experiment.id,
+        generation: committedIdentity.current.generation + 1,
+      };
+    }
     uploadPending.current = false;
     deletingIdsRef.current = new Set();
     setUploading(false);
@@ -130,7 +129,7 @@ export default function AttachmentGallery({
 
   async function upload(files: FileList) {
     if (uploadPending.current) return;
-    const operationGeneration = identity.current.generation;
+    const operationIdentity = committedIdentity.current;
     uploadPending.current = true;
     setUploading(true);
     setError("");
@@ -144,14 +143,14 @@ export default function AttachmentGallery({
       }
       if (
         mounted.current &&
-        identity.current.generation === operationGeneration
+        committedIdentity.current === operationIdentity
       ) {
         onChanged();
       }
     } catch (caught) {
       if (
         mounted.current &&
-        identity.current.generation === operationGeneration
+        committedIdentity.current === operationIdentity
       ) {
         setError(
           caught instanceof Error
@@ -160,7 +159,7 @@ export default function AttachmentGallery({
         );
       }
     } finally {
-      if (identity.current.generation === operationGeneration) {
+      if (committedIdentity.current === operationIdentity) {
         uploadPending.current = false;
         if (mounted.current) setUploading(false);
       }
@@ -174,7 +173,7 @@ export default function AttachmentGallery({
     ) {
       return;
     }
-    const operationGeneration = identity.current.generation;
+    const operationIdentity = committedIdentity.current;
     deletingIdsRef.current.add(attachment.id);
     setDeletingIds((current) => new Set(current).add(attachment.id));
     setError("");
@@ -182,21 +181,21 @@ export default function AttachmentGallery({
       await deleteExperimentAttachment(attachment);
       if (
         mounted.current &&
-        identity.current.generation === operationGeneration
+        committedIdentity.current === operationIdentity
       ) {
         onChanged();
       }
     } catch (caught) {
       if (
         mounted.current &&
-        identity.current.generation === operationGeneration
+        committedIdentity.current === operationIdentity
       ) {
         setError(
           caught instanceof Error ? caught.message : "Could not delete image.",
         );
       }
     } finally {
-      if (identity.current.generation !== operationGeneration) return;
+      if (committedIdentity.current !== operationIdentity) return;
       deletingIdsRef.current.delete(attachment.id);
       if (mounted.current) {
         setDeletingIds((current) => {

@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { startTransition, Suspense, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Activity,
@@ -604,5 +605,69 @@ describe("experiment evidence", () => {
     });
     expect(onAttachmentA2).toHaveBeenCalledTimes(1);
     expect(onTimelineA2).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not invalidate committed work when a new identity render is discarded", async () => {
+    const experimentA = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
+    const experimentB = row("00000000-0000-4000-8000-000000000003", 0.3, "npu:2");
+    const upload = deferred<void>();
+    const note = deferred<void>();
+    const never = new Promise<void>(() => undefined);
+    vi.mocked(uploadExperimentAttachment).mockReturnValue(upload.promise);
+    vi.mocked(addExperimentTimelineNote).mockReturnValue(note.promise);
+    const onAttachmentChanged = vi.fn();
+    const onTimelineChanged = vi.fn();
+    let showExperiment!: (experiment: ExperimentListRow) => void;
+
+    function SuspendForB({ id }: { id: string }) {
+      if (id === experimentB.id) throw never;
+      return null;
+    }
+
+    function Harness() {
+      const [experiment, setExperiment] = useState(experimentA);
+      showExperiment = setExperiment;
+      return (
+        <Suspense fallback={<p>Loading experiment</p>}>
+          <AttachmentGallery
+            experiment={experiment}
+            attachments={[]}
+            onChanged={onAttachmentChanged}
+          />
+          <ExperimentTimeline
+            experiment={experiment}
+            activity={[]}
+            onChanged={onTimelineChanged}
+          />
+          <SuspendForB id={experiment.id} />
+        </Suspense>
+      );
+    }
+
+    const view = render(<Harness />);
+    fireEvent.change(view.container.querySelector('input[type="file"]')!, {
+      target: {
+        files: [new File(["plot"], "plot.png", { type: "image/png" })],
+      },
+    });
+    fireEvent.change(screen.getByLabelText("Experiment timeline note"), {
+      target: { value: "Committed A note" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+
+    act(() => {
+      startTransition(() => showExperiment(experimentB));
+    });
+    expect(screen.queryByText("Loading experiment")).toBeNull();
+    expect(screen.getByRole("button", { name: "Uploading…" })).toBeDefined();
+
+    await act(async () => {
+      upload.resolve();
+      note.resolve();
+      await Promise.all([upload.promise, note.promise]);
+    });
+    expect(onAttachmentChanged).toHaveBeenCalledTimes(1);
+    expect(onTimelineChanged).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Upload images" })).toBeDefined();
   });
 });

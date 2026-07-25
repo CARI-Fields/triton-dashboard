@@ -36,4 +36,30 @@ describe("compare URL state", () => {
       `ids=${encodeURIComponent(`${first},${second}`)}`,
     );
   });
+
+  it("serializes valid IDs once and pins an absent Baseline first", () => {
+    const query = serializeCompareSelection({
+      ids: [second, "invalid", second],
+      baselineId: first,
+    });
+    const params = new URLSearchParams(query);
+    expect(params.get("ids")).toBe(`${first},${second}`);
+    expect(params.get("baseline")).toBe(first);
+  });
+
+  it("pins a later valid Baseline and omits an invalid Baseline", () => {
+    const pinned = new URLSearchParams(serializeCompareSelection({
+      ids: [second, first],
+      baselineId: first,
+    }));
+    expect(pinned.get("ids")).toBe(`${first},${second}`);
+    expect(pinned.get("baseline")).toBe(first);
+
+    const invalid = new URLSearchParams(serializeCompareSelection({
+      ids: ["invalid", second],
+      baselineId: "invalid",
+    }));
+    expect(invalid.get("ids")).toBe(second);
+    expect(invalid.has("baseline")).toBe(false);
+  });
 });

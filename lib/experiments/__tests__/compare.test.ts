@@ -94,6 +94,30 @@ describe("comparison derivation", () => {
     ).toBeNull();
   });
 
+  it.each([
+    [Number.NaN, 0.1],
+    [Number.POSITIVE_INFINITY, 0.1],
+    [0.2, Number.NaN],
+    [0.2, Number.NEGATIVE_INFINITY],
+  ])("uses a null Delta when a metric is non-finite (%s, %s)", (currentMetric, baselineMetric) => {
+    const baseline = {
+      ...experiment("00000000-0000-4000-8000-000000000001", 0.1, "npu:0"),
+      metrics: { "pass@1": baselineMetric },
+    };
+    const current = {
+      ...experiment("00000000-0000-4000-8000-000000000002", 0.2, "npu:1"),
+      metrics: { "pass@1": currentMetric },
+    };
+    const columns = buildCompareColumns([baseline, current], {
+      groups: ["result"],
+      baselineId: baseline.id,
+      diffOnly: false,
+    });
+    expect(
+      columns.find((column) => column.key === "result.metrics.pass@1.delta")?.values[current.id],
+    ).toBeNull();
+  });
+
   it("returns only changed context and removes all-equal fields in Diff only mode", () => {
     const baseline = experiment("00000000-0000-4000-8000-000000000001", 0.1, "npu:0");
     const current = experiment("00000000-0000-4000-8000-000000000002", 0.2, "npu:1");

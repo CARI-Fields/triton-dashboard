@@ -35,8 +35,14 @@ export function parseCompareSearchParams(params: CompareSearchParams): CompareSe
 
 export function serializeCompareSelection(selection: CompareSelection): string {
   const params = new URLSearchParams();
-  const ids = [...new Set(selection.ids)];
-  if (ids.length > 0) params.set("ids", ids.join(","));
-  if (selection.baselineId) params.set("baseline", selection.baselineId);
+  const baselineId = selection.baselineId && UUID.test(selection.baselineId)
+    ? selection.baselineId
+    : null;
+  const ids = [...new Set(selection.ids.filter((id) => UUID.test(id)))];
+  const orderedIds = baselineId
+    ? [baselineId, ...ids.filter((id) => id !== baselineId)]
+    : ids;
+  if (orderedIds.length > 0) params.set("ids", orderedIds.join(","));
+  if (baselineId) params.set("baseline", baselineId);
   return params.toString();
 }

@@ -137,6 +137,10 @@ function sameValue(left: CompareValue, right: CompareValue): boolean {
   return Object.is(left, right);
 }
 
+function isFiniteNumber(value: CompareValue): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export function compareContexts(
   current: Experiment,
   baseline: Experiment,
@@ -215,7 +219,7 @@ export function buildCompareColumns(
       const baselineValue = values[baseline.id];
       const deltas = Object.fromEntries(experiments.map((experiment) => {
         const currentValue = values[experiment.id];
-        const delta = typeof currentValue === "number" && typeof baselineValue === "number"
+        const delta = isFiniteNumber(currentValue) && isFiniteNumber(baselineValue)
           ? currentValue - baselineValue
           : null;
         return [experiment.id, delta];

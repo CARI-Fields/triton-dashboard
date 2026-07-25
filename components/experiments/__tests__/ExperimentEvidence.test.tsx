@@ -98,7 +98,7 @@ function row(id: string, passAt1: number, device: string): ExperimentListRow {
 }
 
 describe("experiment evidence", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => vi.resetAllMocks());
   afterEach(cleanup);
 
   it("marks an existing numeric metric as featured", () => {
@@ -598,7 +598,9 @@ describe("experiment evidence", () => {
       created_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const captionSave = deferred<void>();
-    vi.mocked(updateExperimentAttachment).mockReturnValue(captionSave.promise);
+    vi.mocked(updateExperimentAttachment)
+      .mockReturnValueOnce(captionSave.promise)
+      .mockResolvedValueOnce();
     const onChanged = vi.fn();
     let showExperimentB!: () => void;
 
@@ -632,7 +634,16 @@ describe("experiment evidence", () => {
 
     expect(onChanged).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByLabelText("Caption for A caption")).toBeDefined();
+    const currentCaption = screen.getByLabelText(
+      "Caption for A caption",
+    ) as HTMLInputElement;
+    expect(currentCaption.disabled).toBe(false);
+    expect(currentCaption.value).toBe("A caption");
+
+    fireEvent.change(currentCaption, { target: { value: "Fresh B update" } });
+    fireEvent.blur(currentCaption);
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(updateExperimentAttachment).toHaveBeenCalledTimes(2);
   });
 
   it("adds only an explicit manual note and renders trigger-owned Activity", async () => {

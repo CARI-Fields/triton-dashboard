@@ -26,6 +26,7 @@ function AttachmentFigure({
   onCaptionError,
   onChanged,
   onDelete,
+  visitId,
 }: {
   attachment: Attachment;
   committedVisit: MutableRefObject<CommittedVisit>;
@@ -33,9 +34,10 @@ function AttachmentFigure({
   onCaptionError: (message: string) => void;
   onChanged: () => void;
   onDelete: () => void;
+  visitId: string;
 }) {
   const mounted = useRef(false);
-  const captionPending = useRef(false);
+  const pendingVisit = useRef<CommittedVisit | null>(null);
   const [caption, setCaption] = useState(attachment.caption);
   const [savingCaption, setSavingCaption] = useState(false);
 
@@ -46,11 +48,19 @@ function AttachmentFigure({
     };
   }, []);
   useEffect(() => setCaption(attachment.caption), [attachment.caption]);
+  useLayoutEffect(() => {
+    pendingVisit.current = null;
+    setCaption(attachment.caption);
+    setSavingCaption(false);
+    onCaptionError("");
+    // Reset only when a different Experiment visit commits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visitId]);
 
   async function saveCaption() {
-    if (caption === attachment.caption || captionPending.current) return;
+    if (caption === attachment.caption || pendingVisit.current) return;
     const operationVisit = committedVisit.current;
-    captionPending.current = true;
+    pendingVisit.current = operationVisit;
     setSavingCaption(true);
     onCaptionError("");
     try {
@@ -65,9 +75,11 @@ function AttachmentFigure({
         );
       }
     } finally {
-      captionPending.current = false;
-      if (mounted.current && committedVisit.current === operationVisit) {
-        setSavingCaption(false);
+      if (pendingVisit.current === operationVisit) {
+        pendingVisit.current = null;
+        if (mounted.current && committedVisit.current === operationVisit) {
+          setSavingCaption(false);
+        }
       }
     }
   }
@@ -257,6 +269,7 @@ export default function AttachmentGallery({
                 onCaptionError={setError}
                 onChanged={onChanged}
                 onDelete={() => void remove(attachment)}
+                visitId={experiment.id}
               />
             ))}
           </div>

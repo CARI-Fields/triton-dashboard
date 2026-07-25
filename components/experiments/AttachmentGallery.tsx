@@ -250,7 +250,7 @@ export default function AttachmentGallery({
           <div className="experiment-image-grid">
             {attachments.map((attachment) => (
               <AttachmentFigure
-                key={`${experiment.id}-${attachment.id}`}
+                key={attachment.id}
                 attachment={attachment}
                 committedVisit={committedIdentity}
                 deleting={deletingIds.has(attachment.id)}

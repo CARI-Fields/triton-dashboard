@@ -6,7 +6,12 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { startTransition, Suspense, useState } from "react";
+import {
+  startTransition,
+  Suspense,
+  useLayoutEffect,
+  useState,
+} from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Activity,
@@ -577,6 +582,57 @@ describe("experiment evidence", () => {
     expect(onChangedA2).not.toHaveBeenCalled();
     expect(currentCaption.value).toBe("Fresh A draft");
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("suppresses a stale caption error before passive unmount cleanup", async () => {
+    const experimentA = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
+    const experimentB = row("00000000-0000-4000-8000-000000000003", 0.3, "npu:2");
+    const attachmentA = {
+      id: "attachment-a",
+      task_id: experimentA.task_id,
+      experiment_id: experimentA.id,
+      url: "https://example.test/a.png",
+      path: "plots/a.png",
+      caption: "A caption",
+      position: 0,
+      created_at: "2026-07-24T00:00:00.000Z",
+    } satisfies Attachment;
+    const captionSave = deferred<void>();
+    vi.mocked(updateExperimentAttachment).mockReturnValue(captionSave.promise);
+    const onChanged = vi.fn();
+    let showExperimentB!: () => void;
+
+    function Harness() {
+      const [experiment, setExperiment] = useState(experimentA);
+      showExperimentB = () => setExperiment(experimentB);
+      useLayoutEffect(() => {
+        if (experiment.id === experimentB.id) {
+          captionSave.reject(new Error("Old caption failed."));
+        }
+      }, [experiment.id]);
+      return (
+        <AttachmentGallery
+          experiment={experiment}
+          attachments={[attachmentA]}
+          onChanged={onChanged}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.change(screen.getByLabelText("Caption for A caption"), {
+      target: { value: "Old A update" },
+    });
+    fireEvent.blur(screen.getByLabelText("Caption for A caption"));
+
+    act(() => showExperimentB());
+    await act(async () => {
+      await captionSave.promise.catch(() => undefined);
+    });
+
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByLabelText("Caption for A caption")).toBeDefined();
   });
 
   it("adds only an explicit manual note and renders trigger-owned Activity", async () => {

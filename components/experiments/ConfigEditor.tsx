@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { ConfigValue, ExperimentConfig } from "@/lib/types";
 
 type ValueType = "string" | "number" | "boolean" | "null";
@@ -16,6 +17,29 @@ function changeType(type: ValueType): ConfigValue {
   return "";
 }
 
+function ConfigKeyInput({
+  configKey,
+  onRename,
+}: {
+  configKey: string;
+  onRename: (nextKey: string) => boolean;
+}) {
+  const [draft, setDraft] = useState(configKey);
+
+  useEffect(() => setDraft(configKey), [configKey]);
+
+  return (
+    <input
+      aria-label={`${configKey} key`}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (!onRename(draft)) setDraft(configKey);
+      }}
+    />
+  );
+}
+
 export default function ConfigEditor({
   value,
   onChange,
@@ -23,14 +47,13 @@ export default function ConfigEditor({
   value: ExperimentConfig;
   onChange: (value: ExperimentConfig) => void;
 }) {
-  function rename(oldKey: string, newKey: string) {
+  function rename(oldKey: string, newKey: string): boolean {
     const trimmed = newKey.trim();
-    if (!trimmed || trimmed === oldKey || Object.hasOwn(value, trimmed)) return;
-    const next = { ...value };
-    const currentValue = next[oldKey];
-    delete next[oldKey];
-    next[trimmed] = currentValue;
-    onChange(next);
+    if (!trimmed || trimmed === oldKey || Object.hasOwn(value, trimmed)) return false;
+    onChange(Object.fromEntries(
+      Object.entries(value).map(([key, current]) => [key === oldKey ? trimmed : key, current]),
+    ));
+    return true;
   }
 
   function setValue(key: string, raw: string) {
@@ -51,7 +74,7 @@ export default function ConfigEditor({
   function add() {
     let index = Object.keys(value).length + 1;
     let key = `parameter_${index}`;
-    while (key in value) {
+    while (Object.hasOwn(value, key)) {
       index += 1;
       key = `parameter_${index}`;
     }
@@ -62,11 +85,7 @@ export default function ConfigEditor({
     <div className="key-value-editor">
       {Object.entries(value).map(([key, current]) => (
         <div className="key-value-row" key={key}>
-          <input
-            aria-label={`${key} key`}
-            defaultValue={key}
-            onBlur={(event) => rename(key, event.target.value)}
-          />
+          <ConfigKeyInput configKey={key} onRename={(nextKey) => rename(key, nextKey)} />
           <select
             aria-label={`${key} type`}
             value={valueType(current)}

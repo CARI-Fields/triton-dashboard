@@ -147,6 +147,7 @@ describe("experiment evidence", () => {
       featuredMetricKeys: ["accuracy"],
       resultSummary: "",
     });
+    expect((name as HTMLInputElement).value).toBe("pass@1");
 
     rerender(
       <ResultEditor
@@ -162,6 +163,38 @@ describe("experiment evidence", () => {
       featuredMetricKeys: [],
       resultSummary: "",
     });
+  });
+
+  it("reconciles metric values to authoritative props on reject and accept", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <ResultEditor
+        metrics={{ latency: 12 }}
+        featuredMetricKeys={[]}
+        resultSummary=""
+        onChange={onChange}
+      />,
+    );
+
+    const input = screen.getByLabelText("latency metric value") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "10" } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      metrics: { latency: 10 },
+      featuredMetricKeys: [],
+      resultSummary: "",
+    });
+    expect(input.value).toBe("12");
+
+    rerender(
+      <ResultEditor
+        metrics={{ latency: 10 }}
+        featuredMetricKeys={[]}
+        resultSummary=""
+        onChange={onChange}
+      />,
+    );
+    expect((screen.getByLabelText("latency metric value") as HTMLInputElement).value)
+      .toBe("10");
   });
 
   it("never displays or emits non-finite metrics", () => {
@@ -221,6 +254,31 @@ describe("experiment evidence", () => {
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
   });
 
+  it("closes active Markdown editing once on unmount without idle churn", () => {
+    const idleChange = vi.fn();
+    const idle = render(
+      <MarkdownField
+        value=""
+        onSave={() => undefined}
+        onEditingChange={idleChange}
+      />,
+    );
+    idle.unmount();
+    expect(idleChange).not.toHaveBeenCalled();
+
+    const activeChange = vi.fn();
+    const active = render(
+      <MarkdownField
+        value=""
+        onSave={() => undefined}
+        onEditingChange={activeChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button"));
+    active.unmount();
+    expect(activeChange.mock.calls).toEqual([[true], [false]]);
+  });
+
   it("emits only exact Decision outcomes and saved notes", () => {
     const onChange = vi.fn();
     render(
@@ -265,6 +323,16 @@ describe("experiment evidence", () => {
     const options = screen.getAllByRole("option");
     expect(options[1].textContent).toContain("run-3");
     expect(options[2].textContent).toContain("run-4");
+    expect(screen.getByText(
+      "Cross-Task Baseline: Different Task · 1 context fields differ.",
+    )).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Search Baseline experiments"), {
+      target: { value: "run-3" },
+    });
+    const select = screen.getByLabelText("Baseline") as HTMLSelectElement;
+    expect(select.value).toBe(crossTask.id);
+    expect(screen.getAllByRole("option", { name: /run-4/ })).toHaveLength(1);
     expect(screen.getByText(
       "Cross-Task Baseline: Different Task · 1 context fields differ.",
     )).toBeDefined();
@@ -422,5 +490,76 @@ describe("experiment evidence", () => {
     });
     expect(onAttachmentChanged).not.toHaveBeenCalled();
     expect(onTimelineChanged).not.toHaveBeenCalled();
+  });
+
+  it("isolates pending async work when the controlled experiment identity changes", async () => {
+    const experimentA = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
+    const experimentB = row("00000000-0000-4000-8000-000000000003", 0.3, "npu:2");
+    const upload = deferred<void>();
+    const note = deferred<void>();
+    vi.mocked(uploadExperimentAttachment).mockReturnValue(upload.promise);
+    vi.mocked(addExperimentTimelineNote).mockReturnValue(note.promise);
+    const onAttachmentA = vi.fn();
+    const onAttachmentB = vi.fn();
+    const attachmentRender = render(
+      <AttachmentGallery
+        experiment={experimentA}
+        attachments={[]}
+        onChanged={onAttachmentA}
+      />,
+    );
+    fireEvent.change(
+      attachmentRender.container.querySelector('input[type="file"]')!,
+      {
+        target: {
+          files: [new File(["plot"], "plot.png", { type: "image/png" })],
+        },
+      },
+    );
+    attachmentRender.rerender(
+      <AttachmentGallery
+        experiment={experimentB}
+        attachments={[]}
+        onChanged={onAttachmentB}
+      />,
+    );
+    expect((screen.getByRole("button", { name: "Upload images" }) as HTMLButtonElement).disabled)
+      .toBe(false);
+
+    const onTimelineA = vi.fn();
+    const onTimelineB = vi.fn();
+    const timelineRender = render(
+      <ExperimentTimeline
+        experiment={experimentA}
+        activity={[]}
+        onChanged={onTimelineA}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Experiment timeline note"), {
+      target: { value: "A note" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    timelineRender.rerender(
+      <ExperimentTimeline
+        experiment={experimentB}
+        activity={[]}
+        onChanged={onTimelineB}
+      />,
+    );
+    const noteInput = screen.getByLabelText(
+      "Experiment timeline note",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(noteInput, { target: { value: "B draft" } });
+
+    await act(async () => {
+      upload.resolve();
+      note.resolve();
+      await Promise.all([upload.promise, note.promise]);
+    });
+    expect(onAttachmentA).not.toHaveBeenCalled();
+    expect(onAttachmentB).not.toHaveBeenCalled();
+    expect(onTimelineA).not.toHaveBeenCalled();
+    expect(onTimelineB).not.toHaveBeenCalled();
+    expect(noteInput.value).toBe("B draft");
   });
 });

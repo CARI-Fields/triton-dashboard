@@ -17,9 +17,12 @@ export default function BaselinePicker({
   onChange: (id: string | null) => void;
 }) {
   const [search, setSearch] = useState("");
+  const selected = value
+    ? candidates.find((candidate) => candidate.id === value) ?? null
+    : null;
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return candidates
+    const matches = candidates
       .filter((candidate) => !query || [
         candidate.name,
         candidate.task?.title ?? "",
@@ -31,10 +34,11 @@ export default function BaselinePicker({
         return leftSameTask - rightSameTask ||
           right.updated_at.localeCompare(left.updated_at);
       });
-  }, [candidates, current.task_id, search]);
-  const selected = value
-    ? candidates.find((candidate) => candidate.id === value)
-    : null;
+    if (selected && !matches.some((candidate) => candidate.id === selected.id)) {
+      return [selected, ...matches];
+    }
+    return matches;
+  }, [candidates, current.task_id, search, selected]);
 
   return (
     <div className="baseline-picker">

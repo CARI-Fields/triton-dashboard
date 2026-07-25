@@ -32,6 +32,18 @@ export default function MarkdownField({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const editingRef = useRef(false);
+  const onEditingChangeRef = useRef(onEditingChange);
+
+  useEffect(() => {
+    onEditingChangeRef.current = onEditingChange;
+  }, [onEditingChange]);
+
+  useEffect(() => () => {
+    if (!editingRef.current) return;
+    editingRef.current = false;
+    onEditingChangeRef.current?.(false);
+  }, []);
 
   useEffect(() => {
     if (!editing) setDraft(value);
@@ -49,11 +61,13 @@ export default function MarkdownField({
   }, [editing]);
 
   function beginEditing() {
+    editingRef.current = true;
     setEditing(true);
     onEditingChange?.(true);
   }
 
   function commit() {
+    editingRef.current = false;
     setEditing(false);
     onEditingChange?.(false);
     const t = draft.replace(/\s+$/, "");
@@ -80,6 +94,7 @@ export default function MarkdownField({
               commit();
             }
             if (e.key === "Escape") {
+              editingRef.current = false;
               setDraft(value);
               setEditing(false);
               onEditingChange?.(false);

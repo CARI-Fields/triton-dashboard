@@ -31,7 +31,8 @@ function MetricKeyInput({
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => {
-        if (!onRename(draft)) setDraft(metricKey);
+        onRename(draft);
+        setDraft(metricKey);
       }}
     />
   );
@@ -46,26 +47,17 @@ function MetricValueInput({
   value: number;
   onChange: (value: number) => void;
 }) {
-  const [draft, setDraft] = useState(String(value));
-
-  useEffect(() => setDraft(String(value)), [value]);
-
   return (
     <input
       aria-label={`${metricKey} metric value`}
       type="number"
       step="any"
-      value={draft}
+      value={value}
       onChange={(event) => {
         const raw = event.target.value;
-        setDraft(raw);
         if (!raw.trim()) return;
         const next = Number(raw);
         if (Number.isFinite(next)) onChange(next);
-      }}
-      onBlur={() => {
-        const next = Number(draft);
-        if (!draft.trim() || !Number.isFinite(next)) setDraft(String(value));
       }}
     />
   );

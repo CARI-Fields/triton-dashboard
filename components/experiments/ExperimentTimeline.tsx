@@ -16,10 +16,13 @@ export default function ExperimentTimeline({
   onChanged: () => void;
 }) {
   const mounted = useRef(false);
+  const currentExperimentId = useRef(experiment.id);
   const pending = useRef(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  currentExperimentId.current = experiment.id;
 
   useEffect(() => {
     mounted.current = true;
@@ -28,19 +31,33 @@ export default function ExperimentTimeline({
     };
   }, []);
 
+  useEffect(() => {
+    pending.current = false;
+    setNote("");
+    setError("");
+    setSaving(false);
+  }, [experiment.id]);
+
   async function addNote() {
     if (!note.trim() || pending.current) return;
+    const operationExperimentId = experiment.id;
     pending.current = true;
     setSaving(true);
     setError("");
     try {
       await addExperimentTimelineNote(experiment, note);
-      if (mounted.current) {
+      if (
+        mounted.current &&
+        currentExperimentId.current === operationExperimentId
+      ) {
         setNote("");
         onChanged();
       }
     } catch (caught) {
-      if (mounted.current) {
+      if (
+        mounted.current &&
+        currentExperimentId.current === operationExperimentId
+      ) {
         setError(
           caught instanceof Error
             ? caught.message
@@ -48,8 +65,10 @@ export default function ExperimentTimeline({
         );
       }
     } finally {
-      pending.current = false;
-      if (mounted.current) setSaving(false);
+      if (currentExperimentId.current === operationExperimentId) {
+        pending.current = false;
+        if (mounted.current) setSaving(false);
+      }
     }
   }
 

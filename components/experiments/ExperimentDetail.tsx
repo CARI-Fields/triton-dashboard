@@ -71,7 +71,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
   const snapshotAcceptedRef = useRef(0);
   const snapshotErrorRef = useRef(0);
   const mutationRef = useRef<{
-    kind: "save" | "delete";
+    kind: "save" | "delete" | "reload";
     token: object;
   } | null>(null);
   const draftRevisionRef = useRef(0);
@@ -95,6 +95,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
   const [markdownEditing, setMarkdownEditing] = useState(false);
   const [markdownEpoch, setMarkdownEpoch] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const [reloadingLatest, setReloadingLatest] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
 
   useEffect(() => {
@@ -238,7 +239,10 @@ export default function ExperimentDetail({ id }: { id: string }) {
     }
   }, [isCurrentVisit]);
 
-  const loadRealtimeExperiment = useCallback(async (visit: Visit) => {
+  const loadRealtimeExperiment = useCallback(async (
+    visit: Visit,
+    acknowledged?: Experiment,
+  ) => {
     const sequence = ++snapshotIssuedRef.current;
     try {
       const next = await loadExperimentBundle(visit.id);
@@ -262,6 +266,18 @@ export default function ExperimentDetail({ id }: { id: string }) {
         setDraft(null);
         draftRef.current = null;
         draftRevisionRef.current = 0;
+        setRemoteDeleted(false);
+        return;
+      }
+      if (
+        acknowledged &&
+        next.experiment.id === acknowledged.id &&
+        next.experiment.updated_at === acknowledged.updated_at
+      ) {
+        setNotFound(false);
+        setBundle({ ...next, experiment: acknowledged });
+        setServer(acknowledged);
+        setRemoteConflict(null);
         setRemoteDeleted(false);
         return;
       }
@@ -370,6 +386,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
     setMarkdownEditing(false);
     setMarkdownEpoch((current) => current + 1);
     setDeleting(false);
+    setReloadingLatest(false);
     setDuplicateOpen(false);
     void loadInitial(visit);
     const unsubscribe = watchExperiment(
@@ -484,10 +501,9 @@ export default function ExperimentDetail({ id }: { id: string }) {
         setDirty(true);
         dirtyRef.current = true;
       }
-      setRemoteConflict(null);
-      setRemoteDeleted(false);
       setIssues([]);
-      await loadRelated(visit);
+      savingRef.current = false;
+      await loadRealtimeExperiment(visit, result.experiment);
     } catch (caught) {
       if (!isCurrentVisit(visit) || mutationRef.current !== mutation) return;
       setDetailError({
@@ -499,6 +515,48 @@ export default function ExperimentDetail({ id }: { id: string }) {
         mutationRef.current = null;
         setSaving(false);
         savingRef.current = false;
+      }
+    }
+  }
+
+  async function loadLatest() {
+    if (!remoteConflict || mutationRef.current) return;
+    if (!window.confirm(
+      "Discard the local draft and reload the remote version?",
+    )) {
+      return;
+    }
+    if (mutationRef.current) return;
+
+    const displayedRemote = remoteConflict;
+    const token = {};
+    const mutation = { kind: "reload" as const, token };
+    const visit = visitRef.current;
+    mutationRef.current = mutation;
+    setReloadingLatest(true);
+    setDetailError(null);
+    establishSnapshotBarrier();
+    setServer(displayedRemote);
+    setDraft(structuredClone(displayedRemote));
+    draftRef.current = displayedRemote;
+    draftRevisionRef.current = 0;
+    setBundle((current) => (
+      current
+        ? { ...current, experiment: displayedRemote }
+        : current
+    ));
+    setDirty(false);
+    dirtyRef.current = false;
+    markdownEditorsRef.current = new Set();
+    setMarkdownEditing(false);
+    setMarkdownEpoch((current) => current + 1);
+    setIssues([]);
+    try {
+      await loadRealtimeExperiment(visit);
+    } finally {
+      if (isCurrentVisit(visit) && mutationRef.current === mutation) {
+        mutationRef.current = null;
+        setReloadingLatest(false);
       }
     }
   }
@@ -555,6 +613,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
   }, [bundle, draft?.baseline_experiment_id]);
 
   const hasLocalChanges = dirty || markdownEditing;
+  const compareBlocked = hasLocalChanges || reloadingLatest;
   const visitLoading = loadedId !== id || loading;
 
   if (visitLoading) {
@@ -632,6 +691,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
               <button
                 type="button"
                 className="btn"
+                disabled={saving || deleting || reloadingLatest}
                 onClick={() => void refreshConflictComparison(visitRef.current)}
               >
                 Keep editing / refresh comparison
@@ -640,33 +700,10 @@ export default function ExperimentDetail({ id }: { id: string }) {
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => {
-                    if (!window.confirm(
-                      "Discard the local draft and reload the remote version?",
-                    )) {
-                      return;
-                    }
-                    establishSnapshotBarrier();
-                    setServer(remoteConflict);
-                    setDraft(structuredClone(remoteConflict));
-                    draftRef.current = remoteConflict;
-                    draftRevisionRef.current = 0;
-                    setBundle((current) => (
-                      current
-                        ? { ...current, experiment: remoteConflict }
-                        : current
-                    ));
-                    setDirty(false);
-                    dirtyRef.current = false;
-                    markdownEditorsRef.current = new Set();
-                    setMarkdownEditing(false);
-                    setMarkdownEpoch((current) => current + 1);
-                    setRemoteConflict(null);
-                    setRemoteDeleted(false);
-                    setIssues([]);
-                  }}
+                  disabled={saving || deleting || reloadingLatest}
+                  onClick={() => void loadLatest()}
                 >
-                  Load latest
+                  {reloadingLatest ? "Loading latest…" : "Load latest"}
                 </button>
               )}
             </div>
@@ -695,16 +732,18 @@ export default function ExperimentDetail({ id }: { id: string }) {
           </div>
           <div className="workspace-actions">
             <Link
-              className={`btn ${hasLocalChanges ? "disabled" : ""}`}
-              aria-disabled={hasLocalChanges}
-              title={hasLocalChanges
-                ? "Finish and save changes before comparing."
-                : "Compare saved data."}
-              href={hasLocalChanges
+              className={`btn ${compareBlocked ? "disabled" : ""}`}
+              aria-disabled={compareBlocked}
+              title={reloadingLatest
+                ? "Wait for the latest saved data before comparing."
+                : hasLocalChanges
+                  ? "Finish and save changes before comparing."
+                  : "Compare saved data."}
+              href={compareBlocked
                 ? `/experiments/${draft.id}`
                 : `/experiments/compare?${compareQuery}`}
               onClick={(event) => {
-                if (hasLocalChanges) event.preventDefault();
+                if (compareBlocked) event.preventDefault();
               }}
             >
               Compare
@@ -712,7 +751,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
             <button
               type="button"
               className="btn"
-              disabled={hasLocalChanges || saving || deleting}
+              disabled={hasLocalChanges || saving || deleting || reloadingLatest}
               title={hasLocalChanges
                 ? "Finish and save changes before duplicating."
                 : "Duplicate saved context."}
@@ -723,7 +762,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
             <button
               type="button"
               className="btn danger-subtle"
-              disabled={saving || deleting}
+              disabled={saving || deleting || reloadingLatest}
               onClick={() => void removeExperiment()}
             >
               {deleting ? "Deleting…" : "Delete"}
@@ -902,7 +941,13 @@ export default function ExperimentDetail({ id }: { id: string }) {
           <button
             type="button"
             className="btn"
-            disabled={!dirty || saving || deleting || markdownEditing}
+            disabled={
+              !dirty ||
+              saving ||
+              deleting ||
+              reloadingLatest ||
+              markdownEditing
+            }
             onClick={() => {
               setDraft(structuredClone(server));
               draftRef.current = server;
@@ -921,6 +966,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
               !dirty ||
               saving ||
               deleting ||
+              reloadingLatest ||
               markdownEditing ||
               Boolean(remoteConflict) ||
               remoteDeleted

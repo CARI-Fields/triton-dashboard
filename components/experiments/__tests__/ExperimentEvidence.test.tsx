@@ -418,21 +418,36 @@ describe("experiment evidence", () => {
 
   it("resynchronizes once when a later file in an upload batch fails", async () => {
     const experiment = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
+    const nextExperiment = row(
+      "00000000-0000-4000-8000-000000000003",
+      0.3,
+      "npu:2",
+    );
     vi.mocked(uploadExperimentAttachment)
       .mockResolvedValueOnce()
       .mockRejectedValueOnce(new Error("Second upload failed."));
     const onChanged = vi.fn();
-    const { container } = render(
+    const view = render(
       <AttachmentGallery
         experiment={experiment}
         attachments={[]}
         onChanged={onChanged}
       />,
     );
+    const persistedAttachment = {
+      id: "attachment-first",
+      task_id: experiment.task_id,
+      experiment_id: experiment.id,
+      url: "https://example.test/first.png",
+      path: "plots/first.png",
+      caption: "",
+      position: 0,
+      created_at: "2026-07-24T00:00:00.000Z",
+    } satisfies Attachment;
     const first = new File(["first"], "first.png", { type: "image/png" });
     const second = new File(["second"], "second.png", { type: "image/png" });
 
-    fireEvent.change(container.querySelector('input[type="file"]')!, {
+    fireEvent.change(view.container.querySelector('input[type="file"]')!, {
       target: { files: [first, second] },
     });
 
@@ -451,6 +466,25 @@ describe("experiment evidence", () => {
       1,
     );
     expect(onChanged).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <AttachmentGallery
+        experiment={experiment}
+        attachments={[persistedAttachment]}
+        onChanged={onChanged}
+      />,
+    );
+    expect(screen.getByRole("alert").textContent).toBe("Second upload failed.");
+    expect(onChanged).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <AttachmentGallery
+        experiment={nextExperiment}
+        attachments={[]}
+        onChanged={onChanged}
+      />,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("deletes a confirmed real attachment through the repository", async () => {

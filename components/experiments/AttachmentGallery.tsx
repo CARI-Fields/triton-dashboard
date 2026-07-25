@@ -52,7 +52,6 @@ function AttachmentFigure({
     pendingVisit.current = null;
     setCaption(attachment.caption);
     setSavingCaption(false);
-    onCaptionError("");
     // Reset only when a different Experiment visit commits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visitId]);

@@ -239,6 +239,32 @@ describe("experiment evidence", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("treats inherited prototype metric names as unavailable", () => {
+    const baseline = row("00000000-0000-4000-8000-000000000001", 0.1, "npu:0");
+    const current = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:0");
+    baseline.metrics = Object.fromEntries([
+      ["constructor", 0.5],
+      ["__proto__", 0.7],
+    ]);
+    current.metrics = { toString: 0.9 };
+
+    render(<BaselineSummary current={current} baseline={baseline} />);
+
+    for (const [key, baselineValue, currentValue] of [
+      ["constructor", "0.5", "—"],
+      ["__proto__", "0.7", "—"],
+      ["toString", "—", "0.9"],
+    ]) {
+      const metricRow = screen.getByText(key, { selector: "strong" })
+        .parentElement!;
+      const values = [...metricRow.querySelectorAll("span")]
+        .map((element) => element.textContent);
+      expect(values).toEqual([baselineValue, currentValue, "—"]);
+    }
+    expect(screen.queryByText(/function Object/)).toBeNull();
+    expect(screen.queryByText("[object Object]")).toBeNull();
+  });
+
   it("reports Markdown editing transitions including Escape", () => {
     const onEditingChange = vi.fn();
     render(
@@ -385,6 +411,43 @@ describe("experiment evidence", () => {
     expect(screen.getAllByRole("img")).toHaveLength(1);
   });
 
+  it("resynchronizes once when a later file in an upload batch fails", async () => {
+    const experiment = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
+    vi.mocked(uploadExperimentAttachment)
+      .mockResolvedValueOnce()
+      .mockRejectedValueOnce(new Error("Second upload failed."));
+    const onChanged = vi.fn();
+    const { container } = render(
+      <AttachmentGallery
+        experiment={experiment}
+        attachments={[]}
+        onChanged={onChanged}
+      />,
+    );
+    const first = new File(["first"], "first.png", { type: "image/png" });
+    const second = new File(["second"], "second.png", { type: "image/png" });
+
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [first, second] },
+    });
+
+    expect((await screen.findByRole("alert")).textContent)
+      .toBe("Second upload failed.");
+    expect(uploadExperimentAttachment).toHaveBeenNthCalledWith(
+      1,
+      experiment,
+      first,
+      0,
+    );
+    expect(uploadExperimentAttachment).toHaveBeenNthCalledWith(
+      2,
+      experiment,
+      second,
+      1,
+    );
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("deletes a confirmed real attachment through the repository", async () => {
     const experiment = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
     const attachment = {
@@ -413,6 +476,107 @@ describe("experiment evidence", () => {
       expect(deleteExperimentAttachment).toHaveBeenCalledWith(attachment)
     );
     confirm.mockRestore();
+  });
+
+  it("resynchronizes once when delete reports Storage cleanup failure", async () => {
+    const experiment = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
+    const attachment = {
+      id: "attachment-1",
+      task_id: experiment.task_id,
+      experiment_id: experiment.id,
+      url: "https://example.test/plot.png",
+      path: "plots/plot.png",
+      caption: "",
+      position: 0,
+      created_at: "2026-07-24T00:00:00.000Z",
+    } satisfies Attachment;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(deleteExperimentAttachment).mockRejectedValue(
+      new Error("Attachment record was deleted, but Storage cleanup failed."),
+    );
+    const onChanged = vi.fn();
+    render(
+      <AttachmentGallery
+        experiment={experiment}
+        attachments={[attachment]}
+        onChanged={onChanged}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete image" }));
+
+    expect((await screen.findByRole("alert")).textContent)
+      .toBe("Attachment record was deleted, but Storage cleanup failed.");
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
+  });
+
+  it("ignores a stale caption completion across committed A to B to A visits", async () => {
+    const experimentA = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
+    const experimentB = row("00000000-0000-4000-8000-000000000003", 0.3, "npu:2");
+    const attachmentA = {
+      id: "attachment-a",
+      task_id: experimentA.task_id,
+      experiment_id: experimentA.id,
+      url: "https://example.test/a.png",
+      path: "plots/a.png",
+      caption: "A caption",
+      position: 0,
+      created_at: "2026-07-24T00:00:00.000Z",
+    } satisfies Attachment;
+    const attachmentB = {
+      ...attachmentA,
+      id: "attachment-b",
+      experiment_id: experimentB.id,
+      url: "https://example.test/b.png",
+      path: "plots/b.png",
+      caption: "B caption",
+    } satisfies Attachment;
+    const captionSave = deferred<void>();
+    vi.mocked(updateExperimentAttachment).mockReturnValue(captionSave.promise);
+    const onChangedA = vi.fn();
+    const onChangedB = vi.fn();
+    const onChangedA2 = vi.fn();
+    const view = render(
+      <AttachmentGallery
+        experiment={experimentA}
+        attachments={[attachmentA]}
+        onChanged={onChangedA}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Caption for A caption"), {
+      target: { value: "Old A update" },
+    });
+    fireEvent.blur(screen.getByLabelText("Caption for A caption"));
+
+    view.rerender(
+      <AttachmentGallery
+        experiment={experimentB}
+        attachments={[attachmentB]}
+        onChanged={onChangedB}
+      />,
+    );
+    view.rerender(
+      <AttachmentGallery
+        experiment={experimentA}
+        attachments={[attachmentA]}
+        onChanged={onChangedA2}
+      />,
+    );
+    const currentCaption = screen.getByLabelText(
+      "Caption for A caption",
+    ) as HTMLInputElement;
+    fireEvent.change(currentCaption, { target: { value: "Fresh A draft" } });
+
+    await act(async () => {
+      captionSave.resolve();
+      await captionSave.promise;
+    });
+    expect(onChangedA).not.toHaveBeenCalled();
+    expect(onChangedB).not.toHaveBeenCalled();
+    expect(onChangedA2).not.toHaveBeenCalled();
+    expect(currentCaption.value).toBe("Fresh A draft");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("adds only an explicit manual note and renders trigger-owned Activity", async () => {

@@ -20,6 +20,13 @@ function isFiniteNumber(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function ownMetric(
+  metrics: Record<string, number>,
+  key: string,
+): number | undefined {
+  return Object.hasOwn(metrics, key) ? metrics[key] : undefined;
+}
+
 export default function BaselineSummary({
   current,
   baseline,
@@ -53,8 +60,8 @@ export default function BaselineSummary({
         <div className="baseline-grid-head">Current</div>
         <div className="baseline-grid-head">Delta</div>
         {metricKeys.map((key) => {
-          const baselineValue = baseline.metrics[key];
-          const currentValue = current.metrics[key];
+          const baselineValue = ownMetric(baseline.metrics, key);
+          const currentValue = ownMetric(current.metrics, key);
           const difference =
             isFiniteNumber(baselineValue) && isFiniteNumber(currentValue)
               ? currentValue - baselineValue

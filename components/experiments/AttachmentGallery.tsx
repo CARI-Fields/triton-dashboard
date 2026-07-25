@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from "react";
 import {
   deleteExperimentAttachment,
   updateExperimentAttachment,
@@ -8,14 +14,21 @@ import {
 } from "@/lib/experiments/repository";
 import type { Attachment, Experiment } from "@/lib/types";
 
+interface CommittedVisit {
+  id: string;
+  generation: number;
+}
+
 function AttachmentFigure({
   attachment,
+  committedVisit,
   deleting,
   onCaptionError,
   onChanged,
   onDelete,
 }: {
   attachment: Attachment;
+  committedVisit: MutableRefObject<CommittedVisit>;
   deleting: boolean;
   onCaptionError: (message: string) => void;
   onChanged: () => void;
@@ -36,21 +49,26 @@ function AttachmentFigure({
 
   async function saveCaption() {
     if (caption === attachment.caption || captionPending.current) return;
+    const operationVisit = committedVisit.current;
     captionPending.current = true;
     setSavingCaption(true);
     onCaptionError("");
     try {
       await updateExperimentAttachment(attachment.id, caption);
-      if (mounted.current) onChanged();
+      if (mounted.current && committedVisit.current === operationVisit) {
+        onChanged();
+      }
     } catch (caught) {
-      if (mounted.current) {
+      if (mounted.current && committedVisit.current === operationVisit) {
         onCaptionError(
           caught instanceof Error ? caught.message : "Could not update caption.",
         );
       }
     } finally {
       captionPending.current = false;
-      if (mounted.current) setSavingCaption(false);
+      if (mounted.current && committedVisit.current === operationVisit) {
+        setSavingCaption(false);
+      }
     }
   }
 
@@ -141,12 +159,6 @@ export default function AttachmentGallery({
         await uploadExperimentAttachment(experiment, file, position);
         position += 1;
       }
-      if (
-        mounted.current &&
-        committedIdentity.current === operationIdentity
-      ) {
-        onChanged();
-      }
     } catch (caught) {
       if (
         mounted.current &&
@@ -161,7 +173,10 @@ export default function AttachmentGallery({
     } finally {
       if (committedIdentity.current === operationIdentity) {
         uploadPending.current = false;
-        if (mounted.current) setUploading(false);
+        if (mounted.current) {
+          setUploading(false);
+          onChanged();
+        }
       }
     }
   }
@@ -179,12 +194,6 @@ export default function AttachmentGallery({
     setError("");
     try {
       await deleteExperimentAttachment(attachment);
-      if (
-        mounted.current &&
-        committedIdentity.current === operationIdentity
-      ) {
-        onChanged();
-      }
     } catch (caught) {
       if (
         mounted.current &&
@@ -203,6 +212,7 @@ export default function AttachmentGallery({
           next.delete(attachment.id);
           return next;
         });
+        onChanged();
       }
     }
   }
@@ -242,6 +252,7 @@ export default function AttachmentGallery({
               <AttachmentFigure
                 key={`${experiment.id}-${attachment.id}`}
                 attachment={attachment}
+                committedVisit={committedIdentity}
                 deleting={deletingIds.has(attachment.id)}
                 onCaptionError={setError}
                 onChanged={onChanged}

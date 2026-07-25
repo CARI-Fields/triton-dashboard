@@ -34,6 +34,49 @@ interface RetryToken {
   requestVersion: number;
 }
 
+type MutationField = "title" | "status" | "notes" | "assignees";
+type MutationErrorKey = MutationField | "timeline";
+
+interface TimelineSubmission {
+  visit: Visit;
+  value: string;
+}
+
+interface RealtimePayload {
+  new?: Record<string, unknown>;
+  old?: Record<string, unknown>;
+}
+
+interface AssigneeChange {
+  name: string;
+  assigned: boolean;
+}
+
+interface AssigneeCoordinator {
+  visit: Visit;
+  confirmed: string[];
+  pending: AssigneeChange[];
+}
+
+interface AssignActivityEvent {
+  text: string;
+  kind: "assign";
+  change: AssigneeChange;
+  coordinator: AssigneeCoordinator;
+}
+
+function applyAssigneeChange(
+  assignees: string[],
+  change: AssigneeChange,
+): string[] {
+  if (change.assigned) {
+    return assignees.includes(change.name)
+      ? assignees
+      : [...assignees, change.name];
+  }
+  return assignees.filter((assignee) => assignee !== change.name);
+}
+
 function initialsFromName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
@@ -171,7 +214,11 @@ export default function TaskDetail({ id }: { id: string }) {
   const visitRef = useRef<Visit | null>(null);
   const requestVersionRef = useRef(0);
   const retryTokenRef = useRef<RetryToken | null>(null);
-  const mutationTokenRef = useRef<object | null>(null);
+  const mutationQueuesRef = useRef(new Map<string, Promise<void>>());
+  const assigneeCoordinatorRef = useRef<AssigneeCoordinator | null>(null);
+  const experimentIdsRef = useRef(new Set<string>());
+  const activityIdsRef = useRef(new Set<string>());
+  const timelineSubmissionRef = useRef<TimelineSubmission | null>(null);
 
   const [loadedGeneration, setLoadedGeneration] = useState<number | null>(null);
   const [task, setTask] = useState<Task | null>(null);
@@ -183,7 +230,11 @@ export default function TaskDetail({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [detailError, setDetailError] = useState<DetailError | null>(null);
+  const [mutationErrors, setMutationErrors] = useState<
+    Partial<Record<MutationErrorKey, string>>
+  >({});
   const [retrying, setRetrying] = useState(false);
+  const [notePending, setNotePending] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const assignRef = useClickOutside(() => setAssignOpen(false));
 
@@ -237,8 +288,10 @@ export default function TaskDetail({ id }: { id: string }) {
         setTask(null);
         setModule(null);
         setExperiments([]);
+        experimentIdsRef.current = new Set();
         setMembers([]);
         setActivity([]);
+        activityIdsRef.current = new Set();
         setLoading(false);
         setNotFound(true);
         setDetailError(null);
@@ -272,12 +325,30 @@ export default function TaskDetail({ id }: { id: string }) {
       throwIfError(activityResult.error);
 
       finishSupersededRetry(requestedVisit, requestVersion);
+      const nextExperiments = (experimentsResult.data ?? []) as Experiment[];
+      const nextActivity = (activityResult.data ?? []) as Activity[];
       setLoadedGeneration(requestedVisit.generation);
       setTask(nextTask);
+      if (
+        assigneeCoordinatorRef.current?.visit !== requestedVisit
+        || assigneeCoordinatorRef.current.pending.length === 0
+      ) {
+        assigneeCoordinatorRef.current = {
+          visit: requestedVisit,
+          confirmed: nextTask.assignees,
+          pending: [],
+        };
+      }
       setModule((moduleResult.data as Module | null) ?? null);
-      setExperiments((experimentsResult.data ?? []) as Experiment[]);
+      setExperiments(nextExperiments);
+      experimentIdsRef.current = new Set(
+        nextExperiments.map((experiment) => experiment.id),
+      );
       setMembers((membersResult.data ?? []) as Member[]);
-      setActivity((activityResult.data ?? []) as Activity[]);
+      setActivity(nextActivity);
+      activityIdsRef.current = new Set(
+        nextActivity.map((event) => event.id),
+      );
       setLoading(false);
       setNotFound(false);
       setDetailError(null);
@@ -299,7 +370,10 @@ export default function TaskDetail({ id }: { id: string }) {
     visitRef.current = visit;
     requestVersionRef.current += 1;
     retryTokenRef.current = null;
-    mutationTokenRef.current = null;
+    assigneeCoordinatorRef.current = null;
+    experimentIdsRef.current = new Set();
+    activityIdsRef.current = new Set();
+    timelineSubmissionRef.current = null;
     setLoadedGeneration(null);
     setTask(null);
     setModule(null);
@@ -310,7 +384,9 @@ export default function TaskDetail({ id }: { id: string }) {
     setLoading(true);
     setNotFound(false);
     setDetailError(null);
+    setMutationErrors({});
     setRetrying(false);
+    setNotePending(false);
     setAssignOpen(false);
 
     if (!id) {
@@ -339,22 +415,119 @@ export default function TaskDetail({ id }: { id: string }) {
     const refresh = () => {
       void loadTask(visit, "refresh");
     };
+    const refreshInsertedExperiment = (payload: RealtimePayload) => {
+      const insertedId = payload.new?.id;
+      if (typeof insertedId === "string") {
+        experimentIdsRef.current.add(insertedId);
+      }
+      refresh();
+    };
+    const refreshInsertedActivity = (payload: RealtimePayload) => {
+      const insertedId = payload.new?.id;
+      if (typeof insertedId === "string") {
+        activityIdsRef.current.add(insertedId);
+      }
+      refresh();
+    };
+    const refreshDeletedTask = (payload: RealtimePayload) => {
+      if (payload.old?.id === visit.id) refresh();
+    };
+    const refreshDeletedExperiment = (payload: RealtimePayload) => {
+      const deletedId = payload.old?.id;
+      if (
+        payload.old?.task_id === visit.id
+        || (
+          typeof deletedId === "string"
+          && experimentIdsRef.current.has(deletedId)
+        )
+      ) {
+        if (typeof deletedId === "string") {
+          experimentIdsRef.current.delete(deletedId);
+        }
+        refresh();
+      }
+    };
+    const refreshDeletedActivity = (payload: RealtimePayload) => {
+      const deletedId = payload.old?.id;
+      if (
+        payload.old?.task_id === visit.id
+        || (
+          typeof deletedId === "string"
+          && activityIdsRef.current.has(deletedId)
+        )
+      ) {
+        if (typeof deletedId === "string") {
+          activityIdsRef.current.delete(deletedId);
+        }
+        refresh();
+      }
+    };
     const channel = client
       .channel(`task-${visit.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "tasks" },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "tasks",
+          filter: `id=eq.${visit.id}`,
+        },
         refresh,
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "experiments" },
+        { event: "DELETE", schema: "public", table: "tasks" },
+        refreshDeletedTask,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "experiments",
+          filter: `task_id=eq.${visit.id}`,
+        },
+        refreshInsertedExperiment,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "experiments",
+          filter: `task_id=eq.${visit.id}`,
+        },
         refresh,
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "activity" },
+        { event: "DELETE", schema: "public", table: "experiments" },
+        refreshDeletedExperiment,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "activity",
+          filter: `task_id=eq.${visit.id}`,
+        },
+        refreshInsertedActivity,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "activity",
+          filter: `task_id=eq.${visit.id}`,
+        },
         refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "activity" },
+        refreshDeletedActivity,
       )
       .subscribe();
 
@@ -362,7 +535,7 @@ export default function TaskDetail({ id }: { id: string }) {
       if (visitRef.current === visit) visitRef.current = null;
       requestVersionRef.current += 1;
       retryTokenRef.current = null;
-      mutationTokenRef.current = null;
+      timelineSubmissionRef.current = null;
       client.removeChannel(channel);
     };
   }, [id, loadTask, visit]);
@@ -390,90 +563,168 @@ export default function TaskDetail({ id }: { id: string }) {
 
   const updateTask = useCallback(async (
     patch: Partial<Task>,
-    activityEvent?: { text: string; kind: "assign" },
+    activityEvent?: AssignActivityEvent,
   ) => {
     if (!supabase) return;
+    const client = supabase;
     const requestedVisit = visitRef.current;
     if (!requestedVisit) return;
-    const token = {};
-    mutationTokenRef.current = token;
-    setDetailError(null);
-
-    try {
-      const result = await supabase
-        .from("tasks")
-        .update(patch)
-        .eq("id", requestedVisit.id);
-      if (
-        visitRef.current !== requestedVisit
-        || mutationTokenRef.current !== token
-      ) {
-        return;
-      }
-      throwIfError(result.error);
-
-      if (activityEvent) {
-        await logActivityChecked(
-          requestedVisit.id,
-          activityEvent.text,
-          activityEvent.kind,
-        );
-      } else if (patch.status) {
-        await logActivityChecked(
-          requestedVisit.id,
-          `Status set to ${statusLabel(patch.status)}`,
-          "status",
-        );
-      } else if (patch.title) {
-        await logActivityChecked(
-          requestedVisit.id,
-          `Renamed to “${patch.title}”`,
-          "edit",
-        );
-      } else if (patch.notes !== undefined) {
-        await logActivityChecked(
-          requestedVisit.id,
-          "Updated progress notes",
-          "note",
-        );
-      }
-      if (
-        visitRef.current === requestedVisit
-        && mutationTokenRef.current === token
-      ) {
-        await loadTask(requestedVisit, "refresh");
-      }
-    } catch (caught) {
-      if (
-        visitRef.current === requestedVisit
-        && mutationTokenRef.current === token
-      ) {
-        setDetailError({
-          message: `Could not update task. ${errorMessage(caught)}`,
-          phase: null,
+    const field: MutationField = Object.hasOwn(patch, "assignees")
+      ? "assignees"
+      : Object.hasOwn(patch, "status")
+        ? "status"
+        : Object.hasOwn(patch, "title")
+          ? "title"
+          : "notes";
+    const queueKey =
+      `${requestedVisit.generation}:${requestedVisit.id}:${field}`;
+    const previous = mutationQueuesRef.current.get(queueKey);
+    const runOperation = async () => {
+      if (visitRef.current === requestedVisit) {
+        setMutationErrors((current) => {
+          if (!(field in current)) return current;
+          const next = { ...current };
+          delete next[field];
+          return next;
         });
       }
-    } finally {
-      if (
-        visitRef.current === requestedVisit
-        && mutationTokenRef.current === token
-      ) {
-        mutationTokenRef.current = null;
+      let effectivePatch = patch;
+      let nextConfirmedAssignees: string[] | null = null;
+      let assigneeChangeIsNoOp = false;
+      if (activityEvent) {
+        assigneeChangeIsNoOp =
+          activityEvent.coordinator.confirmed.includes(
+            activityEvent.change.name,
+          ) === activityEvent.change.assigned;
+        nextConfirmedAssignees = applyAssigneeChange(
+          activityEvent.coordinator.confirmed,
+          activityEvent.change,
+        );
+        effectivePatch = {
+          ...patch,
+          assignees: nextConfirmedAssignees,
+        };
       }
+      const settleAssigneeChange = (succeeded: boolean) => {
+        if (!activityEvent) return;
+        if (succeeded && nextConfirmedAssignees) {
+          activityEvent.coordinator.confirmed = nextConfirmedAssignees;
+        }
+        activityEvent.coordinator.pending =
+          activityEvent.coordinator.pending.filter(
+            (change) => change !== activityEvent.change,
+          );
+      };
+      if (assigneeChangeIsNoOp) {
+        settleAssigneeChange(false);
+        return;
+      }
+      let result;
+      try {
+        result = await client
+          .from("tasks")
+          .update(effectivePatch)
+          .eq("id", requestedVisit.id);
+        throwIfError(result.error);
+      } catch (caught) {
+        settleAssigneeChange(false);
+        if (visitRef.current === requestedVisit) {
+          setMutationErrors((current) => ({
+            ...current,
+            [field]: `Could not update task. ${errorMessage(caught)}`,
+          }));
+        }
+        return;
+      }
+      settleAssigneeChange(true);
+
+      let activityFailure: unknown = null;
+      try {
+        if (activityEvent) {
+          await logActivityChecked(
+            requestedVisit.id,
+            activityEvent.text,
+            activityEvent.kind,
+          );
+        } else if (patch.status) {
+          await logActivityChecked(
+            requestedVisit.id,
+            `Status set to ${statusLabel(patch.status)}`,
+            "status",
+          );
+        } else if (patch.title) {
+          await logActivityChecked(
+            requestedVisit.id,
+            `Renamed to “${patch.title}”`,
+            "edit",
+          );
+        } else if (patch.notes !== undefined) {
+          await logActivityChecked(
+            requestedVisit.id,
+            "Updated progress notes",
+            "note",
+          );
+        }
+      } catch (caught) {
+        activityFailure = caught;
+      }
+
+      if (visitRef.current === requestedVisit) {
+        await loadTask(requestedVisit, "refresh");
+        if (
+          activityFailure
+          && visitRef.current === requestedVisit
+        ) {
+          setMutationErrors((current) => ({
+            ...current,
+            [field]:
+              "Task updated, but activity could not be recorded. "
+              + errorMessage(activityFailure),
+          }));
+        }
+      }
+    };
+    const operation = previous
+      ? previous.catch(() => undefined).then(runOperation)
+      : runOperation();
+
+    mutationQueuesRef.current.set(queueKey, operation);
+    await operation;
+    if (mutationQueuesRef.current.get(queueKey) === operation) {
+      mutationQueuesRef.current.delete(queueKey);
     }
   }, [loadTask]);
 
   function toggleAssignee(name: string) {
     if (!task) return;
-    const hadAssignee = task.assignees.includes(name);
-    const nextAssignees = hadAssignee
-      ? task.assignees.filter((assignee) => assignee !== name)
-      : [...task.assignees, name];
+    const requestedVisit = visitRef.current;
+    if (!requestedVisit) return;
+    let coordinator = assigneeCoordinatorRef.current;
+    if (coordinator?.visit !== requestedVisit) {
+      coordinator = {
+        visit: requestedVisit,
+        confirmed: task.assignees,
+        pending: [],
+      };
+      assigneeCoordinatorRef.current = coordinator;
+    }
+    const currentAssignees = coordinator.pending.reduce(
+      applyAssigneeChange,
+      coordinator.confirmed,
+    );
+    const hadAssignee = currentAssignees.includes(name);
+    const change: AssigneeChange = {
+      name,
+      assigned: !hadAssignee,
+    };
+    coordinator.pending.push(change);
     void updateTask(
-      { assignees: nextAssignees },
+      { assignees: [] },
       {
         text: `${hadAssignee ? "Unassigned" : "Assigned"} ${name}`,
         kind: "assign",
+        change,
+        coordinator,
       },
     );
   }
@@ -481,36 +732,44 @@ export default function TaskDetail({ id }: { id: string }) {
   async function addTimelineNote() {
     const value = draftNote.trim();
     const requestedVisit = visitRef.current;
-    if (!value || !requestedVisit) return;
-    const token = {};
-    mutationTokenRef.current = token;
-    setDetailError(null);
+    if (!value || !requestedVisit || timelineSubmissionRef.current) return;
+    const submission = { visit: requestedVisit, value };
+    timelineSubmissionRef.current = submission;
+    setMutationErrors((current) => {
+      if (!current.timeline) return current;
+      const next = { ...current };
+      delete next.timeline;
+      return next;
+    });
+    setNotePending(true);
     try {
       await logActivityChecked(requestedVisit.id, value, "comment");
       if (
         visitRef.current !== requestedVisit
-        || mutationTokenRef.current !== token
+        || timelineSubmissionRef.current !== submission
       ) {
         return;
       }
-      setDraftNote("");
+      setDraftNote((current) => current.trim() === value ? "" : current);
       await loadTask(requestedVisit, "refresh");
     } catch (caught) {
       if (
         visitRef.current === requestedVisit
-        && mutationTokenRef.current === token
+        && timelineSubmissionRef.current === submission
       ) {
-        setDetailError({
-          message: `Could not add the timeline note. ${errorMessage(caught)}`,
-          phase: null,
-        });
+        setMutationErrors((current) => ({
+          ...current,
+          timeline:
+            `Could not add the timeline note. ${errorMessage(caught)}`,
+        }));
       }
     } finally {
       if (
         visitRef.current === requestedVisit
-        && mutationTokenRef.current === token
+        && timelineSubmissionRef.current === submission
       ) {
-        mutationTokenRef.current = null;
+        timelineSubmissionRef.current = null;
+        setNotePending(false);
       }
     }
   }
@@ -519,6 +778,10 @@ export default function TaskDetail({ id }: { id: string }) {
     visit.id !== id
     || loadedGeneration !== visit.generation
     || loading;
+  const mutationMessage = Object.values(mutationErrors).join(" ");
+  const mutationError: DetailError | null = mutationMessage
+    ? { message: mutationMessage, phase: null }
+    : null;
 
   if (visitLoading) {
     return (
@@ -559,6 +822,12 @@ export default function TaskDetail({ id }: { id: string }) {
   return (
     <div className="wrap detail">
       <Link href="/" className="back-link">← Back to board</Link>
+
+      {mutationError && (
+        <div className="error-banner" role="alert">
+          <span>{mutationError.message}</span>
+        </div>
+      )}
 
       {detailError && (
         <div className="error-banner" role="alert">
@@ -715,8 +984,9 @@ export default function TaskDetail({ id }: { id: string }) {
           <button
             className="btn primary"
             onClick={() => void addTimelineNote()}
+            disabled={notePending}
           >
-            Add note
+            {notePending ? "Adding…" : "Add note"}
           </button>
         </div>
         {activity.length === 0 ? (

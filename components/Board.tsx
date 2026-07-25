@@ -13,7 +13,7 @@ import MarkdownField from "@/components/MarkdownField";
 import { logActivity } from "@/lib/activity";
 import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
 import { relTime } from "@/lib/time";
-import type { Member, Module, Task } from "@/lib/types";
+import type { ActivityKind, Member, Module, Task } from "@/lib/types";
 
 function initialsFromName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -464,6 +464,25 @@ export default function Board() {
   const [newMember, setNewMember] = useState("");
   const [pickerId, setPickerId] = useState<string | null>(null);
 
+  const recordActivity = useCallback((
+    taskId: string,
+    text: string,
+    kind: ActivityKind,
+  ) => {
+    void logActivity(taskId, text, kind)
+      .then((activityError) => {
+        if (activityError) {
+          setErrorMsg(`Could not record activity. ${activityError}`);
+        }
+      })
+      .catch((caught: unknown) => {
+        const message = caught instanceof Error
+          ? caught.message
+          : "The request failed.";
+        setErrorMsg(`Could not record activity. ${message}`);
+      });
+  }, []);
+
   const reload = useCallback(async () => {
     if (!supabase) return;
     const [m, t, mem] = await Promise.all([
@@ -552,23 +571,27 @@ export default function Board() {
         .select("id")
         .single();
       if (data) {
-        logActivity(data.id, "Task created", "create");
+        recordActivity(data.id, "Task created", "create");
         setPickerId(data.id);
       }
       reload();
     },
-    [tasks, reload]
+    [recordActivity, tasks, reload]
   );
 
   const patchTask = useCallback(
     async (id: string, patch: Partial<Task>) => {
       if (!supabase) return;
       await supabase.from("tasks").update(patch).eq("id", id);
-      if (patch.status) logActivity(id, `Status set to ${statusLabel(patch.status)}`, "status");
-      if (patch.title) logActivity(id, `Renamed to “${patch.title}”`, "edit");
+      if (patch.status) {
+        recordActivity(id, `Status set to ${statusLabel(patch.status)}`, "status");
+      }
+      if (patch.title) {
+        recordActivity(id, `Renamed to “${patch.title}”`, "edit");
+      }
       reload();
     },
-    [reload]
+    [recordActivity, reload]
   );
 
   const deleteTask = useCallback(
@@ -590,10 +613,14 @@ export default function Board() {
         ? task.assignees.filter((a) => a !== name)
         : [...task.assignees, name];
       await supabase.from("tasks").update({ assignees: next }).eq("id", taskId);
-      logActivity(taskId, `${had ? "Unassigned" : "Assigned"} ${name}`, "assign");
+      recordActivity(
+        taskId,
+        `${had ? "Unassigned" : "Assigned"} ${name}`,
+        "assign",
+      );
       reload();
     },
-    [tasks, reload]
+    [recordActivity, tasks, reload]
   );
 
   const addMember = useCallback(
@@ -625,11 +652,11 @@ export default function Board() {
           .from("tasks")
           .update({ assignees: [...task.assignees, n] })
           .eq("id", taskId);
-        logActivity(taskId, `Assigned ${n}`, "assign");
+        recordActivity(taskId, `Assigned ${n}`, "assign");
       }
       reload();
     },
-    [members, tasks, reload]
+    [members, recordActivity, tasks, reload]
   );
 
   const removeMember = useCallback(

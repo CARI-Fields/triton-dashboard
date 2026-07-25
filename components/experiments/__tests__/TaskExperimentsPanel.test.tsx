@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -92,6 +93,14 @@ function experiment(
     updated_at: "2026-07-24T00:00:00.000Z",
     ...patch,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -270,5 +279,39 @@ describe("TaskExperimentsPanel", () => {
       name: "Created from Task",
     }));
     expect(routerPush).toHaveBeenCalledWith(`/experiments/${created.id}`);
+  });
+
+  it("does not navigate a pending creation after switching Tasks", async () => {
+    const pending = deferred<Experiment>();
+    vi.mocked(createExperiment).mockReturnValue(pending.promise);
+    const { rerender } = render(
+      <TaskExperimentsPanel
+        task={task}
+        experiments={[]}
+        members={[member]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New experiment" }));
+    fireEvent.change(screen.getByLabelText("Experiment name"), {
+      target: { value: "Old Task creation" },
+    });
+    fireEvent.change(screen.getByLabelText("Owner"), {
+      target: { value: member.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create experiment" }));
+
+    rerender(
+      <TaskExperimentsPanel
+        task={otherTask}
+        experiments={[]}
+        members={[member]}
+      />,
+    );
+    await act(async () => pending.resolve(experiment(
+      "00000000-0000-4000-8000-000000000088",
+      88,
+    )));
+    expect(routerPush).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

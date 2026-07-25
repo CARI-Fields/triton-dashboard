@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import type { ActivityKind } from "@/lib/types";
 
-/** Fire-and-forget timeline event. Realtime pushes it to open task pages. */
+/** Return a resolved insert error so callers can explicitly surface or consume it. */
 export async function logActivity(
   taskId: string,
   text: string,

@@ -30,14 +30,32 @@ interface QueryResult<T = unknown> {
 
 interface RealtimeHandler {
   channelName: string;
+  config: {
+    event: string;
+    schema: string;
+    table: string;
+    filter?: string;
+  };
+  callback: (payload: RealtimePayload) => void;
+}
+
+interface RealtimePayload {
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  new: Record<string, unknown>;
+  old: Record<string, unknown>;
+}
+
+interface MutationCall {
   table: string;
-  callback: () => void;
+  kind: "update" | "insert" | "delete";
+  payload: unknown;
 }
 
 const supabaseState = vi.hoisted(() => ({
   queues: new Map<string, Promise<QueryResult>[]>(),
   handlers: [] as RealtimeHandler[],
   fromCalls: [] as string[],
+  mutations: [] as MutationCall[],
   removeChannel: vi.fn(),
 }));
 
@@ -54,16 +72,14 @@ vi.mock("@/lib/supabase", () => {
         throw new Error(`No ${table} query result was queued.`);
       }
       const builder: Record<string, unknown> = {};
-      for (const method of [
-        "select",
-        "eq",
-        "order",
-        "maybeSingle",
-        "update",
-        "insert",
-        "delete",
-      ]) {
+      for (const method of ["select", "eq", "order", "maybeSingle"]) {
         builder[method] = vi.fn(() => builder);
+      }
+      for (const kind of ["update", "insert", "delete"] as const) {
+        builder[kind] = vi.fn((payload?: unknown) => {
+          supabaseState.mutations.push({ table, kind, payload });
+          return builder;
+        });
       }
       builder.then = response.then.bind(response);
       return builder;
@@ -72,12 +88,12 @@ vi.mock("@/lib/supabase", () => {
       const channel = {
         on: vi.fn((
           _kind: string,
-          filter: { table: string },
-          callback: () => void,
+          config: RealtimeHandler["config"],
+          callback: RealtimeHandler["callback"],
         ) => {
           supabaseState.handlers.push({
             channelName,
-            table: filter.table,
+            config: { ...config },
             callback,
           });
           return channel;
@@ -124,6 +140,20 @@ const member = {
   initials: "BX",
   position: 0,
   created_at: "2026-07-24T00:00:00.000Z",
+} satisfies Member;
+
+const alice = {
+  ...member,
+  id: "00000000-0000-4000-8000-000000000021",
+  name: "Alice",
+  initials: "AL",
+} satisfies Member;
+
+const bob = {
+  ...member,
+  id: "00000000-0000-4000-8000-000000000022",
+  name: "Bob",
+  initials: "BO",
 } satisfies Member;
 
 function experiment(name: string): Experiment {
@@ -208,10 +238,11 @@ function enqueue(table: string, result: QueryResult | Promise<QueryResult>) {
 function enqueueRelated(
   experiments: Experiment[] = [],
   activities: Activity[] = [],
+  members: Member[] = [member],
 ) {
   enqueue("modules", ok(moduleRow));
   enqueue("experiments", ok(experiments));
-  enqueue("members", ok([member]));
+  enqueue("members", ok(members));
   enqueue("activity", ok(activities));
 }
 
@@ -219,25 +250,62 @@ function enqueueLoad(
   task: Task,
   experiments: Experiment[] = [],
   activities: Activity[] = [],
+  members: Member[] = [member],
 ) {
   enqueue("tasks", ok(task));
-  enqueueRelated(experiments, activities);
+  enqueueRelated(experiments, activities, members);
 }
 
-function trigger(channelName: string, table: string) {
-  const handler = [...supabaseState.handlers].reverse().find(
-    (candidate) => (
-      candidate.channelName === channelName && candidate.table === table
-    ),
+function taskUpdates() {
+  return supabaseState.mutations.filter(
+    (call) => call.table === "tasks" && call.kind === "update",
   );
-  if (!handler) throw new Error(`No ${channelName}/${table} handler.`);
-  act(() => handler.callback());
+}
+
+function activityInserts() {
+  return supabaseState.mutations.filter(
+    (call) => call.table === "activity" && call.kind === "insert",
+  );
+}
+
+function trigger(
+  channelName: string,
+  table: string,
+  eventType: RealtimePayload["eventType"] = "UPDATE",
+  next: Record<string, unknown> = table === "tasks"
+    ? { id: taskA.id }
+    : { id: `${table}-row`, task_id: taskA.id },
+  old: Record<string, unknown> = {},
+) {
+  const payload = { eventType, new: next, old };
+  const handlers = supabaseState.handlers.filter((candidate) => {
+    if (
+      candidate.channelName !== channelName
+      || candidate.config.table !== table
+      || (
+        candidate.config.event !== "*"
+        && candidate.config.event !== eventType
+      )
+    ) {
+      return false;
+    }
+    if (!candidate.config.filter) return true;
+    const match = /^([^=]+)=eq\.(.*)$/.exec(candidate.config.filter);
+    if (!match) throw new Error(`Unsupported filter: ${candidate.config.filter}`);
+    const row = eventType === "DELETE" ? old : next;
+    return String(row[match[1]]) === match[2];
+  });
+  if (handlers.length === 0) return;
+  act(() => {
+    for (const handler of handlers) handler.callback(payload);
+  });
 }
 
 beforeEach(() => {
   supabaseState.queues.clear();
   supabaseState.handlers.length = 0;
   supabaseState.fromCalls.length = 0;
+  supabaseState.mutations.length = 0;
   supabaseState.removeChannel.mockClear();
 });
 
@@ -409,6 +477,289 @@ describe("TaskDetail orchestration", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("does not suppress overlapping independent Task writes, audits, or reconciliation", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const titleWrite = deferred<QueryResult>();
+    const statusWrite = deferred<QueryResult>();
+    enqueue("tasks", titleWrite.promise);
+    enqueue("tasks", statusWrite.promise);
+
+    fireEvent.click(screen.getByRole("button", { name: "Task A" }));
+    const titleInput = screen.getByLabelText("Task title");
+    fireEvent.change(titleInput, { target: { value: "Edited Task A" } });
+    fireEvent.blur(titleInput);
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "done" },
+    });
+
+    enqueue("activity", ok(null));
+    enqueue("activity", ok(null));
+    enqueueLoad({ ...taskA, title: "Edited Task A", status: "done" });
+    enqueueLoad({ ...taskA, title: "Edited Task A", status: "done" });
+    await act(async () => {
+      titleWrite.resolve(ok(null));
+      statusWrite.resolve(ok(null));
+    });
+
+    await waitFor(() => expect(activityInserts()).toHaveLength(2));
+    expect(activityInserts().map((call) => (
+      call.payload as { text: string }
+    ).text)).toEqual([
+      "Renamed to “Edited Task A”",
+      "Status set to Done",
+    ]);
+    expect(
+      (screen.getByLabelText("Status") as HTMLSelectElement).value,
+    ).toBe("done");
+
+  });
+
+  it("keeps one field's failure visible when another field succeeds and reconciles", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const titleWrite = deferred<QueryResult>();
+    const statusWrite = deferred<QueryResult>();
+    enqueue("tasks", titleWrite.promise);
+    enqueue("tasks", statusWrite.promise);
+
+    fireEvent.click(screen.getByRole("button", { name: "Task A" }));
+    const titleInput = screen.getByLabelText("Task title");
+    fireEvent.change(titleInput, { target: { value: "Rejected title" } });
+    fireEvent.blur(titleInput);
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "done" },
+    });
+
+    enqueue("activity", ok(null));
+    enqueueLoad({ ...taskA, status: "done" });
+    await act(async () => {
+      titleWrite.resolve(failure("Title update denied."));
+      statusWrite.resolve(ok(null));
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not update task.");
+    expect(alert.textContent).toContain("Title update denied.");
+    expect(
+      (screen.getByLabelText("Status") as HTMLSelectElement).value,
+    ).toBe("done");
+
+    enqueue("tasks", failure("Concurrent refresh denied."));
+    trigger(`task-${taskA.id}`, "experiments", "UPDATE");
+    await screen.findByRole("button", { name: "Retry" });
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts).toHaveLength(2);
+    expect(alerts.map((item) => item.textContent).join(" ")).toContain(
+      "Title update denied.",
+    );
+    expect(alerts.map((item) => item.textContent).join(" ")).toContain(
+      "Concurrent refresh denied.",
+    );
+  });
+
+  it("preserves rapid assignee intent in invocation order", async () => {
+    enqueueLoad(taskA, [], [], [member, alice, bob]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const firstWrite = deferred<QueryResult>();
+    const secondWrite = deferred<QueryResult>();
+    enqueue("tasks", firstWrite.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
+    fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
+
+    expect(taskUpdates().map((call) => call.payload)).toEqual([
+      { assignees: ["Alice"] },
+    ]);
+
+    enqueue("activity", ok(null));
+    enqueueLoad({ ...taskA, assignees: ["Alice"] }, [], [], [
+      member,
+      alice,
+      bob,
+    ]);
+    enqueue("tasks", secondWrite.promise);
+    enqueue("activity", ok(null));
+    enqueueLoad({ ...taskA, assignees: ["Alice", "Bob"] }, [], [], [
+      member,
+      alice,
+      bob,
+    ]);
+    await act(async () => firstWrite.resolve(ok(null)));
+
+    await waitFor(() => expect(taskUpdates().map((call) => call.payload)).toEqual([
+      { assignees: ["Alice"] },
+      { assignees: ["Alice", "Bob"] },
+    ]));
+    await act(async () => secondWrite.resolve(ok(null)));
+  });
+
+  it("rebases a queued assignee change after an earlier assignee write fails", async () => {
+    enqueueLoad(taskA, [], [], [member, alice, bob]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const aliceWrite = deferred<QueryResult>();
+    const bobWrite = deferred<QueryResult>();
+    enqueue("tasks", aliceWrite.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
+    fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
+    expect(taskUpdates().map((call) => call.payload)).toEqual([
+      { assignees: ["Alice"] },
+    ]);
+
+    enqueue("tasks", bobWrite.promise);
+    enqueue("activity", ok(null));
+    enqueueLoad({ ...taskA, assignees: ["Bob"] }, [], [], [
+      member,
+      alice,
+      bob,
+    ]);
+    await act(async () => aliceWrite.resolve(failure("Alice update denied.")));
+
+    await waitFor(() => expect(taskUpdates().map((call) => call.payload)).toEqual([
+      { assignees: ["Alice"] },
+      { assignees: ["Bob"] },
+    ]));
+    await act(async () => bobWrite.resolve(ok(null)));
+
+    expect(await screen.findByRole("button", { name: "Unassign Bob" }))
+      .toBeDefined();
+    expect(screen.queryByRole("button", { name: "Unassign Alice" })).toBeNull();
+    expect(activityInserts().map((call) => call.payload)).toEqual([
+      expect.objectContaining({
+        task_id: taskA.id,
+        text: "Assigned Bob",
+        kind: "assign",
+      }),
+    ]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("skips a queued unassign that becomes a no-op after assign fails", async () => {
+    enqueueLoad(taskA, [], [], [member, alice]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const assignWrite = deferred<QueryResult>();
+    enqueue("tasks", assignWrite.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
+    fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
+
+    enqueue("tasks", ok(null));
+    enqueue("activity", ok(null));
+    enqueueLoad(taskA, [], [], [member, alice]);
+    await act(async () => assignWrite.resolve(failure("Assign denied.")));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(taskUpdates().map((call) => call.payload)).toEqual([
+      { assignees: ["Alice"] },
+    ]);
+    expect(activityInserts()).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Unassign Alice" })).toBeNull();
+  });
+
+  it("skips a queued assign that becomes a no-op after unassign fails", async () => {
+    const assignedTask = { ...taskA, assignees: ["Alice"] };
+    enqueueLoad(assignedTask, [], [], [member, alice]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Unassign Alice" });
+
+    const unassignWrite = deferred<QueryResult>();
+    enqueue("tasks", unassignWrite.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Unassign Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unassign Alice" }));
+
+    enqueue("tasks", ok(null));
+    enqueue("activity", ok(null));
+    enqueueLoad(assignedTask, [], [], [member, alice]);
+    await act(async () => unassignWrite.resolve(failure("Unassign denied.")));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(taskUpdates().map((call) => call.payload)).toEqual([
+      { assignees: [] },
+    ]);
+    expect(activityInserts()).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Unassign Alice" })).toBeDefined();
+  });
+
+  it("reports partial Task success truthfully and reconciles after activity failure", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    enqueue("tasks", ok(null));
+    enqueue("activity", failure("Activity insert denied."));
+    enqueueLoad({ ...taskA, status: "done" });
+    fireEvent.change(screen.getByLabelText("Status"), {
+      target: { value: "done" },
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "Task updated, but activity could not be recorded.",
+    );
+    expect(alert.textContent).toContain("Activity insert denied.");
+    expect(alert.textContent).not.toContain("Could not update task.");
+    expect(
+      (screen.getByLabelText("Status") as HTMLSelectElement).value,
+    ).toBe("done");
+  });
+
+  it("audits a confirmed write to its captured Task after navigation without leaking UI", async () => {
+    enqueueLoad(taskA);
+    const view = render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const committedWrite = deferred<QueryResult>();
+    enqueue("tasks", committedWrite.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Task A" }));
+    const titleInput = screen.getByLabelText("Task title");
+    fireEvent.change(titleInput, { target: { value: "Committed A title" } });
+    fireEvent.blur(titleInput);
+
+    enqueueLoad(taskB);
+    view.rerender(<TaskDetail id={taskB.id} />);
+    await screen.findByRole("button", { name: "Task B" });
+    enqueue("activity", ok(null));
+    await act(async () => committedWrite.resolve(ok(null)));
+
+    await waitFor(() => expect(activityInserts()).toHaveLength(1));
+    expect(activityInserts()[0].payload).toMatchObject({
+      task_id: taskA.id,
+      text: "Renamed to “Committed A title”",
+    });
+    expect(screen.getByRole("button", { name: "Task B" })).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("submits a timeline note exactly once and exposes truthful pending UI", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const pendingInsert = deferred<QueryResult>();
+    enqueue("activity", pendingInsert.promise);
+    enqueue("activity", pendingInsert.promise);
+    const input = screen.getByLabelText("Add a note to the timeline");
+    fireEvent.change(input, { target: { value: "One note" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: /Add note|Adding…/ }));
+
+    expect(activityInserts()).toHaveLength(1);
+    const pendingButton = screen.getByRole("button", { name: "Adding…" });
+    expect((pendingButton as HTMLButtonElement).disabled).toBe(true);
+    expect((input as HTMLInputElement).value).toBe("One note");
+  });
+
   it("keeps a timeline note draft and surfaces its insert error", async () => {
     enqueueLoad(taskA);
     render(<TaskDetail id={taskA.id} />);
@@ -427,6 +778,201 @@ describe("TaskDetail orchestration", () => {
       (screen.getByLabelText("Add a note to the timeline") as HTMLInputElement)
         .value,
     ).toBe("Keep this draft");
+  });
+
+  it("registers scoped Realtime handlers and ignores unrelated update traffic", async () => {
+    enqueueLoad(taskA, [experiment("Scoped run")], [activity("Scoped activity")]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByText("Scoped run");
+
+    expect(supabaseState.handlers.map(({ config }) => config)).toEqual([
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "tasks",
+        filter: `id=eq.${taskA.id}`,
+      },
+      { event: "DELETE", schema: "public", table: "tasks" },
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "experiments",
+        filter: `task_id=eq.${taskA.id}`,
+      },
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "experiments",
+        filter: `task_id=eq.${taskA.id}`,
+      },
+      { event: "DELETE", schema: "public", table: "experiments" },
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "activity",
+        filter: `task_id=eq.${taskA.id}`,
+      },
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "activity",
+        filter: `task_id=eq.${taskA.id}`,
+      },
+      { event: "DELETE", schema: "public", table: "activity" },
+    ]);
+
+    const taskQueries = supabaseState.fromCalls.filter(
+      (table) => table === "tasks",
+    ).length;
+    trigger(
+      `task-${taskA.id}`,
+      "tasks",
+      "UPDATE",
+      { id: taskB.id },
+    );
+    expect(supabaseState.fromCalls.filter(
+      (table) => table === "tasks",
+    )).toHaveLength(taskQueries);
+  });
+
+  it("ignores unrelated DELETE payloads but detects current Task and Experiment deletion", async () => {
+    const currentExperiment = experiment("Delete-aware run");
+    const currentActivity = activity("Delete-aware activity");
+    enqueueLoad(taskA, [currentExperiment], [currentActivity]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByText("Delete-aware run");
+
+    const taskQueries = () => supabaseState.fromCalls.filter(
+      (table) => table === "tasks",
+    ).length;
+    const initialQueries = taskQueries();
+    trigger(
+      `task-${taskA.id}`,
+      "experiments",
+      "DELETE",
+      {},
+      { id: "00000000-0000-4000-8000-000000000099" },
+    );
+    expect(taskQueries()).toBe(initialQueries);
+
+    trigger(
+      `task-${taskA.id}`,
+      "activity",
+      "DELETE",
+      {},
+      { id: "unrelated-activity" },
+    );
+    expect(taskQueries()).toBe(initialQueries);
+
+    enqueueLoad(taskA, [], [currentActivity]);
+    trigger(
+      `task-${taskA.id}`,
+      "experiments",
+      "DELETE",
+      {},
+      { id: currentExperiment.id },
+    );
+    await waitFor(() => {
+      expect(screen.queryByText("Delete-aware run")).toBeNull();
+    });
+
+    enqueueLoad(taskA, []);
+    trigger(
+      `task-${taskA.id}`,
+      "activity",
+      "DELETE",
+      {},
+      { id: currentActivity.id },
+    );
+    await waitFor(() => {
+      expect(screen.queryByText("Delete-aware activity")).toBeNull();
+    });
+
+    enqueue("tasks", ok(null));
+    trigger(
+      `task-${taskA.id}`,
+      "tasks",
+      "DELETE",
+      {},
+      { id: taskA.id },
+    );
+    expect(await screen.findByText(/Task not found/)).toBeDefined();
+  });
+
+  it("recognizes an Experiment DELETE while its INSERT refresh is still pending", async () => {
+    const inserted = experiment("Transient experiment");
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const oldModule = deferred<QueryResult>();
+    enqueue("tasks", ok(taskA));
+    enqueue("modules", oldModule.promise);
+    enqueue("experiments", ok([inserted]));
+    enqueue("members", ok([member]));
+    enqueue("activity", ok([]));
+    trigger(
+      `task-${taskA.id}`,
+      "experiments",
+      "INSERT",
+      { id: inserted.id, task_id: taskA.id },
+    );
+    await waitFor(() => expect(supabaseState.fromCalls.filter(
+      (table) => table === "experiments",
+    )).toHaveLength(2));
+
+    enqueueLoad(taskA);
+    trigger(
+      `task-${taskA.id}`,
+      "experiments",
+      "DELETE",
+      {},
+      { id: inserted.id },
+    );
+    await waitFor(() => expect(supabaseState.fromCalls.filter(
+      (table) => table === "tasks",
+    )).toHaveLength(3));
+
+    await act(async () => oldModule.resolve(ok(moduleRow)));
+    expect(screen.queryByText("Transient experiment")).toBeNull();
+  });
+
+  it("recognizes an Activity DELETE while its INSERT refresh is still pending", async () => {
+    const inserted = activity("Transient activity");
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const oldModule = deferred<QueryResult>();
+    enqueue("tasks", ok(taskA));
+    enqueue("modules", oldModule.promise);
+    enqueue("experiments", ok([]));
+    enqueue("members", ok([member]));
+    enqueue("activity", ok([inserted]));
+    trigger(
+      `task-${taskA.id}`,
+      "activity",
+      "INSERT",
+      { id: inserted.id, task_id: taskA.id },
+    );
+    await waitFor(() => expect(supabaseState.fromCalls.filter(
+      (table) => table === "activity",
+    )).toHaveLength(2));
+
+    enqueueLoad(taskA);
+    trigger(
+      `task-${taskA.id}`,
+      "activity",
+      "DELETE",
+      {},
+      { id: inserted.id },
+    );
+    await waitFor(() => expect(supabaseState.fromCalls.filter(
+      (table) => table === "tasks",
+    )).toHaveLength(3));
+
+    await act(async () => oldModule.resolve(ok(moduleRow)));
+    expect(screen.queryByText("Transient activity")).toBeNull();
   });
 
   it("invalidates an initial request before unmount cleanup completes", async () => {

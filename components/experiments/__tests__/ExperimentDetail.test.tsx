@@ -294,6 +294,97 @@ describe("ExperimentDetail orchestration", () => {
     ));
   });
 
+  it("retries failed post-save authority without conflicting on the committed revision", async () => {
+    const current = experiment();
+    const firstSaved = experiment({
+      name: "First",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const secondSaved = experiment({
+      name: "Second",
+      updated_at: "2026-07-24T03:00:00.000Z",
+    });
+    const firstSave = deferred<ExperimentUpdateResult>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockRejectedValueOnce(new Error("authority unavailable"))
+      .mockResolvedValueOnce(bundle(firstSaved))
+      .mockResolvedValue(bundle(secondSaved));
+    vi.mocked(updateExperiment)
+      .mockReturnValueOnce(firstSave.promise)
+      .mockResolvedValueOnce({ ok: true, experiment: secondSaved });
+    render(<ExperimentDetail id={current.id} />);
+
+    const name = await screen.findByLabelText("Experiment Name");
+    fireEvent.change(name, { target: { value: "First" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenCalledTimes(1));
+    fireEvent.change(name, { target: { value: "Second" } });
+    await act(async () => {
+      firstSave.resolve({ ok: true, experiment: firstSaved });
+    });
+
+    expect(await screen.findByText(/authority unavailable/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(loadExperimentBundle).toHaveBeenCalledTimes(3));
+    expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
+      .toBe("Second");
+    expect(screen.queryByText("This experiment changed remotely.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenNthCalledWith(
+      2,
+      current.id,
+      firstSaved.updated_at,
+      expect.objectContaining({ name: "Second" }),
+    ));
+  });
+
+  it("does not conflict when generic realtime overtakes post-save authority with the committed revision", async () => {
+    const current = experiment();
+    const firstSaved = experiment({
+      name: "First",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const secondSaved = experiment({
+      name: "Second",
+      updated_at: "2026-07-24T03:00:00.000Z",
+    });
+    const firstSave = deferred<ExperimentUpdateResult>();
+    const postSaveAuthority = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockReturnValueOnce(postSaveAuthority.promise)
+      .mockResolvedValueOnce(bundle(firstSaved))
+      .mockResolvedValue(bundle(secondSaved));
+    vi.mocked(updateExperiment)
+      .mockReturnValueOnce(firstSave.promise)
+      .mockResolvedValueOnce({ ok: true, experiment: secondSaved });
+    render(<ExperimentDetail id={current.id} />);
+
+    const name = await screen.findByLabelText("Experiment Name");
+    fireEvent.change(name, { target: { value: "First" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenCalledTimes(1));
+    fireEvent.change(name, { target: { value: "Second" } });
+    await act(async () => {
+      firstSave.resolve({ ok: true, experiment: firstSaved });
+    });
+    await waitFor(() => expect(loadExperimentBundle).toHaveBeenCalledTimes(2));
+    await act(async () => testState.experimentChanged?.());
+
+    expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
+      .toBe("Second");
+    expect(screen.queryByText("This experiment changed remotely.")).toBeNull();
+    await act(async () => postSaveAuthority.resolve(bundle(firstSaved)));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenNthCalledWith(
+      2,
+      current.id,
+      firstSaved.updated_at,
+      expect.objectContaining({ name: "Second" }),
+    ));
+  });
+
   it("lets a newer realtime snapshot establish state before initial load resolves", async () => {
     const initial = deferred<ExperimentBundle | null>();
     const realtime = deferred<ExperimentBundle | null>();
@@ -698,6 +789,49 @@ describe("ExperimentDetail orchestration", () => {
     expect(await screen.findByText(
       "Experiment not found. It may have been deleted.",
     )).toBeDefined();
+  });
+
+  it("preserves an edit during Load latest when authority confirms the displayed revision", async () => {
+    const current = experiment();
+    const displayedConflict = experiment({
+      name: "Displayed conflict",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    const savedEdit = experiment({
+      name: "Edit during reload",
+      updated_at: "2026-07-24T03:00:00.000Z",
+    });
+    const freshAuthority = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValueOnce(bundle(displayedConflict))
+      .mockReturnValueOnce(freshAuthority.promise)
+      .mockResolvedValue(bundle(savedEdit));
+    vi.mocked(updateExperiment).mockResolvedValue({
+      ok: true,
+      experiment: savedEdit,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExperimentDetail id={current.id} />);
+
+    const name = await screen.findByLabelText("Experiment Name");
+    fireEvent.change(name, { target: { value: "Original local draft" } });
+    await act(async () => testState.experimentChanged?.());
+    fireEvent.click(screen.getByRole("button", { name: "Load latest" }));
+    await waitFor(() => expect(loadExperimentBundle).toHaveBeenCalledTimes(3));
+    fireEvent.change(name, { target: { value: "Edit during reload" } });
+    await act(async () => freshAuthority.resolve(bundle(displayedConflict)));
+
+    expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
+      .toBe("Edit during reload");
+    expect(screen.getByText("Unsaved changes")).toBeDefined();
+    expect(screen.queryByText("This experiment changed remotely.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenCalledWith(
+      current.id,
+      displayedConflict.updated_at,
+      expect.objectContaining({ name: "Edit during reload" }),
+    ));
   });
 
   it("treats active Markdown as local editing during realtime reconciliation", async () => {

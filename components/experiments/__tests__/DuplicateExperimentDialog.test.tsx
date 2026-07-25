@@ -1,4 +1,7 @@
 import {
+  useState,
+} from "react";
+import {
   act,
   cleanup,
   fireEvent,
@@ -80,9 +83,68 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function DuplicateHarness() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Launch duplicate</button>
+      <DuplicateExperimentDialog
+        open={open}
+        source={source}
+        members={[member]}
+        onClose={() => setOpen(false)}
+        onCreated={() => undefined}
+      />
+    </>
+  );
+}
+
 describe("DuplicateExperimentDialog", () => {
   beforeEach(() => vi.resetAllMocks());
   afterEach(cleanup);
+
+  it("traps keyboard focus, closes with Escape, and restores the launcher", async () => {
+    render(<DuplicateHarness />);
+    const launch = screen.getByRole("button", { name: "Launch duplicate" });
+    launch.focus();
+    fireEvent.click(launch);
+
+    const name = screen.getByLabelText("Duplicate name");
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    const first = screen.getByRole("button", { name: "Close" });
+    const last = screen.getByRole("button", { name: "Duplicate experiment" });
+
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    fireEvent.keyDown(last, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(launch);
+  });
+
+  it("keeps focus and Escape inside while duplication is pending", async () => {
+    const request = deferred<Experiment>();
+    vi.mocked(duplicateExperiment).mockReturnValue(request.promise);
+    render(<DuplicateHarness />);
+    const launch = screen.getByRole("button", { name: "Launch duplicate" });
+    fireEvent.click(launch);
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate experiment" }));
+
+    const dialog = screen.getByRole("dialog");
+    launch.focus();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement ?? dialog, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement ?? dialog, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+
+    await act(async () => request.resolve({ id: "duplicate" } as Experiment));
+  });
 
   it("shows the explicit Source Baseline and copy/reset boundary", async () => {
     vi.mocked(duplicateExperiment).mockResolvedValue({ id: "duplicate" } as Experiment);

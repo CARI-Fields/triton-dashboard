@@ -332,7 +332,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   border-radius: 5px; color: var(--ink); word-break: break-all;
 }
 
-@media (max-width: 820px) {
+/* The 232px desktop sidebar leaves the legacy canvas 820px wide at 1052px. */
+@media (max-width: 1052px) {
   .pipeline { flex-direction: column; }
   .arrow { transform: rotate(90deg); padding: 8px 0; }
   .foundation-grid { grid-template-columns: 1fr; }
@@ -578,5 +579,14 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   .nav-btn { white-space: nowrap; }
   .navbar-spacer { display: none; }
   .wrap { padding-inline: 18px; }
-  .logout-btn { top: 60px; right: 10px; }
+  .login-screen { min-height: calc(100dvh - 52px); }
+  .app-content:has(> .logout-btn) {
+    position: relative;
+    padding-top: 44px;
+  }
+  .app-content > .logout-btn {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+  }
 }

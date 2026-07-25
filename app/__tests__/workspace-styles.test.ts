@@ -18,6 +18,14 @@ function ruleBody(css: string, selector: string): string {
   return match?.[1] ?? "";
 }
 
+function mediaBody(css: string, width: number): string {
+  const match = css.match(
+    new RegExp(`@media\\s*\\(max-width:\\s*${width}px\\)\\s*\\{([\\s\\S]+)\\}\\s*$`),
+  );
+  expect(match, `Expected a max-width ${width}px media query`).not.toBeNull();
+  return match?.[1] ?? "";
+}
+
 describe("workspace visual contracts", () => {
   it("mounts the global workspace shell through the root layout", () => {
     expect(layout).toMatch(/import\s+["']\.\/experiment-workspace\.css["']/);
@@ -37,11 +45,20 @@ describe("workspace visual contracts", () => {
   });
 
   it("switches the shell to horizontal navigation at 860px", () => {
-    const mobile = globals.match(/@media\s*\(max-width:\s*860px\)\s*\{([\s\S]+)\}\s*$/);
-    expect(mobile).not.toBeNull();
-    expect(mobile?.[1]).toMatch(/\.app-shell\s*\{\s*display\s*:\s*block/);
-    expect(mobile?.[1]).toMatch(/\.navbar-inner[\s\S]*flex-direction\s*:\s*row/);
-    expect(mobile?.[1]).toMatch(/overflow-x\s*:\s*auto/);
+    const mobile = mediaBody(globals, 860);
+    expect(mobile).toMatch(/\.app-shell\s*\{\s*display\s*:\s*block/);
+    expect(mobile).toMatch(/\.navbar-inner[\s\S]*flex-direction\s*:\s*row/);
+    expect(mobile).toMatch(/overflow-x\s*:\s*auto/);
+  });
+
+  it("stacks legacy board and analytics layouts before the sidebar leaves them 820px", () => {
+    expect(globals).not.toMatch(/@media\s*\(max-width:\s*820px\)/);
+    const sidebarAware = mediaBody(globals, 1052);
+    expect(sidebarAware).toMatch(/\.pipeline\s*\{\s*flex-direction\s*:\s*column/);
+    expect(sidebarAware).toMatch(
+      /\.foundation-grid\s*\{\s*grid-template-columns\s*:\s*1fr/,
+    );
+    expect(sidebarAware).toMatch(/\.panel-grid\s*\{\s*grid-template-columns\s*:\s*1fr/);
   });
 
   it("keeps experiment and compare tables scrollable and pins Compare identity", () => {
@@ -62,16 +79,61 @@ describe("workspace visual contracts", () => {
 
   it("stacks editor forms and lets narrow save actions wrap", () => {
     const css = workspaceCss();
-    const mobile = css.match(/@media\s*\(max-width:\s*760px\)\s*\{([\s\S]+)\}\s*$/);
-    expect(mobile).not.toBeNull();
-    expect(mobile?.[1]).toMatch(
+    const mobile = mediaBody(css, 760);
+    expect(mobile).toMatch(
       /\.dataset-row\s*,\s*\.property-grid\s*\{\s*grid-template-columns\s*:\s*1fr/,
     );
-    expect(mobile?.[1]).toMatch(
+    expect(mobile).toMatch(
       /\.decision-editor\s*\{\s*grid-template-columns\s*:\s*1fr/,
     );
     expect(ruleBody(css, ".experiment-save-bar")).toMatch(/flex-wrap\s*:\s*wrap/);
-    expect(mobile?.[1]).toMatch(/\.workspace-actions[\s\S]*width\s*:\s*100%/);
+    expect(mobile).toMatch(/\.workspace-actions[\s\S]*width\s*:\s*100%/);
+  });
+
+  it("stacks the Task experiments header and actions on mobile", () => {
+    const mobile = mediaBody(workspaceCss(), 760);
+    const header = ruleBody(
+      mobile,
+      ".task-experiments-section .detail-section-head",
+    );
+    expect(header).toMatch(/flex-direction\s*:\s*column/);
+    expect(header).toMatch(/align-items\s*:\s*stretch/);
+    expect(ruleBody(mobile, ".task-experiments-section .workspace-actions"))
+      .toMatch(/width\s*:\s*100%/);
+  });
+
+  it("wraps long Baseline and context values instead of widening mobile pages", () => {
+    const mobile = mediaBody(workspaceCss(), 760);
+    const baseline = ruleBody(mobile, ".baseline-reference");
+    expect(baseline).toMatch(/white-space\s*:\s*normal/);
+    expect(baseline).toMatch(/overflow-wrap\s*:\s*anywhere/);
+    expect(ruleBody(mobile, ".context-difference-list > div"))
+      .toMatch(/grid-template-columns\s*:\s*1fr/);
+    const contextValue = ruleBody(mobile, ".context-difference-list > div > *");
+    expect(contextValue).toMatch(/min-width\s*:\s*0/);
+    expect(contextValue).toMatch(/overflow-wrap\s*:\s*anywhere/);
+  });
+
+  it("styles the real Baseline search input and keeps its focus visible", () => {
+    const css = workspaceCss();
+    expect(css).toMatch(
+      /\.baseline-picker input\s*,[\s\S]*?\.baseline-picker select\s*,/,
+    );
+    expect(css).toMatch(
+      /\.baseline-picker input:focus-visible\s*,[\s\S]*?\.baseline-picker select:focus-visible\s*,/,
+    );
+  });
+
+  it("reserves mobile authenticated header space without changing login/setup shells", () => {
+    const mobile = mediaBody(globals, 860);
+    expect(ruleBody(mobile, ".login-screen")).toMatch(
+      /min-height\s*:\s*calc\(100dvh\s*-\s*52px\)/,
+    );
+    expect(ruleBody(mobile, ".app-content:has(> .logout-btn)"))
+      .toMatch(/padding-top\s*:/);
+    const logout = ruleBody(mobile, ".app-content > .logout-btn");
+    expect(logout).toMatch(/position\s*:\s*absolute/);
+    expect(logout).not.toMatch(/position\s*:\s*fixed/);
   });
 
   it("defines explicit focus-visible treatment for every interactive workspace family", () => {

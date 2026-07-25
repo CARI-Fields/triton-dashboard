@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Experiment, Member, Task } from "@/lib/types";
@@ -47,9 +48,68 @@ function fillAndSubmit(name = "NPU guardrail run") {
   fireEvent.click(screen.getByRole("button", { name: "Create experiment" }));
 }
 
+function CreateHarness() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Launch create</button>
+      <CreateExperimentDialog
+        open={open}
+        tasks={[task]}
+        members={[member]}
+        onClose={() => setOpen(false)}
+        onCreated={() => undefined}
+      />
+    </>
+  );
+}
+
 describe("CreateExperimentDialog", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
+
+  it("traps keyboard focus, closes with Escape, and restores the launcher", async () => {
+    render(<CreateHarness />);
+    const launch = screen.getByRole("button", { name: "Launch create" });
+    launch.focus();
+    fireEvent.click(launch);
+
+    const name = screen.getByLabelText("Experiment name");
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    const first = screen.getByRole("button", { name: "Close" });
+    const last = screen.getByRole("button", { name: "Create experiment" });
+
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    fireEvent.keyDown(last, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(launch);
+  });
+
+  it("keeps focus and Escape inside while create is pending", async () => {
+    const request = deferred<Experiment>();
+    vi.mocked(createExperiment).mockReturnValue(request.promise);
+    render(<CreateHarness />);
+    const launch = screen.getByRole("button", { name: "Launch create" });
+    fireEvent.click(launch);
+    fillAndSubmit();
+
+    const dialog = screen.getByRole("dialog");
+    launch.focus();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement ?? dialog, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement ?? dialog, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+
+    await act(async () => request.resolve({ id: "created" } as Experiment));
+  });
 
   it("requires Name, Owner, and Task and creates a planned row", async () => {
     vi.mocked(createExperiment).mockResolvedValue({ id: "new-experiment" } as Experiment);

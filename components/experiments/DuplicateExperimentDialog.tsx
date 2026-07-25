@@ -10,6 +10,7 @@ import {
 import type { Experiment, Member } from "@/lib/types";
 import { duplicateExperiment } from "@/lib/experiments/repository";
 import { formatExperimentId } from "@/lib/experiments/policy";
+import { useModalFocus } from "@/components/experiments/useModalFocus";
 
 export default function DuplicateExperimentDialog({
   open,
@@ -34,6 +35,7 @@ export default function DuplicateExperimentDialog({
   const [ownerId, setOwnerId] = useState(source.owner_id ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const dialogRef = useModalFocus({ open, onClose, blocked: saving });
 
   useEffect(() => {
     mounted.current = true;
@@ -127,10 +129,12 @@ export default function DuplicateExperimentDialog({
       }}
     >
       <section
+        ref={dialogRef}
         className="experiment-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="duplicate-experiment-title"
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
@@ -159,9 +163,9 @@ export default function DuplicateExperimentDialog({
             <span>Name</span>
             <input
               aria-label="Duplicate name"
+              data-modal-initial-focus
               value={name}
               disabled={saving}
-              autoFocus
               onChange={(event) => setName(event.target.value)}
             />
           </label>

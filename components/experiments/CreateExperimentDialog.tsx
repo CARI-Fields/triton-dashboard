@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Experiment, Member, Task } from "@/lib/types";
 import { createExperiment } from "@/lib/experiments/repository";
+import { useModalFocus } from "@/components/experiments/useModalFocus";
 
 export default function CreateExperimentDialog({
   open,
@@ -27,6 +28,7 @@ export default function CreateExperimentDialog({
   const [ownerId, setOwnerId] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const dialogRef = useModalFocus({ open, onClose, blocked: saving });
 
   useEffect(() => {
     mounted.current = true;
@@ -87,10 +89,12 @@ export default function CreateExperimentDialog({
       }}
     >
       <section
+        ref={dialogRef}
         className="experiment-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-experiment-title"
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
@@ -113,10 +117,10 @@ export default function CreateExperimentDialog({
             <span>Name</span>
             <input
               aria-label="Experiment name"
+              data-modal-initial-focus
               value={name}
               onChange={(event) => setName(event.target.value)}
               disabled={saving}
-              autoFocus
             />
           </label>
           <label>

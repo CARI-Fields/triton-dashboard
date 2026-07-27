@@ -1,6 +1,6 @@
 # Triton Board
 
-### 🔗 Live board: **https://triton-dashboard-eight.vercel.app**
+### 🔗 Live board: **https://triton-dashboard-cari.vercel.app**
 
 A live, editable project board + research log for the **Triton Kernel Agent — RL Training**
 project. Modules → tasks with owners and status, and each task has its own detail page
@@ -105,7 +105,7 @@ Plus the **team login password** (to sign in to the running board) — shared ou
 - The Vercel project `Eason's projects / triton-dashboard` is linked to
   [`CARI-Fields/triton-dashboard`](https://github.com/CARI-Fields/triton-dashboard).
 - Pushes and merges to `main` deploy to
-  **[triton-dashboard-eight.vercel.app](https://triton-dashboard-eight.vercel.app)**.
+  **[triton-dashboard-cari.vercel.app](https://triton-dashboard-cari.vercel.app)**.
 - Changes should go through **pull requests**. Branch protection is not currently enabled on the
   new repository, so repository admins should treat direct pushes to `main` as an exception.
   The full workflow is in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.

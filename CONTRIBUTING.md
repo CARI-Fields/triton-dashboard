@@ -41,7 +41,7 @@ that's already been applied.** After merging, a maintainer runs `npm run db:migr
 - A maintainer reviews and merges your PR into `main`.
 - The Vercel project `Eason's projects / triton-dashboard` watches this GitHub repository.
 - Pushes and merges to `main` deploy production at
-  <https://triton-dashboard-eight.vercel.app>.
+  <https://triton-dashboard-cari.vercel.app>.
 - If a deployment does not start, check the GitHub commit status and the Vercel project dashboard;
   a maintainer can redeploy from **Deployments → ⋯ → Redeploy**.
 

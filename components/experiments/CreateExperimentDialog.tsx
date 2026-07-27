@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Experiment, Member, Task } from "@/lib/types";
 import { createExperiment } from "@/lib/experiments/repository";
-import { useModalFocus } from "@/components/experiments/useModalFocus";
+import { useModalFocus } from "@/components/ui/useModalFocus";
 
 export default function CreateExperimentDialog({
   open,

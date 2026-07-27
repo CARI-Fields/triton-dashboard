@@ -28,27 +28,59 @@ function mediaBody(css: string, width: number): string {
 
 describe("workspace visual contracts", () => {
   it("mounts the global workspace shell through the root layout", () => {
-    expect(layout).toMatch(/import\s+["']\.\/experiment-workspace\.css["']/);
+    const globalsImport = layout.indexOf('import "./globals.css"');
+    const workspaceImport = layout.indexOf('import "./experiment-workspace.css"');
+    expect(globalsImport).toBeGreaterThan(-1);
+    expect(workspaceImport).toBeGreaterThan(globalsImport);
+    expect(layout).not.toMatch(/^["']use client["'];?/m);
+    expect(layout).toMatch(/import\s+Script\s+from\s+["']next\/script["']/);
+    expect(layout).toMatch(/<html[^>]*suppressHydrationWarning/);
+    expect(layout).toMatch(
+      /<Script\s+id=["']theme-init["']\s+strategy=["']beforeInteractive["']>/,
+    );
+    expect(layout).toContain('localStorage.getItem("triton-theme")');
+    expect(layout).toMatch(/<ThemeProvider>[\s\S]*<AuthGate>/);
+    expect(layout).toMatch(/<AuthGate>[\s\S]*className=["']app-shell["']/);
     expect(layout).toMatch(/className=["']app-shell["']/);
     expect(layout).toMatch(/<Navbar\s*\/>/);
     expect(layout).toMatch(/<main\s+className=["']app-content["']>\{children\}<\/main>/);
   });
 
-  it("uses a white canvas and a 232px warm-gray desktop sidebar without decoration", () => {
-    expect(globals).not.toMatch(/background-image\s*:\s*radial-gradient/i);
-    expect(ruleBody(globals, ".app-shell")).toMatch(
-      /grid-template-columns\s*:\s*232px\s+minmax\(0,\s*1fr\)/,
-    );
-    expect(ruleBody(globals, ".app-content")).toMatch(/background\s*:\s*var\(--paper\)/);
-    expect(ruleBody(globals, ".navbar")).toMatch(/background\s*:\s*#f7f6f3/i);
-    expect(ruleBody(globals, ".navbar")).toMatch(/border-right\s*:/);
+  it("defines the approved light and dark semantic color contracts", () => {
+    expect(globals).toContain("--canvas: #ffffff");
+    expect(globals).toContain("--surface: #ffffff");
+    expect(globals).toContain("--surface-subtle: #f8faff");
+    expect(globals).toContain("--accent: #1e96eb");
+    expect(globals).toMatch(/\[data-theme="dark"\][\s\S]*--canvas:\s*#141414/);
+    expect(globals).toMatch(/\[data-theme="dark"\][\s\S]*--surface:\s*#252525/);
+    expect(globals).toMatch(/\[data-theme="dark"\][\s\S]*--border:\s*#414141/);
+    expect(globals).toMatch(/\[data-theme="dark"\][\s\S]*--text-primary:\s*#e6e6e6/i);
+    expect(globals).not.toMatch(/gradient\s*\(/i);
   });
 
-  it("switches the shell to horizontal navigation at 860px", () => {
-    const mobile = mediaBody(globals, 860);
+  it("uses the approved 256px desktop shell and semantic sidebar surface", () => {
+    expect(ruleBody(globals, ".app-shell")).toMatch(
+      /grid-template-columns\s*:\s*256px\s+minmax\(0,\s*1fr\)/,
+    );
+    expect(ruleBody(globals, ".app-shell")).toMatch(/background\s*:\s*var\(--canvas\)/);
+    expect(ruleBody(globals, ".app-sidebar")).toMatch(
+      /background\s*:\s*var\(--surface-subtle\)/,
+    );
+    expect(ruleBody(globals, ".app-sidebar")).toMatch(/border-right\s*:/);
+  });
+
+  it("switches the shell to an accessible navigation sheet at 768px", () => {
+    const mobile = mediaBody(globals, 768);
     expect(mobile).toMatch(/\.app-shell\s*\{\s*display\s*:\s*block/);
-    expect(mobile).toMatch(/\.navbar-inner[\s\S]*flex-direction\s*:\s*row/);
-    expect(mobile).toMatch(/overflow-x\s*:\s*auto/);
+    expect(ruleBody(mobile, ".mobile-app-bar")).toMatch(/display\s*:\s*flex/);
+    expect(ruleBody(mobile, ".app-sidebar")).toMatch(/position\s*:\s*fixed/);
+    expect(ruleBody(mobile, ".app-sidebar")).toMatch(
+      /transform\s*:\s*translateX\(-100%\)/,
+    );
+    expect(ruleBody(mobile, ".app-sidebar.is-open")).toMatch(
+      /transform\s*:\s*translateX\(0\)/,
+    );
+    expect(ruleBody(mobile, ".nav-backdrop")).toMatch(/display\s*:\s*block/);
   });
 
   it("stacks legacy board and analytics layouts before the sidebar leaves them 820px", () => {
@@ -122,18 +154,6 @@ describe("workspace visual contracts", () => {
     expect(css).toMatch(
       /\.baseline-picker input:focus-visible\s*,[\s\S]*?\.baseline-picker select:focus-visible\s*,/,
     );
-  });
-
-  it("reserves mobile authenticated header space without changing login/setup shells", () => {
-    const mobile = mediaBody(globals, 860);
-    expect(ruleBody(mobile, ".login-screen")).toMatch(
-      /min-height\s*:\s*calc\(100dvh\s*-\s*52px\)/,
-    );
-    expect(ruleBody(mobile, ".app-content:has(> .logout-btn)"))
-      .toMatch(/padding-top\s*:/);
-    const logout = ruleBody(mobile, ".app-content > .logout-btn");
-    expect(logout).toMatch(/position\s*:\s*absolute/);
-    expect(logout).not.toMatch(/position\s*:\s*fixed/);
   });
 
   it("defines explicit focus-visible treatment for every interactive workspace family", () => {

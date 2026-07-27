@@ -189,8 +189,9 @@ Project
 - Before `analyzing`, record a numeric Metric or Result Summary.
 - Before `completed`, record runnable context, Result, and Decision Outcome.
 - Duplicate copies Task, Owner, Data, Object, Environment, and Config; it clears Result,
-  Decision, Note, attachments, timeline, and run times. The Source is shown explicitly as
-  the new Baseline.
+  Decision, Note, attachments, and run times. The source timeline is not copied; the
+  duplicate starts a new timeline with `Experiment duplicated from EXP-####`. The Source
+  is shown explicitly as the new Baseline.
 - Baseline is never guessed. Without an explicit Baseline, Triton Board shows no Delta.
 - Delta is always `current - baseline`, is derived at render time, and has no automatic
   good/bad interpretation.

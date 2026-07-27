@@ -244,6 +244,49 @@ describe("experiment evidence", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("renders every collision-prone context difference without duplicate React keys", () => {
+    const baseline = row("00000000-0000-4000-8000-000000000001", 0.1, "npu:0");
+    const current = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:0");
+    baseline.config = {
+      "a.b": 1,
+      a: { b: 2 },
+      "items[0]": "literal baseline",
+      items: ["array baseline"],
+    } as unknown as ExperimentListRow["config"];
+    current.config = {
+      "a.b": 3,
+      a: { b: 4 },
+      "items[0]": "literal current",
+      items: ["array current"],
+    } as unknown as ExperimentListRow["config"];
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const { container } = render(
+        <BaselineSummary current={current} baseline={baseline} />,
+      );
+
+      expect(container.querySelectorAll(".context-difference-list > div"))
+        .toHaveLength(4);
+      for (const value of [
+        "1",
+        "2",
+        "3",
+        "4",
+        "literal baseline",
+        "literal current",
+        "array baseline",
+        "array current",
+      ]) {
+        expect(screen.getByText(value)).toBeDefined();
+      }
+      expect(consoleError.mock.calls.flat().join(" "))
+        .not.toContain("same key");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("treats inherited prototype metric names as unavailable", () => {
     const baseline = row("00000000-0000-4000-8000-000000000001", 0.1, "npu:0");
     const current = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:0");
@@ -284,6 +327,28 @@ describe("experiment evidence", () => {
     expect(onEditingChange).toHaveBeenLastCalledWith(true);
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("publishes active Markdown drafts and restores the original value on Escape", () => {
+    const onDraftChange = vi.fn();
+    const onSave = vi.fn();
+    render(
+      <MarkdownField
+        value="Original"
+        onSave={onSave}
+        onDraftChange={onDraftChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Unsaved Markdown" },
+    });
+    expect(onDraftChange).toHaveBeenLastCalledWith("Unsaved Markdown");
+
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+    expect(onDraftChange).toHaveBeenLastCalledWith("Original");
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("closes active Markdown editing once on unmount without idle churn", () => {
@@ -336,18 +401,21 @@ describe("experiment evidence", () => {
     expect(onChange).toHaveBeenLastCalledWith(null, "Ship this result");
   });
 
-  it("prioritizes same-Task Baselines and discloses cross-Task differences", () => {
+  it("shows same-Task plus selected cross-Task Baselines until cross-Task search is nonblank", () => {
     const current = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
     const sameTask = row("00000000-0000-4000-8000-000000000003", 0.2, "npu:1");
-    const crossTask = row("00000000-0000-4000-8000-000000000004", 0.15, "npu:0");
-    crossTask.task_id = "00000000-0000-4000-8000-000000000099";
-    crossTask.task = { id: crossTask.task_id, title: "Different Task" };
+    const selectedCrossTask = row("00000000-0000-4000-8000-000000000004", 0.15, "npu:0");
+    selectedCrossTask.task_id = "00000000-0000-4000-8000-000000000099";
+    selectedCrossTask.task = { id: selectedCrossTask.task_id, title: "Different Task" };
+    const searchedCrossTask = row("00000000-0000-4000-8000-000000000005", 0.1, "npu:2");
+    searchedCrossTask.task_id = selectedCrossTask.task_id;
+    searchedCrossTask.task = selectedCrossTask.task;
 
-    render(
+    const view = render(
       <BaselinePicker
         current={current}
-        candidates={[crossTask, sameTask]}
-        value={crossTask.id}
+        candidates={[current, searchedCrossTask, selectedCrossTask, sameTask]}
+        value={selectedCrossTask.id}
         onChange={() => undefined}
       />,
     );
@@ -355,19 +423,56 @@ describe("experiment evidence", () => {
     const options = screen.getAllByRole("option");
     expect(options[1].textContent).toContain("run-3");
     expect(options[2].textContent).toContain("run-4");
+    expect(options).toHaveLength(3);
+    expect(screen.queryByRole("option", { name: /run-2/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /run-5/ })).toBeNull();
     expect(screen.getByText(
       "Cross-Task Baseline: Different Task · 1 context fields differ.",
     )).toBeDefined();
 
     fireEvent.change(screen.getByLabelText("Search Baseline experiments"), {
-      target: { value: "run-3" },
+      target: { value: "run-5" },
     });
     const select = screen.getByLabelText("Baseline") as HTMLSelectElement;
-    expect(select.value).toBe(crossTask.id);
+    expect(select.value).toBe(selectedCrossTask.id);
     expect(screen.getAllByRole("option", { name: /run-4/ })).toHaveLength(1);
+    expect(screen.getAllByRole("option", { name: /run-5/ })).toHaveLength(1);
     expect(screen.getByText(
       "Cross-Task Baseline: Different Task · 1 context fields differ.",
     )).toBeDefined();
+
+    view.rerender(
+      <BaselinePicker
+        current={current}
+        candidates={[current, searchedCrossTask, selectedCrossTask, sameTask]}
+        value={null}
+        onChange={() => undefined}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Search Baseline experiments"), {
+      target: { value: "" },
+    });
+    expect(screen.getByRole("option", { name: /run-3/ })).toBeDefined();
+    expect(screen.queryByRole("option", { name: /run-4/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /run-5/ })).toBeNull();
+  });
+
+  it("does not re-add the current experiment from a corrupted self-selected value", () => {
+    const current = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
+    const sameTask = row("00000000-0000-4000-8000-000000000003", 0.2, "npu:1");
+
+    render(
+      <BaselinePicker
+        current={current}
+        candidates={[current, sameTask]}
+        value={current.id}
+        onChange={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByRole("option", { name: /run-2/ })).toBeNull();
+    expect((screen.getByLabelText("Baseline") as HTMLSelectElement).value).toBe("");
+    expect(screen.queryByText(/Cross-Task Baseline:/)).toBeNull();
   });
 
   it("surfaces attachment caption and upload failures without fabricating plots", async () => {

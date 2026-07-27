@@ -41,6 +41,7 @@ export default function DecisionEditor({
         <MarkdownField
           value={notes}
           onSave={(nextNotes) => onChange(outcome, nextNotes)}
+          onDraftChange={(nextNotes) => onChange(outcome, nextNotes)}
           onEditingChange={onEditingChange}
           placeholder="Why this outcome was chosen and what happens next"
         />

@@ -17,17 +17,24 @@ export default function BaselinePicker({
   onChange: (id: string | null) => void;
 }) {
   const [search, setSearch] = useState("");
-  const selected = value
+  const selected = value && value !== current.id
     ? candidates.find((candidate) => candidate.id === value) ?? null
     : null;
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
     const matches = candidates
-      .filter((candidate) => !query || [
-        candidate.name,
-        candidate.task?.title ?? "",
-        formatExperimentId(candidate.experiment_no),
-      ].join(" ").toLowerCase().includes(query))
+      .filter((candidate) => candidate.id !== current.id)
+      .filter((candidate) => {
+        if (!query) {
+          return candidate.task_id === current.task_id
+            || candidate.id === selected?.id;
+        }
+        return [
+          candidate.name,
+          candidate.task?.title ?? "",
+          formatExperimentId(candidate.experiment_no),
+        ].join(" ").toLowerCase().includes(query);
+      })
       .sort((left, right) => {
         const leftSameTask = left.task_id === current.task_id ? 0 : 1;
         const rightSameTask = right.task_id === current.task_id ? 0 : 1;
@@ -38,7 +45,7 @@ export default function BaselinePicker({
       return [selected, ...matches];
     }
     return matches;
-  }, [candidates, current.task_id, search, selected]);
+  }, [candidates, current.id, current.task_id, search, selected]);
 
   return (
     <div className="baseline-picker">
@@ -46,7 +53,7 @@ export default function BaselinePicker({
         <span>Baseline</span>
         <select
           aria-label="Baseline"
-          value={value ?? ""}
+          value={selected?.id ?? ""}
           onChange={(event) => onChange(event.target.value || null)}
         >
           <option value="">No Baseline</option>

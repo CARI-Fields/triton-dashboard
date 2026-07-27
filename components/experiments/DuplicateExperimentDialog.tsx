@@ -49,6 +49,9 @@ export default function DuplicateExperimentDialog({
   useLayoutEffect(() => {
     const opening = open && !previousOpen.current;
     const sourceChanged = open && sessionSourceRef.current.id !== source.id;
+    const sourceRevisionChanged = open
+      && sessionSourceRef.current.id === source.id
+      && sessionSourceRef.current.updated_at !== source.updated_at;
     const closing = !open && previousOpen.current;
     previousOpen.current = open;
 
@@ -58,7 +61,13 @@ export default function DuplicateExperimentDialog({
       setSaving(false);
       return;
     }
-    if (!opening && !sourceChanged) return;
+    if (!opening && !sourceChanged) {
+      if (sourceRevisionChanged) {
+        sessionSourceRef.current = source;
+        setSessionSource(source);
+      }
+      return;
+    }
 
     generation.current += 1;
     pending.current = null;
@@ -158,7 +167,14 @@ export default function DuplicateExperimentDialog({
             {sessionSource.name}
           </div>
           <p>Copies: Task, Owner, Data, Object, Environment, Config</p>
-          <p>Clears: Result, Decision, Note, attachments, timeline, run times</p>
+          <p>
+            Does not copy: Result, Decision, Note, attachments, source timeline,
+            run times
+          </p>
+          <p>
+            The duplicate starts a new timeline with an automatic duplication
+            event.
+          </p>
           <label>
             <span>Name</span>
             <input

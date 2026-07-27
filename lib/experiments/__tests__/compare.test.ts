@@ -76,7 +76,9 @@ describe("comparison derivation", () => {
       baselineId: baseline.id,
       diffOnly: false,
     });
-    const delta = columns.find((column) => column.key === "result.metrics.pass@1.delta");
+    const delta = columns.find((column) => (
+      column.key === "result.metrics.pass@1" && column.kind === "delta"
+    ));
     expect(delta?.values[current.id]).toBeCloseTo(0.15);
     expect(delta?.values[baseline.id]).toBe(0);
   });
@@ -90,7 +92,9 @@ describe("comparison derivation", () => {
       diffOnly: false,
     });
     expect(
-      columns.find((column) => column.key === "result.metrics.pass@1.delta")?.values[current.id],
+      columns.find((column) => (
+        column.key === "result.metrics.pass@1" && column.kind === "delta"
+      ))?.values[current.id],
     ).toBeNull();
   });
 
@@ -114,8 +118,144 @@ describe("comparison derivation", () => {
       diffOnly: false,
     });
     expect(
-      columns.find((column) => column.key === "result.metrics.pass@1.delta")?.values[current.id],
+      columns.find((column) => (
+        column.key === "result.metrics.pass@1" && column.kind === "delta"
+      ))?.values[current.id],
     ).toBeNull();
+  });
+
+  it("keeps metric value and Delta identities distinct for reserved-looking keys", () => {
+    const baseline = {
+      ...experiment("00000000-0000-4000-8000-000000000001", 0.1, "npu:0"),
+      metrics: { foo: 1, "foo.delta": 10 },
+    };
+    const current = {
+      ...experiment("00000000-0000-4000-8000-000000000002", 0.2, "npu:1"),
+      metrics: { foo: 3, "foo.delta": 16 },
+    };
+    const columns = buildCompareColumns([baseline, current], {
+      groups: ["result"],
+      baselineId: baseline.id,
+      diffOnly: false,
+    }).filter((column) => column.key.startsWith("result.metrics.foo"));
+
+    expect(columns.map(({ identity, kind, key }) => ({ identity, kind, key })))
+      .toEqual([
+        {
+          identity: { fieldId: '["result","metrics","foo"]', kind: "value" },
+          kind: "value",
+          key: "result.metrics.foo",
+        },
+        {
+          identity: { fieldId: '["result","metrics","foo"]', kind: "delta" },
+          kind: "delta",
+          key: "result.metrics.foo",
+        },
+        {
+          identity: {
+            fieldId: '["result","metrics","foo.delta"]',
+            kind: "value",
+          },
+          kind: "value",
+          key: "result.metrics.foo.delta",
+        },
+        {
+          identity: {
+            fieldId: '["result","metrics","foo.delta"]',
+            kind: "delta",
+          },
+          kind: "delta",
+          key: "result.metrics.foo.delta",
+        },
+      ]);
+    expect(new Set(columns.map((column) => JSON.stringify(column.identity))).size)
+      .toBe(4);
+    expect(columns.map((column) => column.values[current.id])).toEqual([
+      3,
+      2,
+      16,
+      6,
+    ]);
+  });
+
+  it("keeps dotted and bracketed object keys distinct from nested paths", () => {
+    const candidate = {
+      ...experiment("00000000-0000-4000-8000-000000000001", 0.1, "npu:0"),
+      config: {
+        "a.b": 1,
+        a: { b: 2 },
+        "items[0]": "literal",
+        items: ["array"],
+      } as unknown as Experiment["config"],
+    };
+    const columns = buildCompareColumns([candidate], {
+      groups: ["config"],
+      baselineId: null,
+      diffOnly: false,
+    });
+
+    expect(columns).toHaveLength(4);
+    expect(new Set(columns.map((column) => column.identity.fieldId)).size).toBe(4);
+    expect(Object.fromEntries(columns.map((column) => [
+      column.identity.fieldId,
+      column.values[candidate.id],
+    ]))).toEqual({
+      '["config","a.b"]': 1,
+      '["config","a","b"]': 2,
+      '["config","items[0]"]': "literal",
+      '["config","items"]': "array",
+    });
+  });
+
+  it("preserves collision-free field ids in context differences", () => {
+    const baseline = {
+      ...experiment("00000000-0000-4000-8000-000000000001", 0.1, "npu:0"),
+      config: {
+        "a.b": 1,
+        a: { b: 2 },
+        "items[0]": "literal baseline",
+        items: ["array baseline"],
+      } as unknown as Experiment["config"],
+    };
+    const current = {
+      ...experiment("00000000-0000-4000-8000-000000000002", 0.2, "npu:0"),
+      config: {
+        "a.b": 3,
+        a: { b: 4 },
+        "items[0]": "literal current",
+        items: ["array current"],
+      } as unknown as Experiment["config"],
+    };
+
+    expect(compareContexts(current, baseline).map((difference) => ({
+      fieldId: difference.fieldId,
+      key: difference.key,
+    }))).toEqual([
+      { fieldId: '["config","a.b"]', key: "config.a.b" },
+      { fieldId: '["config","a","b"]', key: "config.a.b" },
+      { fieldId: '["config","items"]', key: "config.items" },
+      { fieldId: '["config","items[0]"]', key: "config.items[0]" },
+    ]);
+  });
+
+  it("uses null when finite operands overflow during Delta subtraction", () => {
+    const baseline = {
+      ...experiment("00000000-0000-4000-8000-000000000001", 0.1, "npu:0"),
+      metrics: { huge: -Number.MAX_VALUE },
+    };
+    const current = {
+      ...experiment("00000000-0000-4000-8000-000000000002", 0.2, "npu:1"),
+      metrics: { huge: Number.MAX_VALUE },
+    };
+    const columns = buildCompareColumns([baseline, current], {
+      groups: ["result"],
+      baselineId: baseline.id,
+      diffOnly: false,
+    });
+
+    expect(columns.find((column) => (
+      column.key === "result.metrics.huge" && column.kind === "delta"
+    ))?.values[current.id]).toBeNull();
   });
 
   it("returns only changed context and removes all-equal fields in Diff only mode", () => {

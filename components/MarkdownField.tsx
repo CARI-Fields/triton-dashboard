@@ -19,12 +19,14 @@ const mdComponents = {
 export default function MarkdownField({
   value,
   onSave,
+  onDraftChange,
   onEditingChange,
   placeholder = "Click to edit — Markdown supported",
   minHeight = 76,
 }: {
   value: string;
   onSave: (v: string) => void;
+  onDraftChange?: (v: string) => void;
   onEditingChange?: (editing: boolean) => void;
   placeholder?: string;
   minHeight?: number;
@@ -33,6 +35,7 @@ export default function MarkdownField({
   const [draft, setDraft] = useState(value);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const editingRef = useRef(false);
+  const startValueRef = useRef(value);
   const onEditingChangeRef = useRef(onEditingChange);
 
   useEffect(() => {
@@ -61,6 +64,7 @@ export default function MarkdownField({
   }, [editing]);
 
   function beginEditing() {
+    startValueRef.current = value;
     editingRef.current = true;
     setEditing(true);
     onEditingChange?.(true);
@@ -71,7 +75,8 @@ export default function MarkdownField({
     setEditing(false);
     onEditingChange?.(false);
     const t = draft.replace(/\s+$/, "");
-    if (t !== value) onSave(t);
+    if (t !== draft) onDraftChange?.(t);
+    if (t !== startValueRef.current) onSave(t);
   }
 
   if (editing) {
@@ -85,6 +90,7 @@ export default function MarkdownField({
           style={{ minHeight }}
           onChange={(e) => {
             setDraft(e.target.value);
+            onDraftChange?.(e.target.value);
             autosize();
           }}
           onBlur={commit}
@@ -95,7 +101,8 @@ export default function MarkdownField({
             }
             if (e.key === "Escape") {
               editingRef.current = false;
-              setDraft(value);
+              setDraft(startValueRef.current);
+              onDraftChange?.(startValueRef.current);
               setEditing(false);
               onEditingChange?.(false);
             }

@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Experiment } from "@/lib/types";
 import {
+  clearSessionExperimentDraft,
+  draftStorageKey,
   editableExperimentPatch,
+  hasEditableExperimentChanges,
+  readSessionExperimentDraft,
   reconcileRealtime,
+  writeSessionExperimentDraft,
 } from "@/lib/experiments/draft";
 
 const draft = {
@@ -92,5 +97,121 @@ describe("realtime draft reconciliation", () => {
     expect(editableExperimentPatch(draft)).not.toHaveProperty("task_id");
     expect(editableExperimentPatch(draft)).not.toHaveProperty("updated_at");
     expect(editableExperimentPatch(draft).name).toBe("local name");
+  });
+});
+
+describe("session Experiment drafts", () => {
+  function storage() {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      values,
+    };
+  }
+
+  it("restores a valid draft only against the revision it was based on", () => {
+    const session = storage();
+    const source = { ...draft };
+    const local = { ...source, name: "  local exact name  ", notes: "draft" };
+    writeSessionExperimentDraft(session, source, local);
+
+    expect(readSessionExperimentDraft(session, source)).toEqual({
+      kind: "restore",
+      draft: local,
+      sourceRevision: source.updated_at,
+    });
+    expect(draftStorageKey(source.id)).toContain(source.id);
+  });
+
+  it("preserves a valid draft as a conflict when the remote revision advanced", () => {
+    const session = storage();
+    const source = { ...draft };
+    writeSessionExperimentDraft(session, source, {
+      ...source,
+      name: "Local draft",
+    });
+    const remote = {
+      ...source,
+      name: "Remote revision",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    };
+
+    expect(readSessionExperimentDraft(session, remote)).toEqual({
+      kind: "conflict",
+      draft: { ...remote, name: "Local draft" },
+      sourceRevision: source.updated_at,
+    });
+  });
+
+  it("rejects and clears malformed or cross-Experiment stored data", () => {
+    const session = storage();
+    const source = { ...draft };
+    session.setItem(draftStorageKey(source.id), JSON.stringify({
+      version: 1,
+      experimentId: "00000000-0000-4000-8000-000000000099",
+      sourceRevision: source.updated_at,
+      patch: { name: 42 },
+    }));
+
+    expect(readSessionExperimentDraft(session, source)).toEqual({ kind: "none" });
+    expect(session.getItem(draftStorageKey(source.id))).toBeNull();
+  });
+
+  it("clears only the requested Experiment draft", () => {
+    const session = storage();
+    const first = { ...draft };
+    const second = {
+      ...draft,
+      id: "00000000-0000-4000-8000-000000000002",
+    };
+    writeSessionExperimentDraft(session, first, { ...first, name: "First" });
+    writeSessionExperimentDraft(session, second, { ...second, name: "Second" });
+
+    clearSessionExperimentDraft(session, first.id);
+
+    expect(readSessionExperimentDraft(session, first)).toEqual({ kind: "none" });
+    expect(readSessionExperimentDraft(session, second).kind).toBe("restore");
+  });
+
+  it("recognizes when an editor reverts to the exact saved draft", () => {
+    expect(hasEditableExperimentChanges(draft, { ...draft, notes: "typing" }))
+      .toBe(true);
+    expect(hasEditableExperimentChanges(draft, structuredClone(draft)))
+      .toBe(false);
+  });
+
+  it("keeps an in-memory navigation fallback when sessionStorage is unavailable", () => {
+    const source = {
+      ...draft,
+      id: "00000000-0000-4000-8000-000000000077",
+    };
+    const unavailable = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    writeSessionExperimentDraft(unavailable, source, {
+      ...source,
+      name: "Memory fallback",
+    });
+
+    expect(readSessionExperimentDraft(unavailable, source)).toEqual({
+      kind: "restore",
+      draft: { ...source, name: "Memory fallback" },
+      sourceRevision: source.updated_at,
+    });
+    clearSessionExperimentDraft(unavailable, source.id);
   });
 });

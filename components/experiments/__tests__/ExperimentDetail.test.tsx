@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Experiment, Member } from "@/lib/types";
 import type {
@@ -13,6 +14,10 @@ import type {
   ExperimentUpdateResult,
 } from "@/lib/experiments/repository";
 import ExperimentDetail from "@/components/experiments/ExperimentDetail";
+import {
+  clearSessionExperimentDraft,
+  draftStorageKey,
+} from "@/lib/experiments/draft";
 import {
   deleteExperiment,
   loadExperimentBundle,
@@ -85,7 +90,19 @@ vi.mock("@/components/experiments/DecisionEditor", () => ({
   ),
 }));
 vi.mock("@/components/experiments/DuplicateExperimentDialog", () => ({
-  default: () => null,
+  default: ({
+    open,
+    onClose,
+  }: {
+    open: boolean;
+    onClose: () => void;
+  }) => open
+    ? (
+      <div role="dialog" aria-label="Duplicate Experiment dialog">
+        <button type="button" onClick={onClose}>Close duplicate dialog</button>
+      </div>
+    )
+    : null,
 }));
 vi.mock("@/components/experiments/EnvironmentEditor", () => ({
   default: () => null,
@@ -188,9 +205,35 @@ function bundle(current: Experiment): ExperimentBundle {
   };
 }
 
+function DetailLinkNavigationHarness({ current }: { current: Experiment }) {
+  const [route, setRoute] = useState<"detail" | "task">("detail");
+  return (
+    <div
+      onClick={(event) => {
+        const target = event.target as Element;
+        if (!target.closest("a.back-link")) return;
+        event.preventDefault();
+        setRoute("task");
+      }}
+    >
+      {route === "detail"
+        ? <ExperimentDetail id={current.id} />
+        : (
+          <section aria-label="Task destination">
+            <button type="button" onClick={() => setRoute("detail")}>
+              Return to experiment
+            </button>
+          </section>
+        )}
+    </div>
+  );
+}
+
 describe("ExperimentDetail orchestration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.sessionStorage.clear();
+    clearSessionExperimentDraft(window.sessionStorage, experiment().id);
     testState.experimentChanged = undefined;
     testState.relatedChanged = undefined;
   });
@@ -210,6 +253,147 @@ describe("ExperimentDetail orchestration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByDisplayValue("Source run")).toBeDefined();
     expect(loadExperimentBundle).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores an unsaved draft after the real Task Link switches routes and remounts", async () => {
+    const current = experiment();
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(current));
+    render(<DetailLinkNavigationHarness current={current} />);
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Navigation-safe local draft" },
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: "← Optimize conv2d" }));
+    expect(screen.getByRole("region", { name: "Task destination" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Return to experiment" }));
+
+    expect(await screen.findByDisplayValue("Navigation-safe local draft"))
+      .toBeDefined();
+    expect(screen.getByText("Unsaved changes")).toBeDefined();
+  });
+
+  it("restores a stale draft as a blocking conflict without overwriting remote authority", async () => {
+    const current = experiment();
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(current));
+    const firstVisit = render(<ExperimentDetail id={current.id} />);
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Local draft" },
+    });
+    firstVisit.unmount();
+
+    const remote = experiment({
+      name: "Remote revision",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(remote));
+    render(<ExperimentDetail id={current.id} />);
+
+    expect(await screen.findByDisplayValue("Local draft")).toBeDefined();
+    expect(screen.getByText("This experiment changed remotely.")).toBeDefined();
+    expect(screen.getByText(/Remote: Remote revision/)).toBeDefined();
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect(updateExperiment).not.toHaveBeenCalled();
+  });
+
+  it("keeps a restored stale-draft conflict blocked after a delayed same-revision realtime read", async () => {
+    const original = experiment();
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(original));
+    const firstVisit = render(<ExperimentDetail id={original.id} />);
+    fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+      target: { value: "Local R1 draft" },
+    });
+    firstVisit.unmount();
+
+    const remoteR2 = experiment({
+      name: "Remote R2",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(remoteR2));
+    render(<ExperimentDetail id={original.id} />);
+    expect(await screen.findByText(/Remote: Remote R2/)).toBeDefined();
+
+    await act(async () => testState.experimentChanged?.());
+
+    expect(screen.getByDisplayValue("Local R1 draft")).toBeDefined();
+    expect(screen.getByText("This experiment changed remotely.")).toBeDefined();
+    const save = screen.getByRole("button", { name: "Save changes" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(save);
+    expect(updateExperiment).not.toHaveBeenCalled();
+  });
+
+  it("uses the in-memory draft fallback when the sessionStorage property getter throws", async () => {
+    const current = experiment();
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(current));
+    const descriptor = Object.getOwnPropertyDescriptor(window, "sessionStorage");
+    expect(descriptor?.configurable).toBe(true);
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("Storage access denied", "SecurityError");
+      },
+    });
+
+    let firstVisit: ReturnType<typeof render> | null = null;
+    let secondVisit: ReturnType<typeof render> | null = null;
+    let thirdVisit: ReturnType<typeof render> | null = null;
+    try {
+      firstVisit = render(<ExperimentDetail id={current.id} />);
+      fireEvent.change(await screen.findByLabelText("Experiment Name"), {
+        target: { value: "Getter-safe local draft" },
+      });
+      firstVisit.unmount();
+
+      secondVisit = render(<ExperimentDetail id={current.id} />);
+      expect(await screen.findByDisplayValue("Getter-safe local draft")).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+      secondVisit.unmount();
+
+      thirdVisit = render(<ExperimentDetail id={current.id} />);
+      expect(await screen.findByDisplayValue("Source run")).toBeDefined();
+    } finally {
+      firstVisit?.unmount();
+      secondVisit?.unmount();
+      thirdVisit?.unmount();
+      if (descriptor) {
+        Object.defineProperty(window, "sessionStorage", descriptor);
+      }
+    }
+  });
+
+  it("clears persisted drafts after save, Discard, and delete", async () => {
+    const current = experiment();
+    const saved = experiment({
+      name: "Saved",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValue(bundle(saved));
+    vi.mocked(updateExperiment).mockResolvedValue({
+      ok: true,
+      experiment: saved,
+    });
+    vi.mocked(deleteExperiment).mockResolvedValue();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ExperimentDetail id={current.id} />);
+
+    const name = await screen.findByLabelText("Experiment Name");
+    fireEvent.change(name, { target: { value: "Saved" } });
+    expect(sessionStorage.getItem(draftStorageKey(current.id))).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByText(/Saved · updated/);
+    expect(sessionStorage.getItem(draftStorageKey(current.id))).toBeNull();
+
+    fireEvent.change(name, { target: { value: "Discard me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(sessionStorage.getItem(draftStorageKey(current.id))).toBeNull();
+
+    fireEvent.change(name, { target: { value: "Delete me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleteExperiment).toHaveBeenCalledOnce());
+    expect(sessionStorage.getItem(draftStorageKey(current.id))).toBeNull();
   });
 
   it("requires Owner and saves against the previously loaded updated_at", async () => {
@@ -741,6 +925,37 @@ describe("ExperimentDetail orchestration", () => {
       .toBeDefined();
   });
 
+  it("blocks Duplicate after a conflicted draft is reverted exactly to the stale committed revision", async () => {
+    const current = experiment();
+    const remote = experiment({
+      name: "Remote R2",
+      updated_at: "2026-07-24T02:00:00.000Z",
+    });
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValue(bundle(remote));
+    render(<ExperimentDetail id={current.id} />);
+
+    const name = await screen.findByLabelText("Experiment Name");
+    const duplicate = screen.getByRole("button", { name: "Duplicate" });
+    expect((duplicate as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(duplicate);
+    expect(screen.getByRole("dialog", { name: "Duplicate Experiment dialog" }))
+      .toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Close duplicate dialog" }));
+
+    fireEvent.change(name, { target: { value: "Local edit" } });
+    await act(async () => testState.experimentChanged?.());
+    expect(screen.getByText(/Remote: Remote R2/)).toBeDefined();
+    fireEvent.change(name, { target: { value: current.name } });
+
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+    expect((duplicate as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(duplicate);
+    expect(screen.queryByRole("dialog", { name: "Duplicate Experiment dialog" }))
+      .toBeNull();
+  });
+
   it("preserves a dirty draft when the experiment is deleted remotely", async () => {
     const current = experiment();
     vi.mocked(loadExperimentBundle)
@@ -755,6 +970,26 @@ describe("ExperimentDetail orchestration", () => {
     expect((screen.getByLabelText("Experiment Name") as HTMLInputElement).value)
       .toBe("Local name");
     expect(screen.getByText("This experiment was deleted remotely.")).toBeDefined();
+  });
+
+  it("blocks Duplicate after a remotely deleted draft is reverted to its committed fields", async () => {
+    const current = experiment();
+    vi.mocked(loadExperimentBundle)
+      .mockResolvedValueOnce(bundle(current))
+      .mockResolvedValueOnce(null);
+    render(<ExperimentDetail id={current.id} />);
+
+    const name = await screen.findByLabelText("Experiment Name");
+    fireEvent.change(name, { target: { value: "Local edit" } });
+    await act(async () => testState.experimentChanged?.());
+    expect(screen.getByText("This experiment was deleted remotely.")).toBeDefined();
+    fireEvent.change(name, { target: { value: current.name } });
+
+    const duplicate = screen.getByRole("button", { name: "Duplicate" });
+    expect((duplicate as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(duplicate);
+    expect(screen.queryByRole("dialog", { name: "Duplicate Experiment dialog" }))
+      .toBeNull();
   });
 
   it("loads fresh authority when accepting a conflict and sees a pending deletion", async () => {

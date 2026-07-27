@@ -13,8 +13,13 @@ import type { Experiment } from "@/lib/types";
 import { fmtDate } from "@/lib/time";
 import MarkdownField from "@/components/MarkdownField";
 import {
+  clearSessionExperimentDraft,
   editableExperimentPatch,
+  getSessionExperimentDraftStorage,
+  hasEditableExperimentChanges,
+  readSessionExperimentDraft,
   reconcileRealtime,
+  writeSessionExperimentDraft,
 } from "@/lib/experiments/draft";
 import {
   allowedTargets,
@@ -199,12 +204,22 @@ export default function ExperimentDetail({ id }: { id: string }) {
       setBundle(next);
       setServer(next.experiment);
       committedRef.current = next.experiment;
-      setDraft(structuredClone(next.experiment));
-      draftRef.current = next.experiment;
+      const storedDraft = readSessionExperimentDraft(
+        getSessionExperimentDraftStorage(),
+        next.experiment,
+      );
+      const nextDraft = storedDraft.kind === "none"
+        ? structuredClone(next.experiment)
+        : storedDraft.draft;
+      setDraft(nextDraft);
+      draftRef.current = nextDraft;
       draftRevisionRef.current = 0;
-      setDirty(false);
-      dirtyRef.current = false;
-      setRemoteConflict(null);
+      const restored = storedDraft.kind !== "none";
+      setDirty(restored);
+      dirtyRef.current = restored;
+      setRemoteConflict(
+        storedDraft.kind === "conflict" ? next.experiment : null,
+      );
       setRemoteDeleted(false);
       setIssues([]);
     } catch (caught) {
@@ -296,9 +311,9 @@ export default function ExperimentDetail({ id }: { id: string }) {
           draftRevisionRef.current = 0;
           setDirty(false);
           dirtyRef.current = false;
+          setRemoteConflict(null);
           setIssues([]);
         }
-        setRemoteConflict(null);
         setRemoteDeleted(false);
         return;
       }
@@ -446,15 +461,30 @@ export default function ExperimentDetail({ id }: { id: string }) {
   }, []);
 
   function patchDraft(patch: Partial<Experiment>) {
+    const current = draftRef.current;
+    if (!current) return;
     draftRevisionRef.current += 1;
-    setDraft((current) => {
-      if (!current) return current;
-      const next = { ...current, ...patch };
-      draftRef.current = next;
-      return next;
-    });
-    setDirty(true);
-    dirtyRef.current = true;
+    const next = { ...current, ...patch };
+    draftRef.current = next;
+    setDraft(next);
+    const source = committedRef.current;
+    if (source) {
+      if (hasEditableExperimentChanges(source, next)) {
+        writeSessionExperimentDraft(
+          getSessionExperimentDraftStorage(),
+          source,
+          next,
+        );
+      } else {
+        clearSessionExperimentDraft(
+          getSessionExperimentDraftStorage(),
+          source.id,
+        );
+      }
+    }
+    const changed = source ? hasEditableExperimentChanges(source, next) : true;
+    setDirty(changed);
+    dirtyRef.current = changed;
     setIssues([]);
   }
 
@@ -523,9 +553,21 @@ export default function ExperimentDetail({ id }: { id: string }) {
         draftRevisionRef.current = 0;
         setDirty(false);
         dirtyRef.current = false;
+        clearSessionExperimentDraft(
+          getSessionExperimentDraftStorage(),
+          result.experiment.id,
+        );
       } else {
         setDirty(true);
         dirtyRef.current = true;
+        const latestDraft = draftRef.current;
+        if (latestDraft) {
+          writeSessionExperimentDraft(
+            getSessionExperimentDraftStorage(),
+            result.experiment,
+            latestDraft,
+          );
+        }
       }
       setIssues([]);
       savingRef.current = false;
@@ -574,6 +616,11 @@ export default function ExperimentDetail({ id }: { id: string }) {
     ));
     setDirty(false);
     dirtyRef.current = false;
+    setRemoteConflict(null);
+    clearSessionExperimentDraft(
+      getSessionExperimentDraftStorage(),
+      displayedRemote.id,
+    );
     markdownEditorsRef.current = new Set();
     setMarkdownEditing(false);
     setMarkdownEpoch((current) => current + 1);
@@ -607,6 +654,10 @@ export default function ExperimentDetail({ id }: { id: string }) {
       await deleteExperiment(draft);
       if (isCurrentVisit(visit) && mutationRef.current === mutation) {
         committedRef.current = null;
+        clearSessionExperimentDraft(
+          getSessionExperimentDraftStorage(),
+          draft.id,
+        );
         router.push(destination);
       }
     } catch (caught) {
@@ -779,7 +830,14 @@ export default function ExperimentDetail({ id }: { id: string }) {
             <button
               type="button"
               className="btn"
-              disabled={hasLocalChanges || saving || deleting || reloadingLatest}
+              disabled={
+                hasLocalChanges ||
+                saving ||
+                deleting ||
+                reloadingLatest ||
+                Boolean(remoteConflict) ||
+                remoteDeleted
+              }
               title={hasLocalChanges
                 ? "Finish and save changes before duplicating."
                 : "Duplicate saved context."}
@@ -940,6 +998,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
               value={draft.notes}
               minHeight={180}
               onSave={(notes) => patchDraft({ notes })}
+              onDraftChange={(notes) => patchDraft({ notes })}
               onEditingChange={(editing) => setMarkdownEditor("note", editing)}
               placeholder="Observations, caveats, links, and follow-up ideas"
             />
@@ -982,6 +1041,10 @@ export default function ExperimentDetail({ id }: { id: string }) {
               draftRevisionRef.current = 0;
               setDirty(false);
               dirtyRef.current = false;
+              clearSessionExperimentDraft(
+                getSessionExperimentDraftStorage(),
+                server.id,
+              );
               setIssues([]);
             }}
           >

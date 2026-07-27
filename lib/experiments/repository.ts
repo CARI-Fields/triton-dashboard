@@ -173,6 +173,7 @@ async function nextPosition(taskId: string): Promise<number> {
     .select("position")
     .eq("task_id", taskId)
     .order("position", { ascending: false })
+    .order("experiment_no", { ascending: false })
     .limit(1);
   throwIfError(error);
   return data?.length ? Number(data[0].position) + 1 : 0;

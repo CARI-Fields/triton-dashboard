@@ -160,7 +160,12 @@ describe("DuplicateExperimentDialog", () => {
     );
     expect(screen.getByText("Baseline = EXP-0009 · Source run")).toBeDefined();
     expect(screen.getByText("Copies: Task, Owner, Data, Object, Environment, Config")).toBeDefined();
-    expect(screen.getByText("Clears: Result, Decision, Note, attachments, timeline, run times")).toBeDefined();
+    expect(screen.getByText(
+      "Does not copy: Result, Decision, Note, attachments, source timeline, run times",
+    )).toBeDefined();
+    expect(screen.getByText(
+      "The duplicate starts a new timeline with an automatic duplication event.",
+    )).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Duplicate experiment" }));
     await waitFor(() => expect(duplicateExperiment).toHaveBeenCalledWith(source, {
       name: "Source run copy",
@@ -221,7 +226,10 @@ describe("DuplicateExperimentDialog", () => {
     expect(onCreated).not.toHaveBeenCalled();
   });
 
-  it("preserves typed fields when the same source refreshes", () => {
+  it("preserves typed fields but submits the latest same-ID source revision", async () => {
+    vi.mocked(duplicateExperiment).mockResolvedValue({
+      id: "duplicate",
+    } as Experiment);
     const { rerender } = render(
       <DuplicateExperimentDialog
         open
@@ -238,15 +246,17 @@ describe("DuplicateExperimentDialog", () => {
     fireEvent.change(screen.getByLabelText("Duplicate Owner"), {
       target: { value: otherMember.id },
     });
+    const refreshed = {
+      ...source,
+      name: "Source refreshed",
+      owner_id: otherMember.id,
+      config: { temperature: 0.2 },
+      updated_at: "2026-07-24T02:00:00.000Z",
+    };
     rerender(
       <DuplicateExperimentDialog
         open
-        source={{
-          ...source,
-          name: "Source refreshed",
-          owner_id: otherMember.id,
-          updated_at: "2026-07-24T02:00:00.000Z",
-        }}
+        source={refreshed}
         members={[member, otherMember]}
         onClose={() => undefined}
         onCreated={() => undefined}
@@ -257,7 +267,16 @@ describe("DuplicateExperimentDialog", () => {
       .toBe("Custom duplicate");
     expect((screen.getByLabelText("Duplicate Owner") as HTMLSelectElement).value)
       .toBe(otherMember.id);
-    expect(screen.getByText("Baseline = EXP-0009 · Source run")).toBeDefined();
+    expect(screen.getByText("Baseline = EXP-0009 · Source refreshed")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate experiment" }));
+    await waitFor(() => expect(duplicateExperiment).toHaveBeenCalledWith(
+      refreshed,
+      {
+        name: "Custom duplicate",
+        ownerId: otherMember.id,
+      },
+    ));
   });
 
   it("keeps one pending insert across a same-source refresh", async () => {

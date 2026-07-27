@@ -310,7 +310,8 @@ export default function TaskDetail({ id }: { id: string }) {
             .from("experiments")
             .select("*")
             .eq("task_id", requestedVisit.id)
-            .order("position"),
+            .order("position")
+            .order("experiment_no", { ascending: true }),
           supabase.from("members").select("*").order("position"),
           supabase
             .from("activity")
@@ -464,6 +465,16 @@ export default function TaskDetail({ id }: { id: string }) {
     };
     const channel = client
       .channel(`task-${visit.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "tasks",
+          filter: `id=eq.${visit.id}`,
+        },
+        refresh,
+      )
       .on(
         "postgres_changes",
         {

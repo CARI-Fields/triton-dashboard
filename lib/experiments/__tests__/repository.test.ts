@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     selectCalls: string[];
     eqCalls: Array<[string, unknown]>;
     inCalls: Array<[string, unknown[]]>;
+    orderCalls: Array<[string, { ascending?: boolean } | undefined]>;
     insertPayload?: unknown;
     updatePayload?: unknown;
     query?: { eq: ReturnType<typeof vi.fn> };
@@ -42,6 +43,7 @@ const mocks = vi.hoisted(() => {
       selectCalls: [],
       eqCalls: [],
       inCalls: [],
+      orderCalls: [],
     };
     traces.push(trace);
     const query = {
@@ -71,7 +73,13 @@ const mocks = vi.hoisted(() => {
         trace.inCalls.push([column, values]);
         return query;
       }),
-      order: vi.fn(() => query),
+      order: vi.fn((
+        column: string,
+        options?: { ascending?: boolean },
+      ) => {
+        trace.orderCalls.push([column, options]);
+        return query;
+      }),
       limit: vi.fn(() => query),
       maybeSingle: vi.fn(() => Promise.resolve(responseFor(trace))),
       single: vi.fn(() => Promise.resolve(responseFor(trace))),
@@ -366,6 +374,37 @@ describe("required experiment inputs", () => {
       name: "Copy",
       owner_id: experiment.owner_id,
       baseline_experiment_id: experiment.id,
+    });
+  });
+
+  it.each([
+    ["create", async () => createExperiment({
+      taskId: experiment.task_id,
+      name: "New",
+      ownerId: experiment.owner_id!,
+    })],
+    ["duplicate", async () => duplicateExperiment(experiment, {
+      name: "Copy",
+      ownerId: experiment.owner_id!,
+    })],
+  ])("uses deterministic tie-breaking when allocating %s position", async (
+    _kind,
+    operation,
+  ) => {
+    enqueue("experiments", "select", {
+      data: [{ position: 4 }],
+      error: null,
+    });
+    enqueue("experiments", "insert", { data: experiment, error: null });
+
+    await operation();
+
+    expect(trace("experiments", "select").orderCalls).toEqual([
+      ["position", { ascending: false }],
+      ["experiment_no", { ascending: false }],
+    ]);
+    expect(trace("experiments", "insert").insertPayload).toMatchObject({
+      position: 5,
     });
   });
 });

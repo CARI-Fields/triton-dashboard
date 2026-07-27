@@ -56,6 +56,11 @@ const supabaseState = vi.hoisted(() => ({
   handlers: [] as RealtimeHandler[],
   fromCalls: [] as string[],
   mutations: [] as MutationCall[],
+  orderCalls: [] as Array<{
+    table: string;
+    column: string;
+    options: { ascending?: boolean } | undefined;
+  }>,
   removeChannel: vi.fn(),
 }));
 
@@ -72,9 +77,16 @@ vi.mock("@/lib/supabase", () => {
         throw new Error(`No ${table} query result was queued.`);
       }
       const builder: Record<string, unknown> = {};
-      for (const method of ["select", "eq", "order", "maybeSingle"]) {
+      for (const method of ["select", "eq", "maybeSingle"]) {
         builder[method] = vi.fn(() => builder);
       }
+      builder.order = vi.fn((
+        column: string,
+        options?: { ascending?: boolean },
+      ) => {
+        supabaseState.orderCalls.push({ table, column, options });
+        return builder;
+      });
       for (const kind of ["update", "insert", "delete"] as const) {
         builder[kind] = vi.fn((payload?: unknown) => {
           supabaseState.mutations.push({ table, kind, payload });
@@ -306,12 +318,85 @@ beforeEach(() => {
   supabaseState.handlers.length = 0;
   supabaseState.fromCalls.length = 0;
   supabaseState.mutations.length = 0;
+  supabaseState.orderCalls.length = 0;
   supabaseState.removeChannel.mockClear();
 });
 
 afterEach(cleanup);
 
 describe("TaskDetail orchestration", () => {
+  it("orders equal-position Task experiments by stable Experiment identity", async () => {
+    const first = experiment("First stable");
+    const second = {
+      ...experiment("Second stable"),
+      id: "00000000-0000-4000-8000-000000000002",
+      experiment_no: 2,
+    };
+    enqueueLoad(taskA, [second, first]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByText("First stable");
+
+    expect(supabaseState.orderCalls.filter(({ table }) => table === "experiments"))
+      .toEqual([
+        { table: "experiments", column: "position", options: undefined },
+        {
+          table: "experiments",
+          column: "experiment_no",
+          options: { ascending: true },
+        },
+      ]);
+  });
+
+  it("recovers a missing Task when that exact UUID is inserted later", async () => {
+    enqueue("tasks", ok(null));
+    render(<TaskDetail id={taskA.id} />);
+    expect(await screen.findByText(/Task not found/)).toBeDefined();
+
+    enqueueLoad(taskA, [experiment("Inserted recovery")]);
+    trigger(
+      `task-${taskA.id}`,
+      "tasks",
+      "INSERT",
+      { id: taskA.id },
+    );
+
+    expect(await screen.findByText("Inserted recovery")).toBeDefined();
+    expect(screen.queryByText(/Task not found/)).toBeNull();
+  });
+
+  it("ignores unrelated Task inserts and stale recovery loads after navigation", async () => {
+    enqueue("tasks", ok(null));
+    const view = render(<TaskDetail id={taskA.id} />);
+    expect(await screen.findByText(/Task not found/)).toBeDefined();
+    const taskQueryCount = supabaseState.fromCalls.filter(
+      (table) => table === "tasks",
+    ).length;
+    trigger(
+      `task-${taskA.id}`,
+      "tasks",
+      "INSERT",
+      { id: taskB.id },
+    );
+    expect(supabaseState.fromCalls.filter((table) => table === "tasks"))
+      .toHaveLength(taskQueryCount);
+
+    const staleRecovery = deferred<QueryResult>();
+    enqueue("tasks", staleRecovery.promise);
+    trigger(
+      `task-${taskA.id}`,
+      "tasks",
+      "INSERT",
+      { id: taskA.id },
+    );
+    enqueueLoad(taskB);
+    view.rerender(<TaskDetail id={taskB.id} />);
+    expect(await screen.findByRole("button", { name: "Task B" })).toBeDefined();
+
+    await act(async () => staleRecovery.resolve(ok(taskA)));
+    expect(screen.getByRole("button", { name: "Task B" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Task A" })).toBeNull();
+  });
+
   it("distinguishes a query failure from not-found and performs one visible retry", async () => {
     enqueue("tasks", failure("Database offline."));
     render(<TaskDetail id={taskA.id} />);
@@ -786,6 +871,12 @@ describe("TaskDetail orchestration", () => {
     await screen.findByText("Scoped run");
 
     expect(supabaseState.handlers.map(({ config }) => config)).toEqual([
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "tasks",
+        filter: `id=eq.${taskA.id}`,
+      },
       {
         event: "UPDATE",
         schema: "public",

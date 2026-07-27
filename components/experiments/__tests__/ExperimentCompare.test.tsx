@@ -168,6 +168,36 @@ describe("ExperimentCompare", () => {
     expect(document.querySelector(".baseline-chip")).toBeNull();
   });
 
+  it("renders unique value and Delta columns for foo and foo.delta metrics", async () => {
+    const baseline = row(1, { metrics: { foo: 1, "foo.delta": 10 } });
+    const current = row(2, { metrics: { foo: 3, "foo.delta": 16 } });
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+    const reactError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    const headers = await screen.findAllByRole("columnheader");
+    expect(headers.map((header) => header.textContent)).toEqual(
+      expect.arrayContaining([
+        "fooResult",
+        "Δ fooResult",
+        "foo.deltaResult",
+        "Δ foo.deltaResult",
+      ]),
+    );
+    expect(reactError.mock.calls.flat().join(" ")).not.toContain(
+      "Encountered two children with the same key",
+    );
+    reactError.mockRestore();
+  });
+
   it("adds and removes arbitrary candidates through canonical replace URLs", async () => {
     const first = row(1);
     const second = row(2);

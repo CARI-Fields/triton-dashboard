@@ -98,7 +98,7 @@ export default function BaselineSummary({
           : (
             <div className="context-difference-list">
               {contextDifferences.map((difference) => (
-                <div key={`${difference.group}-${difference.key}`}>
+                <div key={difference.fieldId}>
                   <strong>{difference.label}</strong>
                   <span>{displayValue(difference.baseline)}</span>
                   <span>{displayValue(difference.current)}</span>

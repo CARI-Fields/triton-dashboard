@@ -373,7 +373,7 @@ export default function ExperimentCompare({
                     <th scope="col">Status</th>
                     {columns.map((column) => (
                       <th
-                        key={column.key}
+                        key={JSON.stringify(column.identity)}
                         scope="col"
                         className={column.kind === "delta" ? "neutral-delta" : ""}
                       >
@@ -417,7 +417,7 @@ export default function ExperimentCompare({
                       <td>{EXPERIMENT_STATUS_LABELS[row.status]}</td>
                       {columns.map((column) => (
                         <td
-                          key={column.key}
+                          key={JSON.stringify(column.identity)}
                           className={column.kind === "delta" ? "neutral-delta" : ""}
                         >
                           {displayValue(

@@ -686,7 +686,7 @@ export default function Board() {
     [tasks]
   );
   const moduleName = useCallback(
-    (id: string) => modules.find((m) => m.id === id),
+    (id: string | null) => modules.find((m) => m.id === id),
     [modules]
   );
 

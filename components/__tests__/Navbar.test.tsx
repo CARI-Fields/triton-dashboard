@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Navbar from "@/components/Navbar";
@@ -80,10 +81,84 @@ describe("Navbar", () => {
     });
   }
 
-  it("closes the narrow navigation sheet after the route changes", async () => {
-    const view = renderNavbar();
+  it("moves focus to the labelled modal sheet close control when opened", async () => {
+    renderNavbar();
 
     fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+
+    const sheet = screen.getByRole("dialog", { name: "Navigation" });
+    const closeButton = within(sheet).getByRole("button", {
+      name: "Close navigation",
+    });
+    expect(sheet.getAttribute("aria-modal")).toBe("true");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(closeButton);
+    });
+  });
+
+  it("closes the navigation sheet with Escape and returns focus to its trigger", async () => {
+    renderNavbar();
+    const trigger = screen.getByRole("button", { name: "Open navigation" });
+
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    });
+  });
+
+  it("closes from the in-sheet control or backdrop and returns focus to its trigger", async () => {
+    renderNavbar();
+    const trigger = screen.getByRole("button", { name: "Open navigation" });
+
+    fireEvent.click(trigger);
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Navigation" })).getByRole(
+        "button",
+        { name: "Close navigation" },
+      ),
+    );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    fireEvent.click(trigger);
+    const backdrop = document.querySelector<HTMLButtonElement>(".nav-backdrop");
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop as HTMLButtonElement);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger);
+    });
+  });
+
+  it("traps forward and reverse Tab focus inside the open navigation sheet", async () => {
+    renderNavbar();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    const sheet = screen.getByRole("dialog", { name: "Navigation" });
+    const first = within(sheet).getByRole("button", { name: "Close navigation" });
+    const last = within(sheet).getByRole("button", { name: "Log out" });
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(first);
+    });
+
+    last.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("closes the narrow navigation sheet after the route changes", async () => {
+    const view = renderNavbar();
+    const trigger = screen.getByRole("button", { name: "Open navigation" });
+
+    fireEvent.click(trigger);
     expect(
       screen.getByRole("button", { name: "Close navigation", expanded: true })
         .getAttribute("aria-expanded"),
@@ -101,6 +176,7 @@ describe("Navbar", () => {
         screen.getByRole("button", { name: "Open navigation", expanded: false })
           .getAttribute("aria-expanded"),
       ).toBe("false");
+      expect(document.activeElement).toBe(trigger);
     });
   });
 });

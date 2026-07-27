@@ -58,6 +58,41 @@ describe("workspace visual contracts", () => {
     expect(globals).not.toMatch(/gradient\s*\(/i);
   });
 
+  it("uses theme-specific semantic foregrounds and status colors for every pill", () => {
+    const lightTokens = ruleBody(globals, ":root");
+    const darkTokens = ruleBody(globals, '[data-theme="dark"]');
+    const statuses = [
+      { token: "todo", className: "todo" },
+      { token: "progress", className: "in_progress" },
+      { token: "done", className: "done" },
+      { token: "blocked", className: "blocked" },
+    ] as const;
+
+    for (const { token, className } of statuses) {
+      expect(lightTokens).toMatch(
+        new RegExp(`--status-${token}-foreground\\s*:`),
+      );
+      expect(darkTokens).toMatch(
+        new RegExp(`--status-${token}-foreground\\s*:`),
+      );
+      expect(ruleBody(globals, `.dot.${className}`)).toMatch(
+        new RegExp(`background\\s*:\\s*var\\(--status-${token}\\)`),
+      );
+
+      const pill = ruleBody(globals, `.pill.${className}`);
+      expect(pill).toMatch(
+        new RegExp(`background\\s*:\\s*var\\(--status-${token}-soft\\)`),
+      );
+      expect(pill).toMatch(
+        new RegExp(`color\\s*:\\s*var\\(--status-${token}-foreground\\)`),
+      );
+      expect(pill).not.toMatch(/#[0-9a-f]{3,8}/i);
+    }
+
+    expect(ruleBody(globals, ".dot.in_progress")).not.toContain("--warn");
+    expect(ruleBody(globals, ".pill.in_progress")).not.toContain("--warn");
+  });
+
   it("uses the approved 256px desktop shell and semantic sidebar surface", () => {
     expect(ruleBody(globals, ".app-shell")).toMatch(
       /grid-template-columns\s*:\s*256px\s+minmax\(0,\s*1fr\)/,
@@ -77,8 +112,18 @@ describe("workspace visual contracts", () => {
     expect(ruleBody(mobile, ".app-sidebar")).toMatch(
       /transform\s*:\s*translateX\(-100%\)/,
     );
+    expect(ruleBody(mobile, ".app-sidebar")).toMatch(/visibility\s*:\s*hidden/);
+    expect(ruleBody(mobile, ".app-sidebar")).toMatch(
+      /pointer-events\s*:\s*none/,
+    );
     expect(ruleBody(mobile, ".app-sidebar.is-open")).toMatch(
       /transform\s*:\s*translateX\(0\)/,
+    );
+    expect(ruleBody(mobile, ".app-sidebar.is-open")).toMatch(
+      /visibility\s*:\s*visible/,
+    );
+    expect(ruleBody(mobile, ".app-sidebar.is-open")).toMatch(
+      /pointer-events\s*:\s*auto/,
     );
     expect(ruleBody(mobile, ".nav-backdrop")).toMatch(/display\s*:\s*block/);
   });

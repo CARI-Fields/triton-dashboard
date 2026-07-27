@@ -1,6 +1,6 @@
 # Triton Board
 
-### 🔗 Live board: **https://triton-board.vercel.app**
+### 🔗 Live board: **https://triton-dashboard-eight.vercel.app**
 
 A live, editable project board + research log for the **Triton Kernel Agent — RL Training**
 project. Modules → tasks with owners and status, and each task has its own detail page
@@ -61,8 +61,8 @@ supabase/
 ## Run locally (working on the existing board)
 
 You need the project's two Supabase values. They're **not in the repo** (`.env.local` is
-git-ignored). Get them from Bruce, or from Vercel → the `rl4kernel` project → Settings →
-Environment Variables:
+git-ignored). Get them from a maintainer, or from Vercel → `Eason's projects` →
+`triton-dashboard` → Settings → Environment Variables:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — this holds the Supabase **publishable** key (`sb_publishable_…`); it's safe to expose in a browser, and access is protected by the login + RLS, not by hiding this key.
@@ -102,18 +102,19 @@ Plus the **team login password** (to sign in to the running board) — shared ou
 
 ## Deploying & contributing
 
-- **Production auto-deploys** from `main` via Vercel on every merge.
-- **`main` is branch-protected** — collaborators can't push to it directly; all changes go through
-  **pull requests**. The full workflow (branch → PR → review → merge) is in
-  **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
-- **Why a maintainer merges each PR:** Vercel only builds commits authored by the owner's Vercel
-  account (`brucexi99@outlook.com`). A PR merged by the owner deploys; a commit pushed under a
-  different email is refused ("… not a member of the team"). If a merge ever doesn't trigger a
-  build, redeploy from the Vercel dashboard (**Deployments → ⋯ → Redeploy**).
+- The Vercel project `Eason's projects / triton-dashboard` is linked to
+  [`CARI-Fields/triton-dashboard`](https://github.com/CARI-Fields/triton-dashboard).
+- Pushes and merges to `main` deploy to
+  **[triton-dashboard-eight.vercel.app](https://triton-dashboard-eight.vercel.app)**.
+- Changes should go through **pull requests**. Branch protection is not currently enabled on the
+  new repository, so repository admins should treat direct pushes to `main` as an exception.
+  The full workflow is in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
+- If a deployment does not start, check the commit status and Vercel dashboard first. A maintainer
+  can redeploy from **Deployments → ⋯ → Redeploy**.
 
-**Adding a collaborator:** the owner invites them under GitHub **Settings → Collaborators**; then
-they follow [`CONTRIBUTING.md`](CONTRIBUTING.md). Branch protection is configured so the owner
-(admin) can still push to `main` directly, while collaborators use PRs.
+**Adding a collaborator:** a `CARI-Fields` organization admin grants repository access under
+GitHub **Settings → Collaborators and teams**; the contributor then follows
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Database (Supabase) & migrations
 

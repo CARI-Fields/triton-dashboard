@@ -39,10 +39,11 @@ that's already been applied.** After merging, a maintainer runs `npm run db:migr
 ## Review & deploy
 
 - A maintainer reviews and merges your PR into `main`.
-- Merging to `main` auto-deploys production (<https://triton-board.vercel.app>) via Vercel.
-- **Why a maintainer merges:** Vercel only builds commits authored by the owner's account, so the
-  *merge commit* (done by a maintainer) is what deploys. Your feature-branch pushes won't produce
-  a working preview deploy — that's expected, ignore it.
+- The Vercel project `Eason's projects / triton-dashboard` watches this GitHub repository.
+- Pushes and merges to `main` deploy production at
+  <https://triton-dashboard-eight.vercel.app>.
+- If a deployment does not start, check the GitHub commit status and the Vercel project dashboard;
+  a maintainer can redeploy from **Deployments → ⋯ → Redeploy**.
 
 ## Good to know
 

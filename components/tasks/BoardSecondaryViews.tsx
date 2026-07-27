@@ -1,0 +1,311 @@
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import Link from "next/link";
+import OwnerAvatar from "@/components/ui/OwnerAvatar";
+import { statusLabel } from "@/lib/status";
+import { relTime } from "@/lib/time";
+import type {
+  Member,
+  TaskModel,
+  TaskType,
+} from "@/lib/types";
+import type { BoardView } from "@/components/tasks/TaskBoardView";
+
+export interface BoardSecondaryViewsProps {
+  view: Exclude<BoardView, "board">;
+  tasks: TaskModel[];
+  types: TaskType[];
+  members: Member[];
+  onCreateType(name: string): Promise<void>;
+  onPatchType(id: string, patch: Partial<TaskType>): Promise<void>;
+  onDeleteType(type: TaskType): Promise<void>;
+  onAddMember(name: string): Promise<void>;
+  onRemoveMember(member: Member): Promise<void>;
+}
+
+interface TypeRowProps {
+  taskType: TaskType;
+  tasks: TaskModel[];
+  onPatchType(id: string, patch: Partial<TaskType>): Promise<void>;
+  onDeleteType(type: TaskType): Promise<void>;
+}
+
+function TypeRow({
+  taskType,
+  tasks,
+  onPatchType,
+  onDeleteType,
+}: TypeRowProps) {
+  const [description, setDescription] = useState(taskType.description);
+  const [position, setPosition] = useState(String(taskType.position));
+  const typeTasks = tasks.filter((task) => task.typeId === taskType.id);
+  const done = typeTasks.filter((task) => task.status === "done").length;
+
+  useEffect(() => {
+    setDescription(taskType.description);
+    setPosition(String(taskType.position));
+  }, [taskType.description, taskType.position]);
+
+  async function commitDescription() {
+    if (description === taskType.description) return;
+    try {
+      await onPatchType(taskType.id, { description });
+    } catch {
+      setDescription(taskType.description);
+    }
+  }
+
+  async function commitPosition() {
+    const trimmed = position.trim();
+    const value = Number(trimmed);
+    if (!trimmed || !Number.isFinite(value)) {
+      setPosition(String(taskType.position));
+      return;
+    }
+    if (value === taskType.position) return;
+    try {
+      await onPatchType(taskType.id, { position: value });
+    } catch {
+      setPosition(String(taskType.position));
+    }
+  }
+
+  return (
+    <tr>
+      <td aria-label={taskType.name}>
+        <div className="type-cell">
+          <span>{taskType.name}</span>
+          <button
+            type="button"
+            className="text-action danger-action"
+            aria-label={`Remove ${taskType.name}`}
+            onClick={() => (
+              void onDeleteType(taskType).catch(() => undefined)
+            )}
+          >
+            Remove
+          </button>
+        </div>
+      </td>
+      <td>
+        <input
+          className="table-input"
+          aria-label={`Description for ${taskType.name}`}
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          onBlur={() => void commitDescription()}
+        />
+      </td>
+      <td>{typeTasks.length}</td>
+      <td>
+        <div className="type-progress">
+          <progress
+            aria-label={`${taskType.name} progress`}
+            value={done}
+            max={Math.max(typeTasks.length, 1)}
+          />
+          <span>{done} / {typeTasks.length}</span>
+        </div>
+      </td>
+      <td>
+        <input
+          className="position-input"
+          type="number"
+          aria-label={`Position for ${taskType.name}`}
+          value={position}
+          onChange={(event) => setPosition(event.target.value)}
+          onBlur={() => void commitPosition()}
+        />
+      </td>
+    </tr>
+  );
+}
+
+export default function BoardSecondaryViews({
+  view,
+  tasks,
+  types,
+  members,
+  onCreateType,
+  onPatchType,
+  onDeleteType,
+  onAddMember,
+  onRemoveMember,
+}: BoardSecondaryViewsProps) {
+  const [newType, setNewType] = useState("");
+  const [newMember, setNewMember] = useState("");
+  const [pending, setPending] = useState(false);
+  const typeMap = useMemo(
+    () => new Map(types.map((type) => [type.id, type])),
+    [types],
+  );
+
+  async function createType() {
+    const name = newType.trim();
+    if (!name || pending) return;
+    setPending(true);
+    try {
+      await onCreateType(name);
+      setNewType("");
+    } catch {
+      // Board owns the stable mutation banner.
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function addMember() {
+    const name = newMember.trim();
+    if (!name || pending) return;
+    setPending(true);
+    try {
+      await onAddMember(name);
+      setNewMember("");
+    } catch {
+      // Board owns the stable mutation banner.
+    } finally {
+      setPending(false);
+    }
+  }
+
+  if (view === "types") {
+    return (
+      <section className="secondary-view" aria-label="Types">
+        <form
+          className="secondary-create"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void createType();
+          }}
+        >
+          <label htmlFor="new-type-name">New type name</label>
+          <input
+            id="new-type-name"
+            value={newType}
+            onChange={(event) => setNewType(event.target.value)}
+          />
+          <button type="submit" className="btn" disabled={pending}>
+            Add type
+          </button>
+        </form>
+        <div className="table-scroll board-table-scroll">
+          <table className="board-table types-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Description</th>
+                <th>Task count</th>
+                <th>Progress</th>
+                <th>Position</th>
+              </tr>
+            </thead>
+            <tbody>
+              {types.map((taskType) => (
+                <TypeRow
+                  key={taskType.id}
+                  taskType={taskType}
+                  tasks={tasks}
+                  onPatchType={onPatchType}
+                  onDeleteType={onDeleteType}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
+  if (view === "ownership") {
+    const ownershipRows = tasks.flatMap((task) => {
+      const type = typeMap.get(task.typeId ?? "") ?? null;
+      const owners = task.owners.length > 0 ? task.owners : [null];
+      return owners.map((owner) => ({
+        id: `${task.id}:${owner ?? "unowned"}`,
+        owner: owner ?? "No owner yet",
+        task,
+        type,
+      }));
+    });
+
+    return (
+      <section className="secondary-view" aria-label="Ownership">
+        <div className="table-scroll board-table-scroll">
+          <table className="board-table ownership-table">
+            <thead>
+              <tr>
+                <th>Owner</th>
+                <th>Task</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ownershipRows.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.owner}</td>
+                  <td>
+                    <Link href={`/task/${row.task.id}`}>
+                      {row.task.title}
+                    </Link>
+                  </td>
+                  <td>{row.type?.name ?? "No type"}</td>
+                  <td>{statusLabel(row.task.status)}</td>
+                  <td>{relTime(row.task.updated_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="secondary-view team-view" aria-label="Team">
+      <form
+        className="secondary-create"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void addMember();
+        }}
+      >
+        <label htmlFor="new-member-name">New owner name</label>
+        <input
+          id="new-member-name"
+          value={newMember}
+          onChange={(event) => setNewMember(event.target.value)}
+        />
+        <button type="submit" className="btn" disabled={pending}>
+          Add owner
+        </button>
+      </form>
+      <ul className="team-list">
+        {members.map((member) => (
+          <li key={member.id}>
+            <OwnerAvatar
+              name={member.name}
+              initials={member.initials}
+              size={30}
+            />
+            <span>{member.name}</span>
+            <button
+              type="button"
+              className="btn"
+              aria-label={`Remove ${member.name}`}
+              onClick={() => (
+                void onRemoveMember(member).catch(() => undefined)
+              )}
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

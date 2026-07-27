@@ -120,6 +120,8 @@ export default function Board() {
     typeId?: string | null;
   }>({});
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const reloadGenerationRef = useRef(0);
+  const memberRemovalLockRef = useRef(false);
 
   const recordActivity = useCallback((
     taskId: string,
@@ -142,8 +144,12 @@ export default function Board() {
   }, []);
 
   const reload = useCallback(async () => {
+    const generation = reloadGenerationRef.current + 1;
+    reloadGenerationRef.current = generation;
     if (!supabase) {
-      setLoading(false);
+      if (generation === reloadGenerationRef.current) {
+        setLoading(false);
+      }
       return;
     }
     try {
@@ -155,6 +161,7 @@ export default function Board() {
       const firstError =
         typeResult.error || taskResult.error || memberResult.error;
       if (firstError) throw firstError;
+      if (generation !== reloadGenerationRef.current) return;
 
       setTypes(
         (typeResult.data ?? []).map((row) => (
@@ -169,9 +176,12 @@ export default function Board() {
       setMembers((memberResult.data ?? []) as Member[]);
       setLoadErrorMsg(null);
     } catch (caught) {
+      if (generation !== reloadGenerationRef.current) return;
       setLoadErrorMsg(`Could not load board. ${errorMessage(caught)}`);
     } finally {
-      setLoading(false);
+      if (generation === reloadGenerationRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -296,7 +306,9 @@ export default function Board() {
 
   const createType = useCallback(async (rawName: string) => {
     const name = rawName.trim();
-    if (!name) return;
+    if (!name) {
+      throw new Error("Type name is required.");
+    }
     if (!supabase) {
       throw await exposeMutationError(
         "create type",
@@ -305,14 +317,23 @@ export default function Board() {
     }
     setMutationErrorMsg(null);
     try {
-      const result = await supabase.from("modules").insert({
-        name,
-        objective: "",
-        kind: "pipeline",
-        position: nextPosition(types),
-      });
+      const result = await supabase
+        .from("modules")
+        .insert({
+          name,
+          objective: "",
+          kind: "pipeline",
+          position: nextPosition(types),
+        })
+        .select("id")
+        .single();
       if (result.error) throw result.error;
+      const typeId = result.data?.id;
+      if (!typeId) {
+        throw new Error("Created Type did not return an id.");
+      }
       await reload();
+      return typeId;
     } catch (caught) {
       throw await exposeMutationError("create type", caught);
     }
@@ -386,8 +407,9 @@ export default function Board() {
   }, [exposeMutationError, members, reload]);
 
   const removeMember = useCallback(async (member: Member) => {
-    if (!supabase) return;
+    if (!supabase || memberRemovalLockRef.current) return;
     if (!window.confirm(`Remove ${member.name} from the team?`)) return;
+    memberRemovalLockRef.current = true;
     setMutationErrorMsg(null);
 
     const affectedTasks = tasks.filter(
@@ -413,6 +435,8 @@ export default function Board() {
       await reload();
     } catch (caught) {
       throw await exposeMutationError("remove member", caught);
+    } finally {
+      memberRemovalLockRef.current = false;
     }
   }, [exposeMutationError, reload, tasks]);
 

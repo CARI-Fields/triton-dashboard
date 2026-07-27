@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import Link from "next/link";
@@ -19,7 +20,7 @@ export interface BoardSecondaryViewsProps {
   tasks: TaskModel[];
   types: TaskType[];
   members: Member[];
-  onCreateType(name: string): Promise<void>;
+  onCreateType(name: string): Promise<string>;
   onPatchType(id: string, patch: Partial<TaskType>): Promise<void>;
   onDeleteType(type: TaskType): Promise<void>;
   onAddMember(name: string): Promise<void>;
@@ -41,6 +42,8 @@ function TypeRow({
 }: TypeRowProps) {
   const [description, setDescription] = useState(taskType.description);
   const [position, setPosition] = useState(String(taskType.position));
+  const authoritativeTypeRef = useRef(taskType);
+  authoritativeTypeRef.current = taskType;
   const typeTasks = tasks.filter((task) => task.typeId === taskType.id);
   const done = typeTasks.filter((task) => task.status === "done").length;
 
@@ -54,7 +57,7 @@ function TypeRow({
     try {
       await onPatchType(taskType.id, { description });
     } catch {
-      setDescription(taskType.description);
+      setDescription(authoritativeTypeRef.current.description);
     }
   }
 
@@ -62,14 +65,14 @@ function TypeRow({
     const trimmed = position.trim();
     const value = Number(trimmed);
     if (!trimmed || !Number.isFinite(value)) {
-      setPosition(String(taskType.position));
+      setPosition(String(authoritativeTypeRef.current.position));
       return;
     }
     if (value === taskType.position) return;
     try {
       await onPatchType(taskType.id, { position: value });
     } catch {
-      setPosition(String(taskType.position));
+      setPosition(String(authoritativeTypeRef.current.position));
     }
   }
 
@@ -138,6 +141,8 @@ export default function BoardSecondaryViews({
   const [newType, setNewType] = useState("");
   const [newMember, setNewMember] = useState("");
   const [pending, setPending] = useState(false);
+  const [memberRemovalPending, setMemberRemovalPending] = useState(false);
+  const memberRemovalPendingRef = useRef(false);
   const typeMap = useMemo(
     () => new Map(types.map((type) => [type.id, type])),
     [types],
@@ -168,6 +173,20 @@ export default function BoardSecondaryViews({
       // Board owns the stable mutation banner.
     } finally {
       setPending(false);
+    }
+  }
+
+  async function removeMember(member: Member) {
+    if (memberRemovalPendingRef.current) return;
+    memberRemovalPendingRef.current = true;
+    setMemberRemovalPending(true);
+    try {
+      await onRemoveMember(member);
+    } catch {
+      // Board owns the stable mutation banner.
+    } finally {
+      memberRemovalPendingRef.current = false;
+      setMemberRemovalPending(false);
     }
   }
 
@@ -203,6 +222,13 @@ export default function BoardSecondaryViews({
               </tr>
             </thead>
             <tbody>
+              {types.length === 0 ? (
+                <tr>
+                  <td className="board-empty" colSpan={5}>
+                    No types yet.
+                  </td>
+                </tr>
+              ) : null}
               {types.map((taskType) => (
                 <TypeRow
                   key={taskType.id}
@@ -245,6 +271,13 @@ export default function BoardSecondaryViews({
               </tr>
             </thead>
             <tbody>
+              {ownershipRows.length === 0 ? (
+                <tr>
+                  <td className="board-empty" colSpan={5}>
+                    No tasks yet.
+                  </td>
+                </tr>
+              ) : null}
               {ownershipRows.map((row) => (
                 <tr key={row.id}>
                   <td>{row.owner}</td>
@@ -285,6 +318,9 @@ export default function BoardSecondaryViews({
         </button>
       </form>
       <ul className="team-list">
+        {members.length === 0 ? (
+          <li className="board-empty">No team members yet.</li>
+        ) : null}
         {members.map((member) => (
           <li key={member.id}>
             <OwnerAvatar
@@ -297,9 +333,8 @@ export default function BoardSecondaryViews({
               type="button"
               className="btn"
               aria-label={`Remove ${member.name}`}
-              onClick={() => (
-                void onRemoveMember(member).catch(() => undefined)
-              )}
+              disabled={memberRemovalPending}
+              onClick={() => void removeMember(member)}
             >
               Remove
             </button>

@@ -1414,6 +1414,11 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .board-table tbody tr:hover {
   background: var(--surface-hover);
 }
+.board-table td.board-empty {
+  height: 72px;
+  color: var(--text-secondary);
+  text-align: center;
+}
 .board-table a {
   color: var(--text-primary);
   font-weight: 550;
@@ -1514,6 +1519,11 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .team-list li:last-child {
   border-bottom: 0;
+}
+.team-list li.board-empty {
+  display: block;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 /* ---------- Add task drawer ---------- */

@@ -28,6 +28,18 @@ interface FailureRule {
   message: string;
 }
 
+interface ReadFailureRule {
+  table: TableName;
+  message: string;
+}
+
+interface MutationDelayRule {
+  table: TableName;
+  operation: MutationOperation;
+  id?: string;
+  promise: Promise<void>;
+}
+
 interface MutationTrace {
   table: TableName;
   operation: MutationOperation;
@@ -48,6 +60,8 @@ const supabaseState = vi.hoisted(() => ({
     members: [] as Array<Record<string, unknown>>,
   },
   failures: [] as FailureRule[],
+  readFailures: [] as ReadFailureRule[],
+  mutationDelays: [] as MutationDelayRule[],
   mutationTrace: [] as MutationTrace[],
   readTrace: [] as TableName[],
   readDelays: [] as Array<Promise<void>>,
@@ -114,9 +128,21 @@ vi.mock("@/lib/supabase", () => {
       async function execute() {
         if (!operation) {
           supabaseState.readTrace.push(table);
+          const readFailureIndex = supabaseState.readFailures.findIndex(
+            (rule) => rule.table === table,
+          );
+          const readFailure = readFailureIndex >= 0
+            ? supabaseState.readFailures.splice(readFailureIndex, 1)[0]
+            : null;
+          let rows = cloneRows(table);
           const readDelay = supabaseState.readDelays.shift();
           if (readDelay) await readDelay;
-          let rows = cloneRows(table);
+          if (readFailure) {
+            return {
+              data: null,
+              error: queryError(readFailure.message),
+            };
+          }
           if (filterId !== null) {
             rows = rows.filter((row) => String(row.id) === filterId);
           }
@@ -126,6 +152,16 @@ vi.mock("@/lib/supabase", () => {
             ));
           }
           return { data: rows, error: null };
+        }
+
+        const delayIndex = supabaseState.mutationDelays.findIndex((rule) => (
+          rule.table === table
+          && rule.operation === operation
+          && (rule.id === undefined || rule.id === filterId)
+        ));
+        if (delayIndex >= 0) {
+          const [delay] = supabaseState.mutationDelays.splice(delayIndex, 1);
+          await delay.promise;
         }
 
         const failureIndex = supabaseState.failures.findIndex((rule) => (
@@ -336,6 +372,8 @@ function resetSupabaseState() {
   }));
   supabaseState.tables.members = memberRows.map((row) => ({ ...row }));
   supabaseState.failures.length = 0;
+  supabaseState.readFailures.length = 0;
+  supabaseState.mutationDelays.length = 0;
   supabaseState.mutationTrace.length = 0;
   supabaseState.readTrace.length = 0;
   supabaseState.readDelays.length = 0;
@@ -351,6 +389,24 @@ function failNext(
   id?: string,
 ) {
   supabaseState.failures.push({ table, operation, message, id });
+}
+
+function failNextRead(table: TableName, message: string) {
+  supabaseState.readFailures.push({ table, message });
+}
+
+function delayNextMutation(
+  table: TableName,
+  operation: MutationOperation,
+  promise: Promise<void>,
+  id?: string,
+) {
+  supabaseState.mutationDelays.push({
+    table,
+    operation,
+    promise,
+    id,
+  });
 }
 
 function deferred() {
@@ -638,6 +694,23 @@ describe("Board", () => {
     expect(screen.getByRole("cell", { name: "Yubai" })).toBeDefined();
   });
 
+  it("renders concise empty states for Types, Ownership, and Team", async () => {
+    supabaseState.tables.modules = [];
+    supabaseState.tables.tasks = [];
+    supabaseState.tables.members = [];
+    render(<Board />);
+    await screen.findByRole("button", { name: "Add task to To do" });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+    expect(screen.getByText("No types yet.")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ownership" }));
+    expect(screen.getByText("No tasks yet.")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    expect(screen.getByText("No team members yet.")).toBeDefined();
+  });
+
   it("creates, patches, and deletes Types with compatibility defaults and exact copy", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
@@ -754,6 +827,60 @@ describe("Board", () => {
     });
   });
 
+  it("rolls a failed Type commit back to the latest realtime value", async () => {
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+
+    const delayedCommit = deferred();
+    delayNextMutation(
+      "modules",
+      "update",
+      delayedCommit.promise,
+      "type-kernel",
+    );
+    failNext("modules", "update", "Deferred description failed.", "type-kernel");
+    const description = screen.getByLabelText("Description for Kernel");
+    fireEvent.change(description, {
+      target: { value: "Local description attempt" },
+    });
+    fireEvent.blur(description);
+    await waitFor(() => {
+      expect(supabaseState.mutationDelays).toHaveLength(0);
+    });
+
+    supabaseState.tables.modules = supabaseState.tables.modules.map((row) => (
+      row.id === "type-kernel"
+        ? { ...row, objective: "Realtime authoritative description" }
+        : row
+    ));
+    const moduleHandler = supabaseState.handlers.find(
+      ({ table }) => table === "modules",
+    );
+    act(() => {
+      moduleHandler?.callback({});
+    });
+    await waitFor(() => {
+      expect(description).toHaveProperty(
+        "value",
+        "Realtime authoritative description",
+      );
+    });
+
+    await act(async () => {
+      delayedCommit.resolve();
+      await delayedCommit.promise;
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not update type. Deferred description failed.",
+    );
+    await waitFor(() => {
+      expect(description).toHaveProperty(
+        "value",
+        "Realtime authoritative description",
+      );
+    });
+  });
+
   it("updates every affected Task before removing a Team member", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
@@ -784,6 +911,55 @@ describe("Board", () => {
       { assignees: [] },
     ]);
     expect(screen.queryByRole("button", { name: "Remove Maya" })).toBeNull();
+  });
+
+  it("serializes same-tick Team removals and disables every remove action", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const removalWrite = deferred();
+    delayNextMutation(
+      "tasks",
+      "update",
+      removalWrite.promise,
+      "task-kernels",
+    );
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    const removeMaya = screen.getByRole("button", { name: "Remove Maya" });
+    const removeYubai = screen.getByRole("button", { name: "Remove Yubai" });
+
+    act(() => {
+      removeMaya.click();
+      removeYubai.click();
+    });
+    await waitFor(() => {
+      expect(confirm).toHaveBeenCalledOnce();
+      expect(screen.getAllByRole("button", { name: /^Remove / }).every(
+        (button) => (button as HTMLButtonElement).disabled,
+      )).toBe(true);
+    });
+    expect(supabaseState.mutationTrace).not.toContainEqual(
+      expect.objectContaining({
+        table: "members",
+        operation: "delete",
+        id: "member-yubai",
+      }),
+    );
+
+    await act(async () => {
+      removalWrite.resolve();
+      await removalWrite.promise;
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Remove Maya" })).toBeNull();
+    });
+    expect(screen.getByRole("button", { name: "Remove Yubai" })).toBeDefined();
+    expect(supabaseState.mutationTrace).not.toContainEqual(
+      expect.objectContaining({
+        table: "members",
+        operation: "delete",
+        id: "member-yubai",
+      }),
+    );
   });
 
   it("keeps the member, reports the error, and reloads when an Owner update fails", async () => {
@@ -941,6 +1117,111 @@ describe("Board", () => {
     expect(screen.getByLabelText("Task title")).toHaveProperty(
       "value",
       "Retained failed task",
+    );
+  });
+
+  it("selects the checked inserted Type id in the retained task draft", async () => {
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Document the verifier" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create type" }));
+    fireEvent.change(screen.getByLabelText("New type name"), {
+      target: { value: "Documentation" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add type" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Type")).toHaveProperty(
+        "value",
+        "modules-100",
+      );
+    });
+    expect(screen.getByLabelText("Task title")).toHaveProperty(
+      "value",
+      "Document the verifier",
+    );
+  });
+
+  it("ignores an older realtime row response that resolves last", async () => {
+    await renderLoadedBoard();
+    const staleReload = deferred();
+    supabaseState.readDelays.push(
+      staleReload.promise,
+      staleReload.promise,
+      staleReload.promise,
+    );
+    const readsBefore = supabaseState.readTrace.length;
+    const taskHandler = supabaseState.handlers.find(
+      ({ table }) => table === "tasks",
+    );
+    act(() => {
+      taskHandler?.callback({});
+    });
+    await waitFor(() => {
+      expect(supabaseState.readTrace.length).toBe(readsBefore + 3);
+    });
+
+    supabaseState.tables.tasks = supabaseState.tables.tasks.map((row) => (
+      row.id === "task-kernels"
+        ? { ...row, title: "Newest kernel validation" }
+        : row
+    ));
+    act(() => {
+      taskHandler?.callback({});
+    });
+    expect(await screen.findByRole("link", {
+      name: "Newest kernel validation",
+    })).toBeDefined();
+
+    await act(async () => {
+      staleReload.resolve();
+      await staleReload.promise;
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("link", {
+      name: "Newest kernel validation",
+    })).toBeDefined();
+    expect(screen.queryByRole("link", {
+      name: "Validate NPU kernels",
+    })).toBeNull();
+  });
+
+  it("does not let an older successful reload clear a newer load error", async () => {
+    await renderLoadedBoard();
+    const staleReload = deferred();
+    supabaseState.readDelays.push(
+      staleReload.promise,
+      staleReload.promise,
+      staleReload.promise,
+    );
+    const readsBefore = supabaseState.readTrace.length;
+    const taskHandler = supabaseState.handlers.find(
+      ({ table }) => table === "tasks",
+    );
+    act(() => {
+      taskHandler?.callback({});
+    });
+    await waitFor(() => {
+      expect(supabaseState.readTrace.length).toBe(readsBefore + 3);
+    });
+
+    failNextRead("modules", "Newest reload failed.");
+    act(() => {
+      taskHandler?.callback({});
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not load board. Newest reload failed.",
+    );
+
+    await act(async () => {
+      staleReload.resolve();
+      await staleReload.promise;
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Could not load board. Newest reload failed.",
     );
   });
 

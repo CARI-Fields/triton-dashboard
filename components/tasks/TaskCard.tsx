@@ -39,10 +39,19 @@ export default function TaskCard({
 }: TaskCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [ownerDraft, setOwnerDraft] = useState(task.owners);
   const actionsId = useId();
   const actionsRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const firstActionRef = useRef<HTMLButtonElement>(null);
+  const editorFocusRef = useRef<HTMLSelectElement>(null);
+  const ownerDraftRef = useRef(task.owners);
+  const authoritativeOwnersRef = useRef(task.owners);
+  const ownerWriteTailRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingOwnerWritesRef = useRef(0);
+  const latestOwnerWriteSucceededRef = useRef(true);
+  const deletePendingRef = useRef(false);
+  authoritativeOwnersRef.current = task.owners;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -63,6 +72,16 @@ export default function TaskCard({
     };
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (editing) editorFocusRef.current?.focus();
+  }, [editing]);
+
+  useEffect(() => {
+    if (pendingOwnerWritesRef.current > 0) return;
+    ownerDraftRef.current = task.owners;
+    setOwnerDraft(task.owners);
+  }, [task.owners]);
+
   function patch(patchValue: TaskPatch) {
     void onPatch(patchValue).catch(() => undefined);
   }
@@ -70,6 +89,59 @@ export default function TaskCard({
   function closeActionsAndRestoreFocus() {
     setMenuOpen(false);
     triggerRef.current?.focus();
+  }
+
+  function closeEditorAndRestoreFocus() {
+    setEditing(false);
+    triggerRef.current?.focus();
+  }
+
+  function toggleOwner(owner: string) {
+    const current = ownerDraftRef.current;
+    const next = current.includes(owner)
+      ? current.filter((value) => value !== owner)
+      : [...current, owner];
+    ownerDraftRef.current = next;
+    setOwnerDraft(next);
+    pendingOwnerWritesRef.current += 1;
+
+    const write = ownerWriteTailRef.current.then(() => (
+      onPatch({ owners: next })
+    ));
+    ownerWriteTailRef.current = write.then(
+      () => {
+        latestOwnerWriteSucceededRef.current = true;
+      },
+      () => {
+        latestOwnerWriteSucceededRef.current = false;
+      },
+    ).finally(() => {
+      pendingOwnerWritesRef.current -= 1;
+      if (
+        pendingOwnerWritesRef.current === 0
+        && !latestOwnerWriteSucceededRef.current
+      ) {
+        const authoritative = authoritativeOwnersRef.current;
+        ownerDraftRef.current = authoritative;
+        setOwnerDraft(authoritative);
+      }
+    });
+  }
+
+  async function deleteFromActions() {
+    if (deletePendingRef.current) return;
+    deletePendingRef.current = true;
+    try {
+      await onDelete();
+    } catch {
+      // Board owns the stable mutation banner.
+    } finally {
+      deletePendingRef.current = false;
+      if (triggerRef.current?.isConnected) {
+        setMenuOpen(false);
+        triggerRef.current.focus();
+      }
+    }
   }
 
   return (
@@ -118,10 +190,7 @@ export default function TaskCard({
                 type="button"
                 className="danger-action"
                 aria-label={`Delete ${task.title}`}
-                onClick={() => {
-                  setMenuOpen(false);
-                  void onDelete().catch(() => undefined);
-                }}
+                onClick={() => void deleteFromActions()}
               >
                 Delete
               </button>
@@ -169,6 +238,13 @@ export default function TaskCard({
         <section
           className="task-quick-edit"
           aria-label={`Quick edit ${task.title}`}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              closeEditorAndRestoreFocus();
+            }
+          }}
         >
           <div className="quick-edit-head">
             <strong>Quick edit</strong>
@@ -176,7 +252,7 @@ export default function TaskCard({
               type="button"
               className="icon-btn"
               aria-label={`Close quick edit ${task.title}`}
-              onClick={() => setEditing(false)}
+              onClick={closeEditorAndRestoreFocus}
             >
               <Icon name="close" size={15} />
             </button>
@@ -184,6 +260,7 @@ export default function TaskCard({
           <label>
             Status
             <select
+              ref={editorFocusRef}
               aria-label={`Status for ${task.title}`}
               value={task.status}
               onChange={(event) => patch({
@@ -217,19 +294,13 @@ export default function TaskCard({
           <fieldset>
             <legend>Owner</legend>
             {members.map((member) => {
-              const checked = task.owners.includes(member.name);
+              const checked = ownerDraft.includes(member.name);
               return (
                 <label key={member.id}>
                   <input
                     type="checkbox"
                     checked={checked}
-                    onChange={() => patch({
-                      owners: checked
-                        ? task.owners.filter(
-                          (owner) => owner !== member.name,
-                        )
-                        : [...task.owners, member.name],
-                    })}
+                    onChange={() => toggleOwner(member.name)}
                   />
                   {member.name}
                 </label>

@@ -33,7 +33,7 @@ export interface AddTaskDrawerProps {
   };
   onClose: () => void;
   onCreate: (input: NewTaskInput) => Promise<void>;
-  onCreateType: (name: string) => Promise<void>;
+  onCreateType: (name: string) => Promise<string>;
 }
 
 function draftFromDefaults(
@@ -78,6 +78,8 @@ export default function AddTaskDrawer({
   const [newTypeName, setNewTypeName] = useState("");
   const [typePending, setTypePending] = useState(false);
   const wasOpen = useRef(false);
+  const taskPendingRef = useRef(false);
+  const typePendingRef = useRef(false);
 
   useEffect(() => {
     if (open && !wasOpen.current) {
@@ -126,7 +128,12 @@ export default function AddTaskDrawer({
   }
 
   async function submitDraft() {
-    if (pending) return;
+    if (
+      pending
+      || typePending
+      || taskPendingRef.current
+      || typePendingRef.current
+    ) return;
     const title = draft.title.trim();
     if (!title) {
       setError("Task title is required.");
@@ -140,6 +147,7 @@ export default function AddTaskDrawer({
       tags,
       dueDate: draft.dueDate || null,
     };
+    taskPendingRef.current = true;
     setPending(true);
     setError(null);
     try {
@@ -150,22 +158,32 @@ export default function AddTaskDrawer({
     } catch (caught) {
       setError(`Could not create task. ${errorMessage(caught)}`);
     } finally {
+      taskPendingRef.current = false;
       setPending(false);
     }
   }
 
   async function submitType() {
     const name = newTypeName.trim();
-    if (!name || typePending) return;
+    if (
+      !name
+      || pending
+      || typePending
+      || taskPendingRef.current
+      || typePendingRef.current
+    ) return;
+    typePendingRef.current = true;
     setTypePending(true);
     setError(null);
     try {
-      await onCreateType(name);
+      const typeId = await onCreateType(name);
+      setDraft((current) => ({ ...current, typeId }));
       setNewTypeName("");
       setCreatingType(false);
     } catch (caught) {
       setError(`Could not create type. ${errorMessage(caught)}`);
     } finally {
+      typePendingRef.current = false;
       setTypePending(false);
     }
   }
@@ -284,6 +302,7 @@ export default function AddTaskDrawer({
                 type="button"
                 className="text-action"
                 onClick={() => setCreatingType((current) => !current)}
+                disabled={pending || typePending}
               >
                 <Icon name="plus" size={16} />
                 Create type
@@ -299,6 +318,7 @@ export default function AddTaskDrawer({
                   id="new-drawer-type"
                   value={newTypeName}
                   onChange={(event) => setNewTypeName(event.target.value)}
+                  disabled={pending || typePending}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
@@ -311,7 +331,7 @@ export default function AddTaskDrawer({
                   type="button"
                   className="btn"
                   onClick={() => void submitType()}
-                  disabled={typePending}
+                  disabled={pending || typePending}
                 >
                   Add type
                 </button>

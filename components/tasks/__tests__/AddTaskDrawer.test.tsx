@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AddTaskDrawer from "@/components/tasks/AddTaskDrawer";
 import type {
@@ -49,7 +50,7 @@ const members: Member[] = [
 
 interface RenderDrawerOptions {
   onCreate?: (input: NewTaskInput) => Promise<void>;
-  onCreateType?: (name: string) => Promise<void>;
+  onCreateType?: (name: string) => Promise<string>;
   onClose?: () => void;
   defaults?: {
     status?: NewTaskInput["status"];
@@ -59,7 +60,7 @@ interface RenderDrawerOptions {
 
 function renderDrawer({
   onCreate = vi.fn().mockResolvedValue(undefined),
-  onCreateType = vi.fn().mockResolvedValue(undefined),
+  onCreateType = vi.fn().mockResolvedValue("type-kernel"),
   onClose = vi.fn(),
   defaults,
 }: RenderDrawerOptions = {}) {
@@ -74,6 +75,50 @@ function renderDrawer({
       onCreateType={onCreateType}
     />,
   );
+}
+
+function InlineTypeHarness({
+  onCreate,
+  onCreateType,
+}: {
+  onCreate: (input: NewTaskInput) => Promise<void>;
+  onCreateType: (name: string) => Promise<string>;
+}) {
+  const [currentTypes, setCurrentTypes] = useState(types);
+
+  return (
+    <AddTaskDrawer
+      open
+      types={currentTypes}
+      members={members}
+      onClose={vi.fn()}
+      onCreate={onCreate}
+      onCreateType={async (name) => {
+        const id = await onCreateType(name);
+        setCurrentTypes((current) => [
+          ...current,
+          {
+            id,
+            name,
+            description: "",
+            position: current.length,
+            created_at: "2026-07-27T00:00:00.000Z",
+          },
+        ]);
+        return id;
+      }}
+    />
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
 }
 
 afterEach(cleanup);
@@ -178,9 +223,12 @@ describe("AddTaskDrawer", () => {
     ));
   });
 
-  it("creates a Type inline without leaving the task draft", async () => {
-    const createType = vi.fn().mockResolvedValue(undefined);
-    renderDrawer({ onCreateType: createType });
+  it("creates and automatically selects a Type without leaving the task draft", async () => {
+    const create = vi.fn().mockResolvedValue(undefined);
+    const createType = vi.fn().mockResolvedValue("type-documentation");
+    render(
+      <InlineTypeHarness onCreate={create} onCreateType={createType} />,
+    );
     fireEvent.change(screen.getByLabelText("Task title"), {
       target: { value: "Draft stays put" },
     });
@@ -198,6 +246,15 @@ describe("AddTaskDrawer", () => {
       "value",
       "Draft stays put",
     );
+    expect(screen.getByLabelText("Type")).toHaveProperty(
+      "value",
+      "type-documentation",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() => expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ typeId: "type-documentation" }),
+    ));
   });
 
   it.each([
@@ -207,7 +264,7 @@ describe("AddTaskDrawer", () => {
     "uses %s + Enter in New type name to create only the Type",
     async (_label, modifier) => {
       const create = vi.fn().mockResolvedValue(undefined);
-      const createType = vi.fn().mockResolvedValue(undefined);
+      const createType = vi.fn().mockResolvedValue("type-documentation");
       renderDrawer({ onCreate: create, onCreateType: createType });
       fireEvent.change(screen.getByLabelText("Task title"), {
         target: { value: "Keep this task as a draft" },
@@ -232,6 +289,76 @@ describe("AddTaskDrawer", () => {
       );
     },
   );
+
+  it("blocks task submission and dismissal while Type creation is pending", async () => {
+    const typeWrite = deferred<string>();
+    const create = vi.fn().mockResolvedValue(undefined);
+    const createType = vi.fn(() => typeWrite.promise);
+    const close = vi.fn();
+    renderDrawer({
+      onCreate: create,
+      onCreateType: createType,
+      onClose: close,
+    });
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Retain while Type saves" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create type" }));
+    fireEvent.change(screen.getByLabelText("New type name"), {
+      target: { value: "Documentation" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add type" }));
+
+    await waitFor(() => expect(createType).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Create task" }))
+      .toHaveProperty("disabled", true);
+    fireEvent.keyDown(screen.getByLabelText("Description"), {
+      key: "Enter",
+      ctrlKey: true,
+    });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(create).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+
+    typeWrite.resolve("type-documentation");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Create task" }))
+        .toHaveProperty("disabled", false);
+    });
+  });
+
+  it("blocks Type creation and dismissal while task creation is pending", async () => {
+    const taskWrite = deferred<void>();
+    const create = vi.fn(() => taskWrite.promise);
+    const createType = vi.fn().mockResolvedValue("type-documentation");
+    const close = vi.fn();
+    renderDrawer({
+      onCreate: create,
+      onCreateType: createType,
+      onClose: close,
+    });
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Task write in flight" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create type" }));
+    fireEvent.change(screen.getByLabelText("New type name"), {
+      target: { value: "Documentation" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Add type" }))
+      .toHaveProperty("disabled", true);
+    fireEvent.keyDown(screen.getByLabelText("New type name"), {
+      key: "Enter",
+    });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(createType).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+
+    taskWrite.resolve();
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
 
   it("keeps the complete draft and shows an inline alert when create fails", async () => {
     const create = vi.fn().mockRejectedValue(new Error("Save failed."));

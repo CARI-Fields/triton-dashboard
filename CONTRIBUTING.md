@@ -7,8 +7,8 @@ Thanks for helping maintain the board! Here's the workflow.
 1. Ask a maintainer to add you as a **collaborator** on the GitHub repo.
 2. Clone and install:
    ```bash
-   git clone https://github.com/brucexi999/triton-board.git
-   cd triton-board
+   git clone https://github.com/CARI-Fields/triton-dashboard.git
+   cd triton-dashboard
    npm install
    ```
 3. Create `.env.local` from [`.env.local.example`](.env.local.example) and fill in the values a

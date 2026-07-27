@@ -68,8 +68,8 @@ Environment Variables:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — this holds the Supabase **publishable** key (`sb_publishable_…`); it's safe to expose in a browser, and access is protected by the login + RLS, not by hiding this key.
 
 ```bash
-git clone https://github.com/brucexi999/triton-board.git
-cd triton-board
+git clone https://github.com/CARI-Fields/triton-dashboard.git
+cd triton-dashboard
 cp .env.local.example .env.local     # then paste the two values in
 npm install
 npm run dev                          # http://localhost:3000

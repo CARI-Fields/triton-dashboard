@@ -76,6 +76,69 @@ describe("Drawer", () => {
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
+  it("places one child inside the drawer body before the footer", () => {
+    render(
+      <Drawer
+        open
+        titleId="one-child-title"
+        onClose={() => undefined}
+        footer={<button type="button">Save one</button>}
+      >
+        <h2 id="one-child-title">One child</h2>
+      </Drawer>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "One child" });
+    const directChildren = Array.from(dialog.children);
+    expect(directChildren).toHaveLength(2);
+    expect(directChildren[0].classList.contains("drawer-body")).toBe(true);
+    expect(directChildren[0].children).toHaveLength(1);
+    expect(directChildren[0].contains(screen.getByText("One child"))).toBe(true);
+    expect(directChildren[1].classList.contains("drawer-footer")).toBe(true);
+  });
+
+  it("keeps multiple sibling children together in one drawer body", () => {
+    render(
+      <Drawer
+        open
+        titleId="sibling-title"
+        onClose={() => undefined}
+        footer={<button type="button">Save siblings</button>}
+      >
+        <h2 id="sibling-title">Sibling drawer</h2>
+        <p>Supporting copy</p>
+        <input aria-label="Sibling field" />
+      </Drawer>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Sibling drawer" });
+    const directChildren = Array.from(dialog.children);
+    expect(directChildren).toHaveLength(2);
+    expect(directChildren[0].classList.contains("drawer-body")).toBe(true);
+    expect(directChildren[0].children).toHaveLength(3);
+    expect(directChildren[1].classList.contains("drawer-footer")).toBe(true);
+  });
+
+  it("uses one drawer body row when no footer is provided", () => {
+    render(
+      <Drawer
+        open
+        titleId="no-footer-title"
+        onClose={() => undefined}
+      >
+        <h2 id="no-footer-title">No footer</h2>
+        <p>Body copy</p>
+      </Drawer>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "No footer" });
+    const directChildren = Array.from(dialog.children);
+    expect(directChildren).toHaveLength(1);
+    expect(directChildren[0].classList.contains("drawer-body")).toBe(true);
+    expect(directChildren[0].children).toHaveLength(2);
+    expect(dialog.querySelector(".drawer-footer")).toBeNull();
+  });
+
   it("focuses the preferred control and traps Tab in both directions", () => {
     render(
       <Drawer
@@ -250,6 +313,26 @@ describe("StatusDot", () => {
 describe("OwnerAvatar", () => {
   afterEach(cleanup);
 
+  it("uses a meaningful owner fallback for a whitespace-only name", () => {
+    render(<OwnerAvatar name="   " />);
+
+    const avatar = screen.getByRole("img", { name: "Unknown owner" });
+    expect(avatar.textContent).toBe("UN");
+  });
+
+  it("uppercases before bounding explicit and derived initials", () => {
+    const { rerender } = render(<OwnerAvatar name="ßa" />);
+
+    let avatar = screen.getByRole("img", { name: "ßa" });
+    expect(avatar.textContent).toBe("SS");
+    expect(Array.from(avatar.textContent ?? "")).toHaveLength(2);
+
+    rerender(<OwnerAvatar name="Named owner" initials="ßa" />);
+    avatar = screen.getByRole("img", { name: "Named owner" });
+    expect(avatar.textContent).toBe("SS");
+    expect(Array.from(avatar.textContent ?? "")).toHaveLength(2);
+  });
+
   it("derives or accepts initials, names the image, and bounds its size", () => {
     const { rerender } = render(
       <OwnerAvatar name="Yubai Feng" size={4} />,
@@ -281,7 +364,9 @@ describe("Tag", () => {
 
     let tag = screen.getByText("NPU").closest(".tag")!;
     expect(tag.getAttribute("data-tone")).toBe("0");
-    fireEvent.click(screen.getByRole("button", { name: "Remove NPU" }));
+    const removeButton = screen.getByRole("button", { name: "Remove NPU" });
+    expect(removeButton.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+    fireEvent.click(removeButton);
     expect(remove).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith("NPU");
 

@@ -1,6 +1,8 @@
 const DEFAULT_AVATAR_SIZE = 28;
 const MIN_AVATAR_SIZE = 20;
 const MAX_AVATAR_SIZE = 48;
+const FALLBACK_OWNER_NAME = "Unknown owner";
+const FALLBACK_OWNER_INITIALS = "UN";
 
 export interface OwnerAvatarProps {
   name: string;
@@ -8,23 +10,28 @@ export interface OwnerAvatarProps {
   size?: number;
 }
 
+function normalizedInitials(value: string): string {
+  return Array.from(value.trim().toUpperCase()).slice(0, 2).join("");
+}
+
 function avatarInitials(name: string, initials?: string): string {
-  const explicit = initials?.trim();
+  const explicit = normalizedInitials(initials ?? "");
   if (explicit) {
-    return Array.from(explicit).slice(0, 2).join("").toUpperCase();
+    return explicit;
   }
 
   const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return FALLBACK_OWNER_INITIALS;
+  }
+
   if (words.length > 1) {
     const first = Array.from(words[0])[0] ?? "";
     const last = Array.from(words[words.length - 1])[0] ?? "";
-    return `${first}${last}`.toUpperCase();
+    return normalizedInitials(`${first}${last}`) || FALLBACK_OWNER_INITIALS;
   }
 
-  return Array.from(words[0] ?? "?")
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
+  return normalizedInitials(words[0]) || FALLBACK_OWNER_INITIALS;
 }
 
 function boundedAvatarSize(size: number | undefined): number {
@@ -43,12 +50,13 @@ export default function OwnerAvatar({
   size,
 }: OwnerAvatarProps) {
   const avatarSize = boundedAvatarSize(size);
+  const accessibleName = name.trim() || FALLBACK_OWNER_NAME;
 
   return (
     <span
       className="owner-avatar"
       role="img"
-      aria-label={name}
+      aria-label={accessibleName}
       style={{ width: avatarSize, height: avatarSize }}
     >
       {avatarInitials(name, initials)}

@@ -45,7 +45,7 @@ export default function Drawer({
         aria-labelledby={titleId}
         tabIndex={-1}
       >
-        {children}
+        <div className="drawer-body">{children}</div>
         {footer ? <footer className="drawer-footer">{footer}</footer> : null}
       </section>
     </div>

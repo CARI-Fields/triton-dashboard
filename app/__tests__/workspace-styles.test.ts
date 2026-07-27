@@ -26,6 +26,44 @@ function mediaBody(css: string, width: number): string {
   return match?.[1] ?? "";
 }
 
+type Rgb = [number, number, number];
+
+function hexColor(body: string, property: string): Rgb {
+  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = body.match(
+    new RegExp(`${escaped}\\s*:\\s*#([0-9a-f]{6})`, "i"),
+  );
+  expect(match, `Expected a six-digit color for ${property}`).not.toBeNull();
+  const hex = match?.[1] ?? "000000";
+  return [0, 2, 4].map((index) => (
+    Number.parseInt(hex.slice(index, index + 2), 16)
+  )) as Rgb;
+}
+
+function mixColors(foreground: Rgb, background: Rgb, weight: number): Rgb {
+  return foreground.map((channel, index) => (
+    channel * weight + background[index] * (1 - weight)
+  )) as Rgb;
+}
+
+function relativeLuminance(color: Rgb): number {
+  const [red, green, blue] = color.map((channel) => {
+    const srgb = channel / 255;
+    return srgb <= 0.04045
+      ? srgb / 12.92
+      : ((srgb + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function contrastRatio(first: Rgb, second: Rgb): number {
+  const firstLuminance = relativeLuminance(first);
+  const secondLuminance = relativeLuminance(second);
+  const lighter = Math.max(firstLuminance, secondLuminance);
+  const darker = Math.min(firstLuminance, secondLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 describe("workspace visual contracts", () => {
   it("mounts the global workspace shell through the root layout", () => {
     const globalsImport = layout.indexOf('import "./globals.css"');
@@ -102,6 +140,59 @@ describe("workspace visual contracts", () => {
       /background\s*:\s*var\(--surface-subtle\)/,
     );
     expect(ruleBody(globals, ".app-sidebar")).toMatch(/border-right\s*:/);
+  });
+
+  it("keeps Drawer content in one scrollable body row with a stable footer row", () => {
+    const panel = ruleBody(globals, ".drawer-panel");
+    expect(panel).toMatch(
+      /grid-template-rows\s*:\s*minmax\(0,\s*1fr\)\s+auto/,
+    );
+    expect(panel).toMatch(/overflow\s*:\s*hidden/);
+
+    const body = ruleBody(globals, ".drawer-body");
+    expect(body).toMatch(/grid-row\s*:\s*1/);
+    expect(body).toMatch(/min-height\s*:\s*0/);
+    expect(body).toMatch(/overflow-y\s*:\s*auto/);
+
+    expect(ruleBody(globals, ".drawer-footer")).toMatch(/grid-row\s*:\s*2/);
+  });
+
+  it("keeps Tag remove icons subdued and at least 3:1 across tones and themes", () => {
+    const tag = ruleBody(globals, ".tag");
+    expect(tag).toMatch(
+      /background\s*:\s*color-mix\(in srgb,\s*var\(--tag-accent\)\s+12%,\s*var\(--surface\)\)/,
+    );
+
+    const remove = ruleBody(globals, ".tag-remove");
+    expect(remove).toMatch(/color\s*:\s*var\(--text-secondary\)/);
+    expect(remove).not.toMatch(/color\s*:\s*var\(--tag-accent\)/);
+
+    const themes = [
+      { name: "light", tokens: ruleBody(globals, ":root") },
+      { name: "dark", tokens: ruleBody(globals, '[data-theme="dark"]') },
+    ];
+    for (const { name, tokens } of themes) {
+      const surface = hexColor(tokens, "--surface");
+      const foreground = hexColor(tokens, "--text-secondary");
+
+      for (let tone = 0; tone < 6; tone += 1) {
+        const accent = hexColor(
+          ruleBody(globals, `.tag[data-tone="${tone}"]`),
+          "--tag-accent",
+        );
+        const tagBackground = mixColors(accent, surface, 0.12);
+        const hoverBackground = mixColors(accent, tagBackground, 0.12);
+
+        expect(
+          contrastRatio(foreground, tagBackground),
+          `${name} tone ${tone} default contrast`,
+        ).toBeGreaterThanOrEqual(3);
+        expect(
+          contrastRatio(foreground, hoverBackground),
+          `${name} tone ${tone} hover contrast`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
   });
 
   it("switches the shell to an accessible navigation sheet at 768px", () => {

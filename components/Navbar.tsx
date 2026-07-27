@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthActions } from "@/components/AuthGate";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { Icon, type IconName } from "@/components/ui/Icons";
@@ -15,6 +15,7 @@ const FOCUSABLE_SELECTOR = [
   "textarea:not([disabled])",
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
+const NARROW_NAVIGATION_QUERY = "(max-width: 768px)";
 
 const NAV_ITEMS = [
   {
@@ -79,32 +80,61 @@ function BrandLink() {
 export default function Navbar() {
   const pathname = usePathname();
   const { logout } = useAuthActions();
+  const [isNarrowViewport, setIsNarrowViewport] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const sheetCloseButtonRef = useRef<HTMLButtonElement>(null);
-  const wasMobileOpenRef = useRef(false);
+  const mobileOpenRef = useRef(false);
+  const wasSheetOpenRef = useRef(false);
+  const skipFocusReturnRef = useRef(false);
+  const sheetOpen = isNarrowViewport && mobileOpen;
+
+  const setMobileNavigationOpen = useCallback((open: boolean) => {
+    mobileOpenRef.current = open;
+    setMobileOpen(open);
+  }, []);
 
   useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
+    const mediaQuery = window.matchMedia(NARROW_NAVIGATION_QUERY);
+    const syncViewport = (narrow: boolean) => {
+      if (!narrow && mobileOpenRef.current) {
+        skipFocusReturnRef.current = true;
+        mobileOpenRef.current = false;
+        setMobileOpen(false);
+      }
+      setIsNarrowViewport(narrow);
+    };
+
+    syncViewport(mediaQuery.matches);
+    const handleChange = (event: MediaQueryListEvent) => {
+      syncViewport(event.matches);
+    };
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
 
   useEffect(() => {
-    if (!mobileOpen) {
-      if (wasMobileOpenRef.current) {
+    setMobileNavigationOpen(false);
+  }, [pathname, setMobileNavigationOpen]);
+
+  useEffect(() => {
+    if (!sheetOpen) {
+      if (wasSheetOpenRef.current && !skipFocusReturnRef.current) {
         menuButtonRef.current?.focus();
       }
-      wasMobileOpenRef.current = false;
+      wasSheetOpenRef.current = false;
+      skipFocusReturnRef.current = false;
       return;
     }
 
-    wasMobileOpenRef.current = true;
+    wasSheetOpenRef.current = true;
     sheetCloseButtonRef.current?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        setMobileOpen(false);
+        setMobileNavigationOpen(false);
         return;
       }
 
@@ -141,7 +171,7 @@ export default function Navbar() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [mobileOpen]);
+  }, [setMobileNavigationOpen, sheetOpen]);
 
   return (
     <>
@@ -151,20 +181,24 @@ export default function Navbar() {
           ref={menuButtonRef}
           type="button"
           className="nav-menu-toggle"
-          aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+          aria-label={sheetOpen ? "Close navigation" : "Open navigation"}
           aria-controls="workspace-navigation"
-          aria-expanded={mobileOpen}
-          onClick={() => setMobileOpen((open) => !open)}
+          aria-expanded={sheetOpen}
+          onClick={() => {
+            if (isNarrowViewport) {
+              setMobileNavigationOpen(!mobileOpenRef.current);
+            }
+          }}
         >
-          <Icon name={mobileOpen ? "close" : "menu"} />
+          <Icon name={sheetOpen ? "close" : "menu"} />
         </button>
       </header>
       <aside
         ref={sidebarRef}
-        className={`app-sidebar ${mobileOpen ? "is-open" : ""}`}
-        role={mobileOpen ? "dialog" : undefined}
-        aria-label={mobileOpen ? "Navigation" : undefined}
-        aria-modal={mobileOpen ? true : undefined}
+        className={`app-sidebar ${sheetOpen ? "is-open" : ""}`}
+        role={sheetOpen ? "dialog" : undefined}
+        aria-label={sheetOpen ? "Navigation" : undefined}
+        aria-modal={sheetOpen ? true : undefined}
       >
         <nav id="workspace-navigation" aria-label="Primary">
           <button
@@ -172,7 +206,7 @@ export default function Navbar() {
             type="button"
             className="sidebar-sheet-close"
             aria-label="Close navigation"
-            onClick={() => setMobileOpen(false)}
+            onClick={() => setMobileNavigationOpen(false)}
           >
             <Icon name="close" />
           </button>
@@ -211,12 +245,12 @@ export default function Navbar() {
           </button>
         </div>
       </aside>
-      {mobileOpen ? (
+      {sheetOpen ? (
         <button
           type="button"
           className="nav-backdrop"
           aria-label="Close navigation"
-          onClick={() => setMobileOpen(false)}
+          onClick={() => setMobileNavigationOpen(false)}
         />
       ) : null}
     </>

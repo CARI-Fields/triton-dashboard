@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -6,12 +7,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Navbar from "@/components/Navbar";
 import ThemeProvider from "@/components/theme/ThemeProvider";
 
 const pathnameState = vi.hoisted(() => ({ value: "/" }));
 const logout = vi.hoisted(() => vi.fn());
+const NARROW_NAVIGATION_QUERY = "(max-width: 768px)";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameState.value,
@@ -39,13 +41,70 @@ function renderNavbar() {
   );
 }
 
+function installMatchMedia(initiallyNarrow = true) {
+  let narrow = initiallyNarrow;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => {
+    const isNarrowNavigationQuery = query === NARROW_NAVIGATION_QUERY;
+    return {
+      get matches() {
+        return isNarrowNavigationQuery ? narrow : false;
+      },
+      media: query,
+      onchange: null,
+      addEventListener: (
+        type: string,
+        listener: (event: MediaQueryListEvent) => void,
+      ) => {
+        if (isNarrowNavigationQuery && type === "change") {
+          listeners.add(listener);
+        }
+      },
+      removeEventListener: (
+        type: string,
+        listener: (event: MediaQueryListEvent) => void,
+      ) => {
+        if (isNarrowNavigationQuery && type === "change") {
+          listeners.delete(listener);
+        }
+      },
+      addListener: (listener: (event: MediaQueryListEvent) => void) => {
+        if (isNarrowNavigationQuery) listeners.add(listener);
+      },
+      removeListener: (listener: (event: MediaQueryListEvent) => void) => {
+        if (isNarrowNavigationQuery) listeners.delete(listener);
+      },
+      dispatchEvent: () => true,
+    } as MediaQueryList;
+  }));
+
+  return {
+    setNarrow(nextNarrow: boolean) {
+      narrow = nextNarrow;
+      const event = {
+        matches: narrow,
+        media: NARROW_NAVIGATION_QUERY,
+      } as MediaQueryListEvent;
+      for (const listener of listeners) listener(event);
+    },
+  };
+}
+
 describe("Navbar", () => {
+  let viewport: ReturnType<typeof installMatchMedia>;
+
+  beforeEach(() => {
+    viewport = installMatchMedia();
+  });
+
   afterEach(() => {
     cleanup();
     pathnameState.value = "/";
     localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("renders icon destinations, project context, theme control, and team actions", () => {
@@ -152,6 +211,48 @@ describe("Navbar", () => {
     first.focus();
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(last);
+  });
+
+  it("demotes an open sheet at desktop and keeps it closed after shrinking again", async () => {
+    renderNavbar();
+    const trigger = screen.getByRole("button", { name: "Open navigation" });
+    const logoutButton = screen.getByRole("button", { name: "Log out" });
+
+    fireEvent.click(trigger);
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Navigation" })).toBeDefined();
+    });
+
+    act(() => viewport.setNarrow(false));
+
+    await waitFor(() => {
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+      expect(document.querySelector(".app-sidebar")?.classList)
+        .not.toContain("is-open");
+      expect(document.querySelector(".nav-backdrop")).toBeNull();
+      expect(document.activeElement).not.toBe(trigger);
+    });
+
+    logoutButton.focus();
+    const desktopTab = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Tab",
+    });
+    document.dispatchEvent(desktopTab);
+    expect(desktopTab.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(logoutButton);
+
+    act(() => viewport.setNarrow(true));
+
+    await waitFor(() => {
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+      expect(document.querySelector(".app-sidebar")?.classList)
+        .not.toContain("is-open");
+      expect(document.querySelector(".nav-backdrop")).toBeNull();
+    });
   });
 
   it("closes the narrow navigation sheet after the route changes", async () => {

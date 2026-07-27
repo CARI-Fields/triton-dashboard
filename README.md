@@ -15,8 +15,8 @@ Everything syncs in real time across everyone's browser.
 
 ### Runtime
 
-Use Node 22.12.0 (`nvm use`) for local development. The accepted engine range is
-`^20.19.0 || ^22.12.0 || >=24.0.0`.
+Use Node 24.18.0 (`nvm use`) for local development. The accepted engine range is
+`>=24.18.0 <25.0.0`.
 
 ## Stack
 

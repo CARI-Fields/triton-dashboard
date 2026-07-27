@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Read and follow `node_modules/next/dist/docs/01-app/01-getting-started/03-layouts-and-pages.md`, `05-server-and-client-components.md`, `11-css.md`, `13-fonts.md`, and `03-api-reference/02-components/script.md`; this repository uses Next.js 16.2.10, not older conventions.
-- Use a Node runtime accepted by Vite/Rolldown: `^20.19.0 || ^22.12.0 || >=24.0.0`; the implementation target is Node `22.12.0`.
+- Use the project Node runtime contract: `>=24.18.0 <25.0.0`; the implementation target is Node `24.18.0`.
 - Do not add a styling framework, icon dependency, font package, state library, or component library.
 - Import global CSS only from `app/layout.tsx`; keep import order deterministic because Next.js production CSS ordering follows JavaScript import order.
 - Keep `app/layout.tsx` a Server Component. Browser theme state belongs in narrowly scoped Client Components.
@@ -45,7 +45,7 @@ The approved concept assets remain in the original workspace and must be viewed 
 
 ## Known Baseline
 
-`npm test` currently exits before collecting tests because the shell provides Node `18.19.1`, while Next 16 requires Node `>=20.9.0` and Vite/Rolldown require `^20.19.0 || ^22.12.0 || >=24.0.0`. The observed error is:
+`npm test` currently exits before collecting tests because the shell provides Node `18.19.1`, while the project runtime contract requires Node `>=24.18.0 <25.0.0`. The observed error is:
 
 ```text
 SyntaxError: The requested module 'node:util' does not provide an export named 'styleText'
@@ -109,7 +109,7 @@ This is an environment mismatch, not an application-test failure. Task 1 fixes t
 **Interfaces:**
 
 - Consumes: installed Next.js/Vite package engine ranges.
-- Produces: a reproducible Node `22.12.0` project runtime and a trustworthy pre-feature test baseline.
+- Produces: a reproducible Node `24.18.0` project runtime and a trustworthy pre-feature test baseline.
 
 - [ ] **Step 1: Reproduce and record the runtime failure**
 
@@ -128,14 +128,14 @@ Expected on the old shell: Node `v18.19.1`, `undefined`, then Vitest startup fai
 Create `.nvmrc`:
 
 ```text
-22.12.0
+24.18.0
 ```
 
 Add to the root of `package.json`:
 
 ```json
 "engines": {
-  "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  "node": ">=24.18.0 <25.0.0"
 }
 ```
 
@@ -144,8 +144,8 @@ Add this README prerequisite:
 ```markdown
 ### Runtime
 
-Use Node 22.12.0 (`nvm use`) for local development. The accepted engine range is
-`^20.19.0 || ^22.12.0 || >=24.0.0`.
+Use Node 24.18.0 (`nvm use`) for local development. The accepted engine range is
+`>=24.18.0 <25.0.0`.
 ```
 
 Change the design spec status to:
@@ -154,23 +154,23 @@ Change the design spec status to:
 **状态：** 已通过书面 Spec 复核，允许进入实施
 ```
 
-- [ ] **Step 3: Activate Node 22.12.0 and refresh lock metadata**
+- [ ] **Step 3: Activate Node 24.18.0 and refresh lock metadata**
 
-This Linux ARM64 workspace currently has no `nvm`, `fnm`, `mise`, or Volta.
-After obtaining network approval, install the official portable runtime under
-`/tmp` so no user-level toolchain directory is mutated:
+Load nvm from its absolute user installation and use Node 24.18.0:
 
 ```bash
-curl -fsSLo /tmp/node-v22.12.0-linux-arm64.tar.xz https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-arm64.tar.xz
-tar -xJf /tmp/node-v22.12.0-linux-arm64.tar.xz -C /tmp
-export PATH="/tmp/node-v22.12.0-linux-arm64/bin:$PATH"
+export NVM_DIR="/home/yubaifeng/.config/nvm"
+. "$NVM_DIR/nvm.sh"
+nvm install 24.18.0
+nvm use 24.18.0
+nvm alias default 24.18.0
 node --version
 npm install
 ```
 
-Expected: `node --version` prints `v22.12.0`; `npm install` uses that runtime;
+Expected: `node --version` prints `v24.18.0`; `npm install` uses that runtime;
 the root package entry in `package-lock.json` contains the same `engines.node`
-range. Keep this PATH active for every later Node, npm, npx, and browser-server
+range. Keep Node 24.18.0 active for every later Node, npm, npx, and browser-server
 command in the plan. Developers with `nvm` can use `.nvmrc` instead.
 
 - [ ] **Step 4: Establish the clean baseline**

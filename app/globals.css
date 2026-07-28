@@ -641,7 +641,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .error-banner {
   margin-bottom: 18px; padding: 12px 16px; border-radius: 6px; font-size: 13.5px;
-  background: var(--crit-soft); border: 1px solid #eab7b3; color: #8e292c;
+  background: var(--status-blocked-soft);
+  border: 1px solid color-mix(in srgb, var(--status-blocked) 40%, var(--border));
+  color: var(--status-blocked-foreground);
 }
 
 /* ---------- Setup screen ---------- */

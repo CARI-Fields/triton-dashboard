@@ -179,6 +179,31 @@ describe("ExperimentsDatabase", () => {
       .getAttribute("aria-disabled")).toBe("true");
   });
 
+  it("keeps hidden selections and the canonical Compare URL in an empty filtered view", async () => {
+    render(<ExperimentsDatabase />);
+    await screen.findByRole("link", { name: "Guardrail run" });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0001" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0002" }));
+    const compare = screen.getByRole("link", { name: "Compare selected (2)" });
+    const canonicalHref = `/experiments/compare?ids=${first.id}%2C${second.id}`;
+    expect(compare.getAttribute("href")).toBe(canonicalHref);
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search experiments" }),
+      { target: { value: "no matching experiment" } },
+    );
+
+    const selection = screen.getByRole("status");
+    const empty = screen.getByText("No experiments match this view.");
+    expect(within(selection).getByText("2 selected")).toBeDefined();
+    expect(selection.nextElementSibling).toBe(empty);
+    expect(screen.getByText("0 experiments")).toBeDefined();
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(compare.getAttribute("aria-disabled")).toBe("false");
+    expect(compare.getAttribute("href")).toBe(canonicalHref);
+  });
+
   it("loads repository rows, refreshes from Realtime, and unsubscribes", async () => {
     let refresh: () => void = () => undefined;
     const unsubscribe = vi.fn();

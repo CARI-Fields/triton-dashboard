@@ -131,6 +131,43 @@ describe("workspace visual contracts", () => {
     expect(ruleBody(globals, ".pill.in_progress")).not.toContain("--warn");
   });
 
+  it("keeps banner and create-form errors semantic and at least 4.5:1 in both themes", () => {
+    const errorBanner = ruleBody(globals, ".error-banner");
+    const formError = ruleBody(workspaceCss(), ".form-error");
+    expect(errorBanner).toMatch(
+      /background\s*:\s*var\(--status-blocked-soft\)/,
+    );
+    expect(errorBanner).toMatch(
+      /color\s*:\s*var\(--status-blocked-foreground\)/,
+    );
+    expect(errorBanner).toMatch(
+      /border\s*:\s*1px\s+solid\s+color-mix\(in srgb,\s*var\(--status-blocked\)\s+\d+%,\s*var\(--border\)\)/,
+    );
+    expect(formError).toMatch(
+      /color\s*:\s*var\(--status-blocked-foreground\)/,
+    );
+
+    const lightTokens = ruleBody(globals, ":root");
+    const blocked = hexColor(lightTokens, "--status-blocked");
+    const themes = [
+      { name: "light", tokens: lightTokens },
+      { name: "dark", tokens: ruleBody(globals, '[data-theme="dark"]') },
+    ];
+    for (const { name, tokens } of themes) {
+      const surface = hexColor(tokens, "--surface");
+      const foreground = hexColor(tokens, "--status-blocked-foreground");
+      const bannerBackground = mixColors(blocked, surface, 0.12);
+      expect(
+        contrastRatio(foreground, bannerBackground),
+        `${name} error banner contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(foreground, surface),
+        `${name} create form error contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("uses the approved 256px desktop shell and semantic sidebar surface", () => {
     expect(ruleBody(globals, ".app-shell")).toMatch(
       /grid-template-columns\s*:\s*256px\s+minmax\(0,\s*1fr\)/,
@@ -237,6 +274,34 @@ describe("workspace visual contracts", () => {
     const identity = ruleBody(css, ".compare-table .compare-identity");
     expect(identity).toMatch(/position\s*:\s*sticky/);
     expect(identity).toMatch(/left\s*:\s*0/);
+  });
+
+  it("joins a selected strip to table, empty, and loading surfaces without a doubled seam", () => {
+    const css = workspaceCss();
+    const strip = ruleBody(css, ".selection-strip");
+    expect(strip).toMatch(/border\s*:\s*1px\s+solid\s+var\(--border\)/);
+    expect(strip).toMatch(/border-radius\s*:\s*6px\s+6px\s+0\s+0/);
+    expect(strip).toMatch(/background\s*:\s*var\(--surface\)/);
+
+    for (const selector of [
+      ".selection-strip + .experiment-table-scroll",
+      ".selection-strip + .experiment-empty",
+      ".selection-strip + .state-note",
+    ]) {
+      const body = ruleBody(css, selector);
+      expect(body, selector).toMatch(/border-top\s*:\s*0/);
+      expect(body, selector).toMatch(/border-radius\s*:\s*0\s+0\s+6px\s+6px/);
+    }
+
+    const empty = ruleBody(css, ".experiment-empty");
+    expect(empty).toMatch(/border\s*:\s*1px\s+dashed\s+var\(--border-strong\)/);
+    expect(empty).toMatch(/background\s*:\s*var\(--surface\)/);
+
+    const loading = ruleBody(css, ".selection-strip + .state-note");
+    expect(loading).toMatch(/margin\s*:\s*0/);
+    expect(loading).toMatch(/max-width\s*:\s*none/);
+    expect(loading).toMatch(/border\s*:\s*1px\s+solid\s+var\(--border\)/);
+    expect(loading).toMatch(/background\s*:\s*var\(--surface\)/);
   });
 
   it("keeps Delta visually neutral", () => {

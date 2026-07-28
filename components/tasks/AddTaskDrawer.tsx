@@ -79,9 +79,12 @@ export default function AddTaskDrawer({
   const [creatingType, setCreatingType] = useState(false);
   const [newTypeName, setNewTypeName] = useState("");
   const [typePending, setTypePending] = useState(false);
+  const [ownerPending, setOwnerPending] = useState(false);
   const wasOpen = useRef(false);
   const taskPendingRef = useRef(false);
   const typePendingRef = useRef(false);
+  const ownerPendingRef = useRef(false);
+  const interactionPending = pending || typePending || ownerPending;
 
   useEffect(() => {
     if (open && !wasOpen.current) {
@@ -90,6 +93,8 @@ export default function AddTaskDrawer({
       setError(null);
       setCreatingType(false);
       setNewTypeName("");
+      ownerPendingRef.current = false;
+      setOwnerPending(false);
     }
     wasOpen.current = open;
   }, [defaults?.status, defaults?.typeId, open]);
@@ -133,8 +138,10 @@ export default function AddTaskDrawer({
     if (
       pending
       || typePending
+      || ownerPending
       || taskPendingRef.current
       || typePendingRef.current
+      || ownerPendingRef.current
     ) return;
     const title = draft.title.trim();
     if (!title) {
@@ -171,8 +178,10 @@ export default function AddTaskDrawer({
       !name
       || pending
       || typePending
+      || ownerPending
       || taskPendingRef.current
       || typePendingRef.current
+      || ownerPendingRef.current
     ) return;
     typePendingRef.current = true;
     setTypePending(true);
@@ -190,19 +199,33 @@ export default function AddTaskDrawer({
     }
   }
 
+  function handleOwnerPendingChange(nextPending: boolean) {
+    ownerPendingRef.current = nextPending;
+    setOwnerPending(nextPending);
+  }
+
+  function closeDrawer() {
+    if (
+      taskPendingRef.current
+      || typePendingRef.current
+      || ownerPendingRef.current
+    ) return;
+    onClose();
+  }
+
   return (
     <Drawer
       open={open}
       titleId="add-task-title"
-      onClose={onClose}
-      blocked={pending || typePending}
+      onClose={closeDrawer}
+      blocked={interactionPending}
       footer={(
         <>
           <button
             type="button"
             className="btn"
-            onClick={onClose}
-            disabled={pending || typePending}
+            onClick={closeDrawer}
+            disabled={interactionPending}
           >
             Cancel
           </button>
@@ -210,7 +233,7 @@ export default function AddTaskDrawer({
             type="submit"
             form="add-task-form"
             className="btn primary"
-            disabled={pending || typePending}
+            disabled={interactionPending}
           >
             {pending ? "Creating…" : "Create task"}
             <span className="keyboard-hint" aria-hidden="true">⌘ Enter</span>
@@ -227,8 +250,8 @@ export default function AddTaskDrawer({
           type="button"
           className="icon-btn drawer-close"
           aria-label="Close create task"
-          onClick={onClose}
-          disabled={pending || typePending}
+          onClick={closeDrawer}
+          disabled={interactionPending}
         >
           <Icon name="close" />
         </button>
@@ -263,6 +286,7 @@ export default function AddTaskDrawer({
             data-modal-initial-focus
             value={draft.title}
             placeholder="What needs to be done?"
+            disabled={interactionPending}
             onChange={(event) => updateDraft("title", event.target.value)}
           />
         </div>
@@ -272,6 +296,7 @@ export default function AddTaskDrawer({
           <select
             id="task-status-input"
             value={draft.status}
+            disabled={interactionPending}
             onChange={(event) => (
               updateDraft("status", event.target.value as Status)
             )}
@@ -291,6 +316,7 @@ export default function AddTaskDrawer({
               <select
                 id="task-type-input"
                 value={draft.typeId ?? ""}
+                disabled={interactionPending}
                 onChange={(event) => (
                   updateDraft("typeId", event.target.value || null)
                 )}
@@ -304,7 +330,7 @@ export default function AddTaskDrawer({
                 type="button"
                 className="text-action"
                 onClick={() => setCreatingType((current) => !current)}
-                disabled={pending || typePending}
+                disabled={interactionPending}
               >
                 <Icon name="plus" size={16} />
                 Create type
@@ -320,7 +346,7 @@ export default function AddTaskDrawer({
                   id="new-drawer-type"
                   value={newTypeName}
                   onChange={(event) => setNewTypeName(event.target.value)}
-                  disabled={pending || typePending}
+                  disabled={interactionPending}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
@@ -333,7 +359,7 @@ export default function AddTaskDrawer({
                   type="button"
                   className="btn"
                   onClick={() => void submitType()}
-                  disabled={pending || typePending}
+                  disabled={interactionPending}
                 >
                   Add type
                 </button>
@@ -364,6 +390,7 @@ export default function AddTaskDrawer({
               id="task-tags-input"
               value={tagInput}
               placeholder="Add tags with comma or Enter"
+              disabled={interactionPending}
               onChange={(event) => handleTagChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -384,8 +411,9 @@ export default function AddTaskDrawer({
             <OwnerPicker
               members={members}
               owners={draft.owners}
-              disabled={pending || typePending}
+              disabled={interactionPending}
               onCreateOwner={onCreateOwner}
+              onPendingChange={handleOwnerPendingChange}
               onChange={(owners) => updateDraft("owners", owners)}
             />
           </div>
@@ -396,6 +424,7 @@ export default function AddTaskDrawer({
           <select
             id="task-priority-input"
             value={draft.priority}
+            disabled={interactionPending}
             onChange={(event) => updateDraft(
               "priority",
               event.target.value as NewTaskInput["priority"],
@@ -414,6 +443,7 @@ export default function AddTaskDrawer({
             id="task-due-date-input"
             type="date"
             value={draft.dueDate ?? ""}
+            disabled={interactionPending}
             onChange={(event) => updateDraft(
               "dueDate",
               event.target.value || null,
@@ -428,6 +458,7 @@ export default function AddTaskDrawer({
             rows={7}
             value={draft.description}
             placeholder="Add context, acceptance criteria, or links…"
+            disabled={interactionPending}
             onChange={(event) => (
               updateDraft("description", event.target.value)
             )}

@@ -1,15 +1,25 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import OwnerAvatar from "@/components/ui/OwnerAvatar";
 import { findMemberByName, memberNameKey } from "@/lib/members";
 import type { Member } from "@/lib/types";
+
+const PANEL_GAP_PX = 6;
 
 export interface OwnerPickerProps {
   members: Member[];
   owners: string[];
   onChange: (owners: string[]) => void;
   onCreateOwner: (name: string) => Promise<Member>;
+  onPendingChange?: (pending: boolean) => void;
   disabled?: boolean;
 }
 
@@ -18,15 +28,25 @@ export default function OwnerPicker({
   owners,
   onChange,
   onCreateOwner,
+  onPendingChange,
   disabled = false,
 }: OwnerPickerProps) {
   const [open, setOpen] = useState(false);
   const [newOwnerName, setNewOwnerName] = useState("");
   const [pending, setPending] = useState(false);
+  const [panelPlacement, setPanelPlacement] = useState<"above" | "below">(
+    "below",
+  );
+  const [restoreFailedCreateFocus, setRestoreFailedCreateFocus] = useState(
+    false,
+  );
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const pendingRef = useRef(false);
+  const latestOwnersRef = useRef(owners);
+  latestOwnersRef.current = owners;
   const inputId = useId();
   const ownerKeys = useMemo(
     () => new Set(owners.map(memberNameKey)),
@@ -36,6 +56,26 @@ export default function OwnerPicker({
     (member) => !ownerKeys.has(memberNameKey(member.name)),
   );
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    const root = rootRef.current;
+    const panel = panelRef.current;
+    if (!root || !panel) return;
+
+    const boundary = root.closest<HTMLElement>(".drawer-body");
+    const boundaryRect = boundary?.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    const panelHeight = panel.getBoundingClientRect().height;
+    const boundaryTop = boundaryRect?.top ?? 0;
+    const boundaryBottom = boundaryRect?.bottom ?? window.innerHeight;
+    const spaceBelow = boundaryBottom - rootRect.bottom - PANEL_GAP_PX;
+    const spaceAbove = rootRect.top - boundaryTop - PANEL_GAP_PX;
+    const nextPlacement = panelHeight > spaceBelow && spaceAbove > spaceBelow
+      ? "above"
+      : "below";
+    setPanelPlacement(nextPlacement);
+  }, [availableMembers.length, open, owners.length]);
+
   function closePanel(restoreFocus = true) {
     setOpen(false);
     if (restoreFocus) {
@@ -44,8 +84,12 @@ export default function OwnerPicker({
   }
 
   function selectOwner(name: string) {
-    if (!ownerKeys.has(memberNameKey(name))) {
-      onChange([...owners, name]);
+    const currentOwners = latestOwnersRef.current;
+    const nameKey = memberNameKey(name);
+    if (!currentOwners.some((owner) => memberNameKey(owner) === nameKey)) {
+      const nextOwners = [...currentOwners, name];
+      latestOwnersRef.current = nextOwners;
+      onChange(nextOwners);
     }
     setNewOwnerName("");
     closePanel();
@@ -61,17 +105,25 @@ export default function OwnerPicker({
     }
 
     pendingRef.current = true;
+    onPendingChange?.(true);
     setPending(true);
     try {
       const created = await onCreateOwner(name);
       selectOwner(created.name);
     } catch {
-      inputRef.current?.focus();
+      setRestoreFailedCreateFocus(true);
     } finally {
       pendingRef.current = false;
       setPending(false);
+      onPendingChange?.(false);
     }
   }
+
+  useEffect(() => {
+    if (!restoreFailedCreateFocus || pending || !open) return;
+    inputRef.current?.focus();
+    setRestoreFailedCreateFocus(false);
+  }, [open, pending, restoreFailedCreateFocus]);
 
   useEffect(() => {
     if (!open) return;
@@ -80,13 +132,17 @@ export default function OwnerPicker({
       if (!rootRef.current?.contains(event.target as Node)) closePanel();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closePanel();
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      closePanel();
     };
     document.addEventListener("pointerdown", closeOnPointer);
-    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("keydown", closeOnEscape, true);
     return () => {
       document.removeEventListener("pointerdown", closeOnPointer);
-      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("keydown", closeOnEscape, true);
     };
   }, [open]);
 
@@ -105,7 +161,13 @@ export default function OwnerPicker({
                 type="button"
                 aria-label={`Remove ${name}`}
                 disabled={disabled}
-                onClick={() => onChange(owners.filter((owner) => owner !== name))}
+                onClick={() => {
+                  const nextOwners = latestOwnersRef.current.filter(
+                    (owner) => owner !== name,
+                  );
+                  latestOwnersRef.current = nextOwners;
+                  onChange(nextOwners);
+                }}
               >
                 ×
               </button>
@@ -124,7 +186,13 @@ export default function OwnerPicker({
         Add owner
       </button>
       {open ? (
-        <div className="owner-picker-panel" role="dialog" aria-label="Add owner">
+        <div
+          className="owner-picker-panel"
+          ref={panelRef}
+          role="dialog"
+          aria-label="Add owner"
+          data-placement={panelPlacement}
+        >
           <div className="owner-picker-options">
             {availableMembers.length === 0 ? (
               <span className="field-help">Everyone is already added.</span>

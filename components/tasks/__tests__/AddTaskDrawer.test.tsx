@@ -123,6 +123,29 @@ function InlineTypeHarness({
   );
 }
 
+function ClosableDrawerHarness({
+  onClose,
+}: {
+  onClose: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <AddTaskDrawer
+      open={open}
+      types={types}
+      members={members}
+      onClose={() => {
+        onClose();
+        setOpen(false);
+      }}
+      onCreate={vi.fn().mockResolvedValue(undefined)}
+      onCreateType={vi.fn().mockResolvedValue("type-kernel")}
+      onCreateOwner={defaultCreateOwner}
+    />
+  );
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -330,6 +353,131 @@ describe("AddTaskDrawer", () => {
       .toBeDefined();
     expect(onCreate).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Create task" })).toBeDefined();
+  });
+
+  it("blocks synchronous submit and close until Owner creation completes", async () => {
+    const ownerWrite = deferred<Member>();
+    const create = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn();
+    let form!: HTMLFormElement;
+    let cancelButton!: HTMLButtonElement;
+    const onCreateOwner = vi.fn(() => {
+      form.dispatchEvent(new Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }));
+      cancelButton.click();
+      return ownerWrite.promise;
+    });
+    renderDrawer({
+      onCreate: create,
+      onCreateOwner,
+      onClose: close,
+    });
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Wait for Nova" },
+    });
+    form = screen.getByRole("form", {
+      name: "Create task",
+    }) as HTMLFormElement;
+    cancelButton = screen.getByRole("button", {
+      name: "Cancel",
+    }) as HTMLButtonElement;
+
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    expect(onCreateOwner).toHaveBeenCalledWith("Nova");
+    expect(create).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    for (const control of [
+      screen.getByLabelText("Task title"),
+      screen.getByLabelText("Status"),
+      screen.getByLabelText("Type"),
+      screen.getByLabelText("Tags"),
+      screen.getByLabelText("Priority"),
+      screen.getByLabelText("Due date"),
+      screen.getByLabelText("Description"),
+      screen.getByRole("button", { name: "Add owner" }),
+      screen.getByRole("button", { name: "Create type" }),
+      screen.getByRole("button", { name: "Cancel" }),
+      screen.getByRole("button", { name: "Create task" }),
+      screen.getByRole("button", { name: "Close create task" }),
+    ]) {
+      expect(control).toHaveProperty("disabled", true);
+    }
+
+    fireEvent.submit(form);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close create task" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(create).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Task title")).toHaveProperty(
+      "value",
+      "Wait for Nova",
+    );
+
+    ownerWrite.resolve({
+      id: "member-nova",
+      name: "Nova",
+      initials: "N",
+      position: 2,
+      created_at: "2026-07-28T00:00:00.000Z",
+    });
+
+    expect(await screen.findByRole("button", { name: "Remove Nova" }))
+      .toBeDefined();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Create task" }))
+        .toHaveProperty("disabled", false);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Wait for Nova",
+        owners: ["Nova"],
+      }),
+    ));
+    expect(create).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("uses the first Escape for the Owner picker and the second for the Drawer", async () => {
+    const close = vi.fn();
+    render(<ClosableDrawerHarness onClose={close} />);
+    const title = screen.getByLabelText("Task title");
+    fireEvent.change(title, {
+      target: { value: "Preserve this draft" },
+    });
+    const trigger = screen.getByRole("button", { name: "Add owner" });
+    fireEvent.click(trigger);
+    const ownerInput = screen.getByLabelText("New owner name");
+    await waitFor(() => expect(document.activeElement).toBe(ownerInput));
+
+    fireEvent.keyDown(ownerInput, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Add owner" })).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    });
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Create task" })).toBeDefined();
+    expect(screen.getByLabelText("Task title")).toHaveProperty(
+      "value",
+      "Preserve this draft",
+    );
+
+    fireEvent.keyDown(trigger, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Create task" })).toBeNull();
+    });
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("creates and automatically selects a Type without leaving the task draft", async () => {

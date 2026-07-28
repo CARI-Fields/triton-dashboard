@@ -459,13 +459,7 @@ export default function OwnerPicker({
               </button>
             ))}
           </div>
-          <form
-            className="owner-picker-create"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void createOwner();
-            }}
-          >
+          <div className="owner-picker-create">
             <label htmlFor="new-owner-name">New owner name</label>
             <input
               id="new-owner-name"
@@ -473,15 +467,22 @@ export default function OwnerPicker({
               value={newOwnerName}
               disabled={pending || disabled}
               onChange={(event) => setNewOwnerName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                event.stopPropagation();
+                void createOwner();
+              }}
             />
             <button
-              type="submit"
+              type="button"
               className="btn"
               disabled={!newOwnerName.trim() || pending || disabled}
+              onClick={() => void createOwner()}
             >
               {pending ? "Creating…" : "Create owner"}
             </button>
-          </form>
+          </div>
         </div>
       ) : null}
     </div>

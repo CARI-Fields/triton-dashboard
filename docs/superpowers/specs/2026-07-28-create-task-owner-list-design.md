@@ -1,7 +1,11 @@
 # Create Task Owner List Design
 
 **Date:** 2026-07-28
-**Status:** Approved and implemented
+**Status:** Superseded by `2026-07-28-owner-picker-fixed-sidebar-design.md`
+
+> The selected-only Owner picker replaces this document's always-expanded
+> one-owner-per-row selector. Historical implementation details below are kept
+> for context only.
 
 ## Goal
 

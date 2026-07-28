@@ -17,6 +17,7 @@ import AttachmentGallery from "@/components/experiments/AttachmentGallery";
 import TaskExperimentsPanel from "@/components/experiments/TaskExperimentsPanel";
 import { supabase } from "@/lib/supabase";
 import { KIND_COLOR, logActivity } from "@/lib/activity";
+import { findMemberByName, initialsFromName } from "@/lib/members";
 import { statusLabel } from "@/lib/status";
 import {
   taskFromStorage,
@@ -64,7 +65,7 @@ type MutationField =
   | "priority"
   | "dueDate"
   | "delete";
-type MutationErrorKey = MutationField | "timeline";
+type MutationErrorKey = MutationField | "timeline" | "ownerCreate";
 
 interface TimelineSubmission {
   visit: Visit;
@@ -1049,6 +1050,59 @@ export default function TaskDetail({ id }: { id: string }) {
   const mutationError: DetailError | null = mutationMessage
     ? { message: mutationMessage, phase: null }
     : null;
+  const createOwner = useCallback(async (
+    rawName: string,
+  ): Promise<Member> => {
+    const name = rawName.trim();
+    const existing = findMemberByName(members, name);
+    if (existing) return { ...existing };
+    if (!name) throw new Error("Owner name is required.");
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const requestedVisit = visitRef.current;
+    setMutationErrors((current) => {
+      if (!current.ownerCreate) return current;
+      const next = { ...current };
+      delete next.ownerCreate;
+      return next;
+    });
+    try {
+      const position = members.length > 0
+        ? Math.max(...members.map((member) => member.position)) + 1
+        : 0;
+      const result = await supabase
+        .from("members")
+        .insert({
+          name,
+          initials: initialsFromName(name),
+          position,
+        })
+        .select("*")
+        .single();
+      throwIfError(result.error);
+      if (!result.data) {
+        throw new Error("Created Owner did not return a row.");
+      }
+      if (visitRef.current !== requestedVisit) {
+        throw new Error("Task visit changed before Owner creation completed.");
+      }
+      const created = result.data as Member;
+      if (visitRef.current === requestedVisit) {
+        setMembers((current) => [
+          ...current.filter((member) => member.id !== created.id),
+          created,
+        ].sort((left, right) => left.position - right.position));
+      }
+      return { ...created };
+    } catch (caught) {
+      if (visitRef.current === requestedVisit) {
+        setMutationErrors((current) => ({
+          ...current,
+          ownerCreate: `Could not add owner. ${errorMessage(caught)}`,
+        }));
+      }
+      throw caught;
+    }
+  }, [members]);
   const propertyTask = useMemo(() => {
     if (!task) return null;
     const ownerCoordinator = ownerCoordinatorRef.current;
@@ -1168,6 +1222,7 @@ export default function TaskDetail({ id }: { id: string }) {
           members={members}
           ownerSyncRevision={ownerSyncRevision}
           tagSyncRevision={tagSyncRevision}
+          onCreateOwner={createOwner}
           onPatch={patchTask}
         />
 

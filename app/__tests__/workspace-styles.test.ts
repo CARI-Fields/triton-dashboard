@@ -65,27 +65,21 @@ function contrastRatio(first: Rgb, second: Rgb): number {
 }
 
 describe("workspace visual contracts", () => {
-  it("renders Create Task owners one per row and ellipsizes long names", () => {
-    expect(ruleBody(globals, ".owner-options")).toMatch(
-      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/,
-    );
-    expect(ruleBody(globals, ".owner-option")).toMatch(/width\s*:\s*100%/);
-    expect(ruleBody(globals, ".owner-option input")).toMatch(
-      /flex\s*:\s*0\s+0\s+auto/,
-    );
-    expect(ruleBody(globals, ".owner-option .owner-avatar")).toMatch(
-      /flex\s*:\s*0\s+0\s+auto/,
-    );
-    const ownerControl = ruleBody(globals, ".owner-field .owner-options");
-    expect(ownerControl).toMatch(/grid-column\s*:\s*2/);
-    expect(ownerControl).toMatch(/width\s*:\s*100%/);
+  it("anchors the owner picker and ellipsizes selected chip names", () => {
+    const picker = ruleBody(globals, ".owner-picker");
+    expect(picker).toMatch(/position\s*:\s*relative/);
+    expect(picker).toMatch(/min-width\s*:\s*0/);
+    const panel = ruleBody(globals, ".owner-picker-panel");
+    expect(panel).toMatch(/position\s*:\s*absolute/);
+    expect(panel).toMatch(/top\s*:\s*calc\(100%\s*\+\s*6px\)/);
+    expect(panel).toMatch(/left\s*:\s*0/);
 
-    const name = ruleBody(globals, ".owner-option-name");
-    expect(name).toMatch(/flex\s*:\s*1\s+1\s+auto/);
+    const name = ruleBody(globals, ".selected-owner-name");
     expect(name).toMatch(/min-width\s*:\s*0/);
     expect(name).toMatch(/overflow\s*:\s*hidden/);
     expect(name).toMatch(/text-overflow\s*:\s*ellipsis/);
     expect(name).toMatch(/white-space\s*:\s*nowrap/);
+    expect(globals).not.toMatch(/\.owner-options\s*\{/);
   });
 
   it("mounts the global workspace shell through the root layout", () => {
@@ -375,14 +369,27 @@ describe("workspace visual contracts", () => {
   });
 
   it("uses the approved 256px desktop shell and semantic sidebar surface", () => {
-    expect(ruleBody(globals, ".app-shell")).toMatch(
+    const shell = ruleBody(globals, ".app-shell");
+    expect(shell).toMatch(
       /grid-template-columns\s*:\s*256px\s+minmax\(0,\s*1fr\)/,
     );
-    expect(ruleBody(globals, ".app-shell")).toMatch(/background\s*:\s*var\(--canvas\)/);
-    expect(ruleBody(globals, ".app-sidebar")).toMatch(
+    expect(shell).toMatch(/background\s*:\s*var\(--canvas\)/);
+    expect(shell).toMatch(/height\s*:\s*100dvh/);
+    expect(shell).toMatch(/min-height\s*:\s*0/);
+    expect(shell).toMatch(/overflow\s*:\s*hidden/);
+
+    const content = ruleBody(globals, ".app-content");
+    expect(content).toMatch(/height\s*:\s*100dvh/);
+    expect(content).toMatch(/min-height\s*:\s*0/);
+    expect(content).toMatch(/overflow-y\s*:\s*auto/);
+
+    const sidebar = ruleBody(globals, ".app-sidebar");
+    expect(sidebar).toMatch(
       /background\s*:\s*var\(--surface-subtle\)/,
     );
-    expect(ruleBody(globals, ".app-sidebar")).toMatch(/border-right\s*:/);
+    expect(sidebar).toMatch(/border-right\s*:/);
+    expect(sidebar).toMatch(/position\s*:\s*static/);
+    expect(sidebar).toMatch(/height\s*:\s*100dvh/);
   });
 
   it("keeps Drawer content in one scrollable body row with a stable footer row", () => {
@@ -490,6 +497,10 @@ describe("workspace visual contracts", () => {
 
     const mobile = mediaBody(globals, 767);
     expect(mobile).toMatch(/\.app-shell\s*\{\s*display\s*:\s*block/);
+    expect(ruleBody(mobile, ".app-shell")).toMatch(/height\s*:\s*auto/);
+    expect(ruleBody(mobile, ".app-shell")).toMatch(/overflow\s*:\s*visible/);
+    expect(ruleBody(mobile, ".app-content")).toMatch(/height\s*:\s*auto/);
+    expect(ruleBody(mobile, ".app-content")).toMatch(/overflow-y\s*:\s*visible/);
     expect(ruleBody(mobile, ".mobile-app-bar")).toMatch(/display\s*:\s*flex/);
     const mobileBrand = ruleBody(mobile, ".mobile-app-bar .brand");
     expect(mobileBrand).toMatch(/justify-content\s*:\s*flex-start/);

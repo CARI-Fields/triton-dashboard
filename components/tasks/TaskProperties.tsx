@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import OwnerPicker from "@/components/tasks/OwnerPicker";
 import { normalizeTags } from "@/lib/tasks/model";
 import { STATUS_OPTIONS } from "@/lib/status";
 import type {
@@ -17,6 +18,7 @@ interface TaskPropertiesProps {
   members: Member[];
   ownerSyncRevision: number;
   tagSyncRevision: number;
+  onCreateOwner: (name: string) => Promise<Member>;
   onPatch: (patch: TaskPatch) => void;
 }
 
@@ -38,6 +40,7 @@ export default function TaskProperties({
   members,
   ownerSyncRevision,
   tagSyncRevision,
+  onCreateOwner,
   onPatch,
 }: TaskPropertiesProps) {
   const [ownerDraft, setOwnerDraft] = useState(task.owners);
@@ -61,11 +64,7 @@ export default function TaskProperties({
     setTagInput("");
   }, [tagKey, tagSyncRevision, task.id, task.tags]);
 
-  function toggleOwner(name: string) {
-    const current = ownerDraftRef.current;
-    const next = current.includes(name)
-      ? current.filter((owner) => owner !== name)
-      : [...current, name];
+  function changeOwners(next: string[]) {
     ownerDraftRef.current = next;
     setOwnerDraft(next);
     onPatch({ owners: next });
@@ -163,20 +162,12 @@ export default function TaskProperties({
 
       <fieldset className="task-property task-property-owner">
         <legend>Owner</legend>
-        <div className="task-owner-options">
-          {members.length === 0 ? (
-            <span className="muted">No members yet</span>
-          ) : members.map((member) => (
-            <label key={member.id}>
-              <input
-                type="checkbox"
-                checked={ownerDraft.includes(member.name)}
-                onChange={() => toggleOwner(member.name)}
-              />
-              <span>{member.name}</span>
-            </label>
-          ))}
-        </div>
+        <OwnerPicker
+          members={members}
+          owners={ownerDraft}
+          onCreateOwner={onCreateOwner}
+          onChange={changeOwners}
+        />
       </fieldset>
 
       <div className="task-property">

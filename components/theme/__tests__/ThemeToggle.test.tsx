@@ -28,4 +28,23 @@ describe("ThemeToggle", () => {
         .getAttribute("aria-pressed"),
     ).toBe("true");
   });
+
+  it("labels light as Default while preserving the light storage contract", () => {
+    localStorage.setItem("triton-theme", "dark");
+    render(
+      <ThemeProvider>
+        <ThemeToggle />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Default theme" }));
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.style.colorScheme).toBe("light");
+    expect(localStorage.getItem("triton-theme")).toBe("light");
+    expect(
+      screen.getByRole("button", { name: "Default theme" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
 });

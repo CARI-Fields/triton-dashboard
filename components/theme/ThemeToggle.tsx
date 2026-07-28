@@ -4,7 +4,7 @@ import { useTheme, type Theme } from "@/components/theme/ThemeProvider";
 import { Icon, type IconName } from "@/components/ui/Icons";
 
 const THEME_OPTIONS = [
-  { theme: "light", label: "Light", icon: "sun" },
+  { theme: "light", label: "Default", icon: "sun" },
   { theme: "dark", label: "Dark", icon: "moon" },
 ] satisfies Array<{ theme: Theme; label: string; icon: IconName }>;
 

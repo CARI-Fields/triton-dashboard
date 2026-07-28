@@ -95,9 +95,13 @@ vi.mock("@/lib/supabase", () => {
       let filterId: string | null = null;
       let orderColumn: string | null = null;
       let returnSingle = false;
+      let selectProjection: string | null = null;
 
       const builder: Record<string, unknown> = {};
-      builder.select = vi.fn(() => builder);
+      builder.select = vi.fn((projection: string) => {
+        selectProjection = projection;
+        return builder;
+      });
       builder.order = vi.fn((column: string) => {
         orderColumn = column;
         return builder;
@@ -224,7 +228,9 @@ vi.mock("@/lib/supabase", () => {
           outcome: "success",
         });
         return {
-          data: returnSingle && returnedRow ? { id: returnedRow.id } : null,
+          data: returnSingle && returnedRow
+            ? selectProjection === "*" ? returnedRow : { id: returnedRow.id }
+            : null,
           error: null,
         };
       }
@@ -1158,7 +1164,8 @@ describe("Board", () => {
     fireEvent.change(screen.getByLabelText("Tags"), {
       target: { value: "NPU, npu, RL" },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Maya" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Maya" }));
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));
 
     await waitFor(() => {
@@ -1201,6 +1208,35 @@ describe("Board", () => {
       "value",
       "Retained failed task",
     );
+  });
+
+  it("creates a Team Owner for a task and submits the returned name", async () => {
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Assign Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    expect(await screen.findByRole("button", { name: "Remove Nova" }))
+      .toBeDefined();
+    expect(supabaseState.mutationTrace.filter((entry) => (
+      entry.table === "members" && entry.operation === "insert"
+    ))).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() => expect(supabaseState.mutationTrace).toContainEqual(
+      expect.objectContaining({
+        table: "tasks",
+        operation: "insert",
+        payload: expect.objectContaining({ assignees: ["Nova"] }),
+        outcome: "success",
+      }),
+    ));
   });
 
   it("selects the checked inserted Type id in the retained task draft", async () => {

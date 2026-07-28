@@ -115,7 +115,8 @@ describe("Navbar", () => {
       .getAttribute("href")).toBe("/");
     expect(screen.getByText("Triton Kernel Agent")).toBeDefined();
     expect(screen.getByText("Shared team board")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Light theme" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Default theme" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Light theme" })).toBeNull();
     expect(screen.getByRole("button", { name: "Dark theme" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Log out" })).toBeDefined();
 

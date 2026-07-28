@@ -51,6 +51,7 @@ const members: Member[] = [
 interface RenderDrawerOptions {
   onCreate?: (input: NewTaskInput) => Promise<void>;
   onCreateType?: (name: string) => Promise<string>;
+  onCreateOwner?: (name: string) => Promise<Member>;
   onClose?: () => void;
   defaults?: {
     status?: NewTaskInput["status"];
@@ -58,9 +59,18 @@ interface RenderDrawerOptions {
   };
 }
 
+const defaultCreateOwner = vi.fn(async (name: string): Promise<Member> => ({
+  id: `member-${name.toLocaleLowerCase()}`,
+  name,
+  initials: name.slice(0, 1).toUpperCase(),
+  position: members.length,
+  created_at: "2026-07-28T00:00:00.000Z",
+}));
+
 function renderDrawer({
   onCreate = vi.fn().mockResolvedValue(undefined),
   onCreateType = vi.fn().mockResolvedValue("type-kernel"),
+  onCreateOwner = defaultCreateOwner,
   onClose = vi.fn(),
   defaults,
 }: RenderDrawerOptions = {}) {
@@ -73,6 +83,7 @@ function renderDrawer({
       onClose={onClose}
       onCreate={onCreate}
       onCreateType={onCreateType}
+      onCreateOwner={onCreateOwner}
     />,
   );
 }
@@ -107,6 +118,7 @@ function InlineTypeHarness({
         ]);
         return id;
       }}
+      onCreateOwner={defaultCreateOwner}
     />
   );
 }
@@ -137,7 +149,8 @@ describe("AddTaskDrawer", () => {
     fireEvent.change(screen.getByLabelText("Tags"), {
       target: { value: "NPU, npu, Verifier" },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Maya" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Maya" }));
     fireEvent.change(screen.getByLabelText("Priority"), {
       target: { value: "high" },
     });
@@ -177,8 +190,12 @@ describe("AddTaskDrawer", () => {
     fireEvent.change(screen.getByLabelText("Task title"), {
       target: { value: "Pair owner coverage" },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Maya" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Yubai" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Maya" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Yubai" }));
+    expect(screen.getByRole("button", { name: "Remove Maya" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Remove Yubai" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));
 
     await waitFor(() => expect(create).toHaveBeenCalledWith(
@@ -202,13 +219,14 @@ describe("AddTaskDrawer", () => {
         onClose={vi.fn()}
         onCreate={vi.fn().mockResolvedValue(undefined)}
         onCreateType={vi.fn().mockResolvedValue("type-kernel")}
+        onCreateOwner={defaultCreateOwner}
       />,
     );
 
-    const checkbox = screen.getByRole("checkbox", { name: longName });
-    expect(checkbox.getAttribute("aria-label")).toBe(longName);
-    const name = checkbox.closest(".owner-option")
-      ?.querySelector(".owner-option-name");
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    const option = screen.getByRole("button", { name: `Add ${longName}` });
+    expect(option.getAttribute("aria-label")).toBe(`Add ${longName}`);
+    const name = option.querySelector("span[title]");
     expect(name?.textContent).toBe(longName);
     expect(name?.getAttribute("title")).toBe(longName);
   });
@@ -264,6 +282,28 @@ describe("AddTaskDrawer", () => {
     await waitFor(() => expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ tags: ["Verifier"] }),
     ));
+  });
+
+  it("creates a Team Owner and immediately selects it in the task draft", async () => {
+    const created: Member = {
+      id: "member-nova",
+      name: "Nova",
+      initials: "N",
+      position: 2,
+      created_at: "2026-07-28T00:00:00.000Z",
+    };
+    const onCreateOwner = vi.fn().mockResolvedValue(created);
+    renderDrawer({ onCreateOwner });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    expect(await screen.findByRole("button", { name: "Remove Nova" }))
+      .toBeDefined();
+    expect(onCreateOwner).toHaveBeenCalledWith("Nova");
   });
 
   it("creates and automatically selects a Type without leaving the task draft", async () => {
@@ -417,7 +457,8 @@ describe("AddTaskDrawer", () => {
     fireEvent.change(screen.getByLabelText("Tags"), {
       target: { value: "RL" },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Yubai" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Yubai" }));
     fireEvent.change(screen.getByLabelText("Description"), {
       target: { value: "Do not erase this context." },
     });
@@ -435,10 +476,7 @@ describe("AddTaskDrawer", () => {
       "value",
       "type-research",
     );
-    expect(screen.getByRole("checkbox", { name: "Yubai" })).toHaveProperty(
-      "checked",
-      true,
-    );
+    expect(screen.getByRole("button", { name: "Remove Yubai" })).toBeDefined();
     expect(screen.getByText("RL")).toBeDefined();
     expect(screen.getByLabelText("Description")).toHaveProperty(
       "value",

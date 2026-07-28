@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
 import { Icon } from "@/components/ui/Icons";
-import OwnerAvatar from "@/components/ui/OwnerAvatar";
+import OwnerPicker from "@/components/tasks/OwnerPicker";
 import Tag from "@/components/ui/Tag";
 import { normalizeTags } from "@/lib/tasks/model";
 import { STATUS_OPTIONS } from "@/lib/status";
@@ -34,6 +34,7 @@ export interface AddTaskDrawerProps {
   onClose: () => void;
   onCreate: (input: NewTaskInput) => Promise<void>;
   onCreateType: (name: string) => Promise<string>;
+  onCreateOwner: (name: string) => Promise<Member>;
 }
 
 function draftFromDefaults(
@@ -67,6 +68,7 @@ export default function AddTaskDrawer({
   onClose,
   onCreate,
   onCreateType,
+  onCreateOwner,
 }: AddTaskDrawerProps) {
   const [draft, setDraft] = useState<NewTaskInput>(() => (
     draftFromDefaults(defaults)
@@ -378,35 +380,14 @@ export default function AddTaskDrawer({
 
         <fieldset className="add-task-field owner-field">
           <legend>Owner</legend>
-          <div className="field-control owner-options">
-            {members.length > 0 ? members.map((member) => {
-              const checked = draft.owners.includes(member.name);
-              return (
-                <label key={member.id} className="owner-option">
-                  <input
-                    type="checkbox"
-                    aria-label={member.name}
-                    checked={checked}
-                    onChange={() => updateDraft(
-                      "owners",
-                      checked
-                        ? draft.owners.filter((name) => name !== member.name)
-                        : [...draft.owners, member.name],
-                    )}
-                  />
-                  <OwnerAvatar
-                    name={member.name}
-                    initials={member.initials}
-                    size={24}
-                  />
-                  <span className="owner-option-name" title={member.name}>
-                    {member.name}
-                  </span>
-                </label>
-              );
-            }) : (
-              <span className="field-help">No owners yet.</span>
-            )}
+          <div className="field-control">
+            <OwnerPicker
+              members={members}
+              owners={draft.owners}
+              disabled={pending || typePending}
+              onCreateOwner={onCreateOwner}
+              onChange={(owners) => updateDraft("owners", owners)}
+            />
           </div>
         </fieldset>
 

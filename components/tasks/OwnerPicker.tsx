@@ -149,6 +149,7 @@ export default function OwnerPicker({
             className="owner-picker-create"
             onSubmit={(event) => {
               event.preventDefault();
+              event.stopPropagation();
               void createOwner();
             }}
           >

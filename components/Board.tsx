@@ -19,6 +19,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import StatusDot from "@/components/ui/StatusDot";
 import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import { logActivity } from "@/lib/activity";
+import { findMemberByName, initialsFromName } from "@/lib/members";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import {
   newTaskToStorage,
@@ -46,13 +47,6 @@ const BOARD_VIEWS: Array<{ value: BoardView; label: string }> = [
   { value: "ownership", label: "Ownership" },
   { value: "team", label: "Team" },
 ];
-
-function initialsFromName(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
 
 function nextPosition(items: Array<{ position: number }>): number {
   return items.length > 0
@@ -384,12 +378,11 @@ export default function Board() {
     }
   }, [exposeMutationError, reload]);
 
-  const addMember = useCallback(async (rawName: string) => {
+  const createMember = useCallback(async (rawName: string): Promise<Member> => {
     const name = rawName.trim();
-    if (
-      !name
-      || members.some((member) => member.name === name)
-    ) return;
+    const existing = findMemberByName(members, name);
+    if (existing) return { ...existing };
+    if (!name) throw new Error("Owner name is required.");
     if (!supabase) {
       throw await exposeMutationError(
         "add owner",
@@ -398,13 +391,22 @@ export default function Board() {
     }
     setMutationErrorMsg(null);
     try {
-      const result = await supabase.from("members").insert({
-        name,
-        initials: initialsFromName(name),
-        position: nextPosition(members),
-      });
+      const result = await supabase
+        .from("members")
+        .insert({
+          name,
+          initials: initialsFromName(name),
+          position: nextPosition(members),
+        })
+        .select("*")
+        .single();
       if (result.error) throw result.error;
+      if (!result.data) {
+        throw new Error("Created Owner did not return a row.");
+      }
+      const created = result.data as Member;
       await reload();
+      return { ...created };
     } catch (caught) {
       throw await exposeMutationError("add owner", caught);
     }
@@ -610,7 +612,9 @@ export default function Board() {
             onCreateType={createType}
             onPatchType={patchType}
             onDeleteType={deleteType}
-            onAddMember={addMember}
+            onAddMember={async (name) => {
+              await createMember(name);
+            }}
             onRemoveMember={removeMember}
           />
         )}
@@ -631,6 +635,7 @@ export default function Board() {
         onClose={() => setCreateOpen(false)}
         onCreate={createTask}
         onCreateType={createType}
+        onCreateOwner={createMember}
       />
     </div>
   );

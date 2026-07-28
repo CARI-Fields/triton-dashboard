@@ -1,41 +1,109 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { STATUS_OPTIONS } from "@/lib/status";
-import type { Member, Module, Status, Task } from "@/lib/types";
+import Link from "next/link";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import PageHeader from "@/components/ui/PageHeader";
+import StatusDot from "@/components/ui/StatusDot";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import {
+  deriveTaskAnalytics,
+  taskAnalyticsCsv,
+} from "@/lib/tasks/analytics";
+import {
+  taskFromStorage,
+  taskTypeFromStorage,
+} from "@/lib/tasks/model";
+import { statusLabel } from "@/lib/status";
+import { relTime } from "@/lib/time";
+import type {
+  Member,
+  Module,
+  Task,
+  TaskModel,
+  TaskType,
+} from "@/lib/types";
 
-const STATUS_COLOR: Record<Status, string> = {
-  todo: "#abb3bf",
-  in_progress: "var(--warn)",
-  done: "var(--good)",
-  blocked: "var(--crit)",
-};
-
-function initialsFromName(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+function ownerSummary(owners: string[]): string {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const owner of owners) {
+    const name = owner.trim();
+    const key = name.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names.join(", ") || "No owner yet";
 }
 
 export default function Analytics() {
-  const [modules, setModules] = useState<Module[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [types, setTypes] = useState<TaskType[]>([]);
+  const [tasks, setTasks] = useState<TaskModel[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasSnapshot, setHasSnapshot] = useState(false);
+  const reloadGenerationRef = useRef(0);
 
   const reload = useCallback(async () => {
-    if (!supabase) return;
-    const [m, t, mem] = await Promise.all([
-      supabase.from("modules").select("*").order("position"),
-      supabase.from("tasks").select("*").order("position"),
-      supabase.from("members").select("*").order("position"),
-    ]);
-    setModules((m.data ?? []) as Module[]);
-    setTasks((t.data ?? []) as Task[]);
-    setMembers((mem.data ?? []) as Member[]);
-    setLoading(false);
+    const generation = reloadGenerationRef.current + 1;
+    reloadGenerationRef.current = generation;
+    if (!supabase) {
+      if (generation === reloadGenerationRef.current) {
+        setLoading(false);
+      }
+      return;
+    }
+
+    try {
+      const [typeResult, taskResult, memberResult] = await Promise.all([
+        supabase.from("modules").select("*").order("position"),
+        supabase.from("tasks").select("*").order("position"),
+        supabase.from("members").select("*").order("position"),
+      ]);
+      if (generation !== reloadGenerationRef.current) return;
+
+      const failedPart = typeResult.error
+        ? "Type"
+        : taskResult.error
+          ? "Task"
+          : memberResult.error
+            ? "Owner"
+            : null;
+      if (failedPart) {
+        setLoadError(
+          `Could not load analytics. ${failedPart} data is unavailable.`,
+        );
+        return;
+      }
+
+      const nextTypes = (typeResult.data ?? []).map((row) => (
+        taskTypeFromStorage(row as Module)
+      ));
+      const nextTasks = (taskResult.data ?? []).map((row) => (
+        taskFromStorage(row as Task)
+      ));
+      const nextMembers = (memberResult.data ?? []) as Member[];
+      setTypes(nextTypes);
+      setTasks(nextTasks);
+      setMembers(nextMembers);
+      setHasSnapshot(true);
+      setLoadError(null);
+    } catch {
+      if (generation !== reloadGenerationRef.current) return;
+      setLoadError("Could not load analytics. Try again.");
+    } finally {
+      if (generation === reloadGenerationRef.current) {
+        setLoading(false);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -44,162 +112,300 @@ export default function Analytics() {
       return;
     }
     const client = supabase;
-    reload();
+    void reload();
+    const refresh = () => {
+      void reload();
+    };
     const channel = client
       .channel("analytics-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "modules" }, reload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, reload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "members" }, reload)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "modules" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tasks" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "members" },
+        refresh,
+      )
       .subscribe();
+
     return () => {
-      client.removeChannel(channel);
+      reloadGenerationRef.current += 1;
+      void client.removeChannel(channel);
     };
   }, [reload]);
 
-  const stats = useMemo(() => {
-    const total = tasks.length;
-    const counts: Record<Status, number> = { todo: 0, in_progress: 0, done: 0, blocked: 0 };
-    for (const t of tasks) counts[t.status] += 1;
-    const completion = total ? counts.done / total : 0;
-    const maxCount = Math.max(1, ...Object.values(counts));
+  const analytics = useMemo(
+    () => deriveTaskAnalytics(tasks, types, members),
+    [members, tasks, types],
+  );
+  const typeNameById = useMemo(
+    () => new Map(types.map((type) => [type.id, type.name])),
+    [types],
+  );
 
-    const statusBars = STATUS_OPTIONS.map((o) => ({
-      label: o.label,
-      count: counts[o.value],
-      width: `${((counts[o.value] / maxCount) * 100).toFixed(1)}%`,
-      color: STATUS_COLOR[o.value],
-    }));
-
-    const workload = members
-      .map((m) => {
-        const mine = tasks.filter((t) => t.assignees.includes(m.name));
-        const done = mine.filter((t) => t.status === "done").length;
-        const prog = mine.filter((t) => t.status === "in_progress").length;
-        const tot = mine.length || 1;
-        return {
-          name: m.name,
-          initials: m.initials || initialsFromName(m.name),
-          summary: `${mine.length} task${mine.length === 1 ? "" : "s"}`,
-          doneWidth: `${((done / tot) * 100).toFixed(1)}%`,
-          progWidth: `${((prog / tot) * 100).toFixed(1)}%`,
-          count: mine.length,
-        };
-      })
-      .filter((w) => w.count > 0);
-
-    const moduleStats = modules.map((m) => {
-      const mine = tasks.filter((t) => t.module_id === m.id);
-      const done = mine.filter((t) => t.status === "done").length;
-      const pct = mine.length ? done / mine.length : 0;
-      return {
-        id: m.id,
-        name: m.name,
-        kindLabel: m.kind === "foundation" ? "Foundation" : "Pipeline",
-        pct,
-        complete: pct >= 1,
-        summary: `${done} / ${mine.length} done`,
-      };
+  function exportCsv() {
+    if (!hasSnapshot) return;
+    const blob = new Blob([taskAnalyticsCsv(analytics)], {
+      type: "text/csv;charset=utf-8",
     });
+    const url = URL.createObjectURL(blob);
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "triton-task-analytics.csv";
+      anchor.click();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
 
-    const kpis = [
-      { label: "Total tasks", value: total, color: "var(--ink)" },
-      { label: "In progress", value: counts.in_progress, color: "var(--warn)" },
-      { label: "Done", value: counts.done, color: "var(--good)" },
-      { label: "Blocked", value: counts.blocked, color: "var(--crit)" },
-    ];
-
-    return { total, counts, completion, statusBars, workload, moduleStats, kpis };
-  }, [tasks, members, modules]);
+  const errorBanner = loadError ? (
+    <div className="error-banner analytics-error" role="alert">
+      <span>{loadError}</span>
+      <button
+        type="button"
+        className="btn"
+        onClick={() => void reload()}
+      >
+        Retry
+      </button>
+    </div>
+  ) : null;
 
   if (!isSupabaseConfigured) {
     return (
-      <div className="wrap">
-        <p className="state-note">Connect Supabase first — open the board for setup instructions.</p>
+      <div className="workspace-page analytics-page analytics-state-page">
+        <p className="state-note">
+          Connect Supabase first — open the board for setup instructions.
+        </p>
       </div>
     );
   }
-  if (loading) return <div className="wrap"><p className="state-note">Loading analytics…</p></div>;
 
   return (
-    <div className="wrap">
-      <p className="eyebrow">Overview</p>
-      <h1>Project Analytics</h1>
+    <div className="workspace-page analytics-page">
+      <PageHeader
+        eyebrow="Live snapshot"
+        title="Analytics"
+        description={
+          "Current Task progress, attention, Type coverage, and Owner workload."
+        }
+        actions={(
+          <button
+            type="button"
+            className="btn"
+            onClick={exportCsv}
+            disabled={loading || !hasSnapshot}
+          >
+            Export CSV
+          </button>
+        )}
+      />
 
-      <div className="kpi-grid">
-        {stats.kpis.map((k) => (
-          <div className="kpi" key={k.label}>
-            <div className="kpi-label">{k.label}</div>
-            <div className="kpi-value" style={{ color: k.color }}>{k.value}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="panel-grid">
-        <div className="panel">
-          <div className="panel-title">Overall completion</div>
-          <div className="progress">
-            <div className="progress-fill" style={{ width: `${stats.completion * 100}%` }} />
-          </div>
-          <div className="panel-sub">
-            {Math.round(stats.completion * 100)}% of tasks done ({stats.counts.done} / {stats.total})
-          </div>
-          <div className="status-bars">
-            {stats.statusBars.map((s) => (
-              <div className="bar-row status-bar-row" key={s.label}>
-                <span className="bar-label">{s.label}</span>
-                <div className="bar-track">
-                  <div className="bar-fill" style={{ width: s.width, background: s.color }} />
-                </div>
-                <span className="bar-value">{s.count}</span>
+      {loading ? (
+        <WorkspaceSkeleton variant="analytics" label="Loading Analytics" />
+      ) : !hasSnapshot ? (
+        errorBanner
+      ) : (
+        <>
+          {errorBanner}
+          <dl className="kpi-strip">
+            {([
+              ["Total tasks", analytics.kpis.total],
+              ["In progress", analytics.kpis.inProgress],
+              ["Done", analytics.kpis.done],
+              ["Blocked", analytics.kpis.blocked],
+              ["Completion", `${analytics.kpis.completion}%`],
+            ] as Array<[string, string | number]>).map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
               </div>
             ))}
-          </div>
-        </div>
+          </dl>
 
-        <div className="panel">
-          <div className="panel-title">Workload by member</div>
-          {stats.workload.length === 0 ? (
-            <p className="muted">No assignments yet.</p>
-          ) : (
-            <div className="workload">
-              {stats.workload.map((w) => (
-                <div key={w.name}>
-                  <div className="workload-head">
-                    <span className="av">{w.initials}</span>
-                    <span className="workload-name">{w.name}</span>
-                    <span className="workload-summary">{w.summary}</span>
-                  </div>
-                  <div className="workload-track">
-                    <div style={{ width: w.doneWidth, background: "var(--good)" }} />
-                    <div style={{ width: w.progWidth, background: "var(--warn)" }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="section-label">
-        Module progress<span className="rule" />
-      </div>
-      <div className="module-grid">
-        {stats.moduleStats.map((m) => (
-          <div className="panel module-panel" key={m.id}>
-            <div className="module-head">
-              <span className="module-name">{m.name}</span>
-              <span className="module-kind">{m.kindLabel}</span>
-            </div>
-            <div className="progress slim">
+          <div className="analytics-split">
+            <section aria-labelledby="progress-status-title">
+              <h2 id="progress-status-title">Progress by status</h2>
               <div
-                className="progress-fill"
-                style={{ width: `${m.pct * 100}%`, background: m.complete ? "var(--good)" : "var(--accent)" }}
-              />
-            </div>
-            <div className="panel-sub">{m.summary}</div>
+                className="status-progress-track"
+                role="img"
+                aria-label={`${analytics.kpis.completion}% complete`}
+              >
+                {analytics.byStatus.map((item) => (
+                  <span
+                    key={item.status}
+                    className={`status-segment status-${item.status}`}
+                    style={{ width: `${item.percentage}%` }}
+                    aria-hidden="true"
+                  />
+                ))}
+              </div>
+              <ul className="status-legend">
+                {analytics.byStatus.map((item) => (
+                  <li key={item.status}>
+                    <StatusDot
+                      status={item.status}
+                      label={statusLabel(item.status)}
+                    />
+                    <strong>{item.count}</strong>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section aria-labelledby="needs-attention-title">
+              <h2 id="needs-attention-title">Needs attention</h2>
+              {analytics.needsAttention.length === 0 ? (
+                <p className="muted">No blocked Tasks.</p>
+              ) : (
+                <ul className="attention-list">
+                  {analytics.needsAttention.map((task) => (
+                    <li key={task.id}>
+                      <Link href={`/task/${task.id}`}>{task.title}</Link>
+                      <span>
+                        {task.typeId
+                          ? typeNameById.get(task.typeId) ?? "No type"
+                          : "No type"}
+                        {" · "}
+                        {ownerSummary(task.owners)}
+                        {" · "}
+                        {relTime(task.updated_at)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           </div>
-        ))}
-      </div>
+
+          <section
+            className="analytics-table-section"
+            aria-labelledby="progress-type-title"
+          >
+            <h2 id="progress-type-title">Progress by type</h2>
+            <div
+              className="analytics-table-scroll"
+              role="region"
+              tabIndex={0}
+              aria-label="Progress by type table"
+              aria-describedby="progress-type-scroll-help"
+            >
+              <table
+                className="analytics-table"
+                aria-labelledby="progress-type-title"
+              >
+                <thead>
+                  <tr>
+                    <th scope="col">Type</th>
+                    <th scope="col">Tasks</th>
+                    <th scope="col">Done</th>
+                    <th scope="col">In progress</th>
+                    <th scope="col">Blocked</th>
+                    <th scope="col">Owner coverage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analytics.byType.map((row) => (
+                    <tr key={row.id}>
+                      <th scope="row">{row.name}</th>
+                      <td>{row.total}</td>
+                      <td>{row.done}</td>
+                      <td>{row.inProgress}</td>
+                      <td>{row.blocked}</td>
+                      <td>{row.ownerCoverage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p id="progress-type-scroll-help" className="sr-only">
+              Scroll horizontally to inspect every Progress by type column.
+            </p>
+          </section>
+
+          <section
+            className="analytics-table-section"
+            aria-labelledby="workload-owner-title"
+          >
+            <h2 id="workload-owner-title">Workload by owner</h2>
+            <div
+              className="analytics-table-scroll"
+              role="region"
+              tabIndex={0}
+              aria-label="Workload by owner table"
+              aria-describedby="workload-owner-scroll-help"
+            >
+              <table
+                className="analytics-table"
+                aria-labelledby="workload-owner-title"
+              >
+                <thead>
+                  <tr>
+                    <th scope="col">Owner</th>
+                    <th scope="col">Tasks</th>
+                    <th scope="col">Workload</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analytics.byOwner.map((row) => (
+                    <tr key={row.name}>
+                      <th scope="row">{row.name}</th>
+                      <td>{row.total}</td>
+                      <td>
+                        <span
+                          className="workload-segments"
+                          aria-label={
+                            `${row.done} done, `
+                            + `${row.inProgress} in progress, `
+                            + `${row.todo} to do, ${row.blocked} blocked`
+                          }
+                        >
+                          {([
+                            "done",
+                            "inProgress",
+                            "todo",
+                            "blocked",
+                          ] as const).map((key) => (
+                            <i
+                              key={key}
+                              className={
+                                `status-${
+                                  key === "inProgress"
+                                    ? "in_progress"
+                                    : key
+                                }`
+                              }
+                              style={{
+                                width: `${
+                                  row.total
+                                    ? (row[key] / row.total) * 100
+                                    : 0
+                                }%`,
+                              }}
+                              aria-hidden="true"
+                            />
+                          ))}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p id="workload-owner-scroll-help" className="sr-only">
+              Scroll horizontally to inspect every Workload by owner column.
+            </p>
+          </section>
+        </>
+      )}
     </div>
   );
 }

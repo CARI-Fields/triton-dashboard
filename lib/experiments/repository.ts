@@ -1,4 +1,9 @@
 import { supabase } from "@/lib/supabase";
+import {
+  deleteAttachment,
+  updateAttachmentCaption,
+  uploadAttachment,
+} from "@/lib/attachments/repository";
 import type {
   Activity,
   Attachment,
@@ -98,7 +103,7 @@ const LIST_SELECT = [
 ].join(",");
 const BUNDLE_SELECT = [
   LIST_SELECT,
-  `baseline:experiments!experiments_baseline_experiment_id_fkey(*,task:tasks(id,title),owner:members(${MEMBER_SELECT}))`,
+  `baseline:experiments!baseline_experiment_id(*,task:tasks(id,title),owner:members(${MEMBER_SELECT}))`,
 ].join(",");
 
 function normalizeExperiment(row: Experiment): Experiment {
@@ -373,61 +378,15 @@ export async function uploadExperimentAttachment(
   file: File,
   position: number,
 ): Promise<void> {
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${experiment.task_id}/${experiment.id}/${crypto.randomUUID()}-${safeName}`;
-  const storage = client().storage.from("task-images");
-  const upload = await storage.upload(path, file, { upsert: false });
-  throwIfError(upload.error);
-  const { data: publicUrl } = storage.getPublicUrl(path);
-  const { error } = await client().from("attachments").insert({
-    task_id: experiment.task_id,
-    experiment_id: experiment.id,
-    url: publicUrl.publicUrl,
-    path,
-    caption: "",
+  return uploadAttachment(
+    { taskId: experiment.task_id, experimentId: experiment.id },
+    file,
     position,
-  });
-  if (error) {
-    const removal = await storage.remove([path]);
-    if (removal.error) {
-      throw new Error(
-        `Attachment insert failed: ${error.message}; Storage cleanup failed: ${removal.error.message}`,
-      );
-    }
-    throw new Error(error.message);
-  }
+  );
 }
 
-export async function updateExperimentAttachment(
-  attachmentId: string,
-  caption: string,
-): Promise<void> {
-  const { error } = await client()
-    .from("attachments")
-    .update({ caption })
-    .eq("id", attachmentId);
-  throwIfError(error);
-}
-
-export async function deleteExperimentAttachment(
-  attachment: Attachment,
-): Promise<void> {
-  const { error } = await client()
-    .from("attachments")
-    .delete()
-    .eq("id", attachment.id);
-  throwIfError(error);
-  if (attachment.path) {
-    const removal = await client()
-      .storage.from("task-images")
-      .remove([attachment.path]);
-    if (removal.error) {
-      throw new Error(
-        `Attachment record was deleted, but Storage cleanup failed: ${removal.error.message}`,
-      );
-    }
-  }
-}
+export const updateExperimentAttachment = updateAttachmentCaption;
+export const deleteExperimentAttachment = deleteAttachment;
 
 export function watchExperiment(
   id: string,

@@ -25,10 +25,12 @@ const SAVED_VIEWS: { value: ExperimentSavedView; label: string }[] = [
 export default function ExperimentFilters({
   rows,
   value,
+  resultCount,
   onChange,
 }: {
   rows: ExperimentListRow[];
   value: ExperimentFilterState;
+  resultCount: number;
   onChange: (value: ExperimentFilterState) => void;
 }) {
   const owners = [...new Map(
@@ -44,7 +46,11 @@ export default function ExperimentFilters({
 
   return (
     <div className="experiment-filter-stack">
-      <div className="saved-view-tabs" aria-label="Experiment saved views">
+      <div
+        className="saved-view-tabs"
+        role="group"
+        aria-label="Experiment saved views"
+      >
         {SAVED_VIEWS.map((view) => (
           <button
             key={view.value}
@@ -57,18 +63,25 @@ export default function ExperimentFilters({
           </button>
         ))}
       </div>
-      <div className="experiment-filter-row">
-        <label>
-          <span>Search</span>
+      <div className="database-toolbar">
+        <label className="search-control">
+          <span className="sr-only">Search experiments</span>
           <input
             type="search"
             value={value.search}
             onChange={(event) => set("search", event.target.value)}
-            placeholder="Name, ID, Task, or Owner"
+            placeholder="Search experiments…"
           />
         </label>
         <label>
-          <span>Owner</span>
+          <span className="sr-only">Task</span>
+          <select value={value.taskId} onChange={(event) => set("taskId", event.target.value)}>
+            <option value="">All tasks</option>
+            {tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">Owner</span>
           <select value={value.ownerId} onChange={(event) => set("ownerId", event.target.value)}>
             <option value="">All owners</option>
             <option value="unassigned">Unassigned</option>
@@ -76,7 +89,7 @@ export default function ExperimentFilters({
           </select>
         </label>
         <label>
-          <span>Status</span>
+          <span className="sr-only">Status</span>
           <select
             value={value.status}
             onChange={(event) => set("status", event.target.value as ExperimentStatus | "")}
@@ -87,14 +100,7 @@ export default function ExperimentFilters({
           </select>
         </label>
         <label>
-          <span>Task</span>
-          <select value={value.taskId} onChange={(event) => set("taskId", event.target.value)}>
-            <option value="">All tasks</option>
-            {tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>Decision</span>
+          <span className="sr-only">Decision</span>
           <select
             value={value.decision}
             onChange={(event) => set(
@@ -110,6 +116,7 @@ export default function ExperimentFilters({
               ))}
           </select>
         </label>
+        <span className="result-count">{resultCount} experiments</span>
       </div>
     </div>
   );

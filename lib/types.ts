@@ -1,5 +1,7 @@
 export type Status = "todo" | "in_progress" | "done" | "blocked";
 
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+
 export type ModuleKind = "pipeline" | "foundation";
 
 export interface Module {
@@ -13,14 +15,64 @@ export interface Module {
 
 export interface Task {
   id: string;
-  module_id: string;
+  module_id: string | null;
   title: string;
   status: Status;
   assignees: string[];
   notes: string;
+  tags: string[];
+  priority: TaskPriority;
+  due_date: string | null;
   position: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface TaskType {
+  id: string;
+  name: string;
+  description: string;
+  position: number;
+  created_at: string;
+}
+
+export interface TaskModel {
+  id: string;
+  typeId: string | null;
+  title: string;
+  status: Status;
+  owners: string[];
+  notes: string;
+  tags: string[];
+  priority: TaskPriority;
+  dueDate: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TaskPatch = Partial<Pick<
+  TaskModel,
+  | "typeId"
+  | "title"
+  | "status"
+  | "owners"
+  | "notes"
+  | "tags"
+  | "priority"
+  | "dueDate"
+  | "position"
+>>;
+
+export interface NewTaskInput {
+  title: string;
+  status: Status;
+  typeId: string | null;
+  tags: string[];
+  owners: string[];
+  priority: TaskPriority;
+  dueDate: string | null;
+  description: string;
 }
 
 export interface Member {

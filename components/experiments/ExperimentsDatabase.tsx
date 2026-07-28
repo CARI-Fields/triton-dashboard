@@ -18,11 +18,14 @@ import { serializeCompareSelection } from "@/lib/experiments/compare-url";
 import CreateExperimentDialog from "@/components/experiments/CreateExperimentDialog";
 import ExperimentFilters from "@/components/experiments/ExperimentFilters";
 import ExperimentTable from "@/components/experiments/ExperimentTable";
+import PageHeader from "@/components/ui/PageHeader";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 
 export default function ExperimentsDatabase() {
   const router = useRouter();
   const reloadVersion = useRef(0);
   const loadingRef = useRef(false);
+  const loadedRef = useRef(false);
   const [rows, setRows] = useState<ExperimentListRow[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -42,6 +45,7 @@ export default function ExperimentsDatabase() {
         loadExperimentReferenceData(),
       ]);
       if (requestVersion !== reloadVersion.current) return;
+      loadedRef.current = true;
       setRows(nextRows);
       setTasks(references.tasks);
       setMembers(references.members);
@@ -69,6 +73,7 @@ export default function ExperimentsDatabase() {
     return () => {
       reloadVersion.current += 1;
       loadingRef.current = false;
+      loadedRef.current = false;
       unsubscribe();
     };
   }, [reload]);
@@ -98,31 +103,36 @@ export default function ExperimentsDatabase() {
   });
 
   return (
-    <div className="workspace-page">
-      <header className="workspace-page-header">
-        <div>
-          <p className="eyebrow">Research database</p>
-          <h1>Experiments</h1>
-          <p>Manual run context, evidence, and decisions across every Task.</p>
-        </div>
-        <div className="workspace-actions">
-          <Link
-            className={`btn ${canCompare ? "" : "disabled"}`}
-            aria-disabled={!canCompare}
-            href={canCompare ? `/experiments/compare?${compareQuery}` : "/experiments"}
-            onClick={(event) => {
-              if (!canCompare) event.preventDefault();
-            }}
-          >
-            Compare selected ({selectedIds.size})
-          </Link>
-          <button type="button" className="btn primary" onClick={() => setCreateOpen(true)}>
-            New experiment
-          </button>
-        </div>
-      </header>
+    <div className="workspace-page experiments-database">
+      <PageHeader
+        eyebrow="Research database"
+        title="Experiments"
+        description="Manual run context, evidence, and decisions across every Task."
+        actions={(
+          <>
+            <Link
+              className={`btn ${canCompare ? "" : "disabled"}`}
+              aria-disabled={!canCompare}
+              href={canCompare ? `/experiments/compare?${compareQuery}` : "/experiments"}
+              onClick={(event) => {
+                if (!canCompare) event.preventDefault();
+              }}
+            >
+              Compare selected ({selectedIds.size})
+            </Link>
+            <button type="button" className="btn primary" onClick={() => setCreateOpen(true)}>
+              New experiment
+            </button>
+          </>
+        )}
+      />
 
-      <ExperimentFilters rows={rows} value={filters} onChange={setFilters} />
+      <ExperimentFilters
+        rows={rows}
+        value={filters}
+        resultCount={visibleRows.length}
+        onChange={setFilters}
+      />
       {error && (
         <div className="error-banner" role="alert">
           <span>{error}</span>
@@ -131,9 +141,32 @@ export default function ExperimentsDatabase() {
           </button>
         </div>
       )}
-      {loading
-        ? <p className="state-note">Loading experiments…</p>
-        : (
+      {selectedIds.size > 0 && (
+        <div className="selection-strip" role="status">
+          <strong>{selectedIds.size} selected</strong>
+          <button type="button" onClick={() => setSelectedIds(new Set())}>
+            Clear selection
+          </button>
+        </div>
+      )}
+      {loading && !loadedRef.current
+        ? <WorkspaceSkeleton variant="table" label="Loading Experiments" />
+        : !loadedRef.current && error
+          ? null
+          : visibleRows.length === 0
+            ? (
+              <div className="experiment-empty">
+                <p>No experiments match this view.</p>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setCreateOpen(true)}
+                >
+                  New experiment
+                </button>
+              </div>
+            )
+            : (
           <ExperimentTable
             rows={visibleRows}
             showTask
@@ -141,7 +174,7 @@ export default function ExperimentsDatabase() {
             selectedIds={selectedIds}
             onToggle={toggle}
           />
-        )}
+            )}
 
       <CreateExperimentDialog
         open={createOpen}

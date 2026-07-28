@@ -26,17 +26,22 @@ import DecisionEditor from "@/components/experiments/DecisionEditor";
 import ExperimentTimeline from "@/components/experiments/ExperimentTimeline";
 import ResultEditor from "@/components/experiments/ResultEditor";
 import {
+  deleteAttachment,
+  updateAttachmentCaption,
+  uploadAttachment,
+} from "@/lib/attachments/repository";
+import {
   addExperimentTimelineNote,
-  deleteExperimentAttachment,
-  updateExperimentAttachment,
-  uploadExperimentAttachment,
 } from "@/lib/experiments/repository";
+
+vi.mock("@/lib/attachments/repository", () => ({
+  deleteAttachment: vi.fn(),
+  updateAttachmentCaption: vi.fn(),
+  uploadAttachment: vi.fn(),
+}));
 
 vi.mock("@/lib/experiments/repository", () => ({
   addExperimentTimelineNote: vi.fn(),
-  deleteExperimentAttachment: vi.fn(),
-  updateExperimentAttachment: vi.fn(),
-  uploadExperimentAttachment: vi.fn(),
 }));
 
 function deferred<T>() {
@@ -94,6 +99,19 @@ function row(id: string, passAt1: number, device: string): ExperimentListRow {
       title: "Optimize conv2d",
     },
     owner: null,
+  };
+}
+
+function galleryProps(experiment: ExperimentListRow) {
+  return {
+    scope: {
+      taskId: experiment.task_id,
+      experimentId: experiment.id,
+    },
+    visitKey: `experiment:${experiment.id}`,
+    title: "Plots & images",
+    emptyMessage: "No plots or images attached.",
+    altFallback: "Experiment plot",
   };
 }
 
@@ -487,20 +505,25 @@ describe("experiment evidence", () => {
       position: 0,
       created_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
-    vi.mocked(updateExperimentAttachment).mockRejectedValue(
+    vi.mocked(updateAttachmentCaption).mockRejectedValue(
       new Error("Caption failed."),
     );
-    vi.mocked(uploadExperimentAttachment).mockRejectedValue(
+    vi.mocked(uploadAttachment).mockRejectedValue(
       new Error("Upload failed."),
     );
     const { container } = render(
       <AttachmentGallery
-        experiment={experiment}
+        {...galleryProps(experiment)}
         attachments={[attachment]}
         onChanged={() => undefined}
       />,
     );
 
+    const openLink = screen.getByRole("link", {
+      name: "Open Latency plot",
+    });
+    expect(openLink.getAttribute("href")).toBe(attachment.url);
+    expect(openLink.querySelector("img")?.getAttribute("alt")).toBe("");
     fireEvent.change(screen.getByLabelText("Caption for Latency plot"), {
       target: { value: "Updated caption" },
     });
@@ -512,13 +535,13 @@ describe("experiment evidence", () => {
     fireEvent.change(container.querySelector('input[type="file"]')!, {
       target: { files: [file] },
     });
-    await waitFor(() => expect(uploadExperimentAttachment).toHaveBeenCalledWith(
-      experiment,
+    await waitFor(() => expect(uploadAttachment).toHaveBeenCalledWith(
+      galleryProps(experiment).scope,
       file,
       1,
     ));
     expect((await screen.findByRole("alert")).textContent).toBe("Upload failed.");
-    expect(screen.getAllByRole("img")).toHaveLength(1);
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
   });
 
   it("resynchronizes once when a later file in an upload batch fails", async () => {
@@ -528,13 +551,13 @@ describe("experiment evidence", () => {
       0.3,
       "npu:2",
     );
-    vi.mocked(uploadExperimentAttachment)
+    vi.mocked(uploadAttachment)
       .mockResolvedValueOnce()
       .mockRejectedValueOnce(new Error("Second upload failed."));
     const onChanged = vi.fn();
     const view = render(
       <AttachmentGallery
-        experiment={experiment}
+        {...galleryProps(experiment)}
         attachments={[]}
         onChanged={onChanged}
       />,
@@ -558,15 +581,15 @@ describe("experiment evidence", () => {
 
     expect((await screen.findByRole("alert")).textContent)
       .toBe("Second upload failed.");
-    expect(uploadExperimentAttachment).toHaveBeenNthCalledWith(
+    expect(uploadAttachment).toHaveBeenNthCalledWith(
       1,
-      experiment,
+      galleryProps(experiment).scope,
       first,
       0,
     );
-    expect(uploadExperimentAttachment).toHaveBeenNthCalledWith(
+    expect(uploadAttachment).toHaveBeenNthCalledWith(
       2,
-      experiment,
+      galleryProps(experiment).scope,
       second,
       1,
     );
@@ -574,7 +597,7 @@ describe("experiment evidence", () => {
 
     view.rerender(
       <AttachmentGallery
-        experiment={experiment}
+        {...galleryProps(experiment)}
         attachments={[persistedAttachment]}
         onChanged={onChanged}
       />,
@@ -584,7 +607,7 @@ describe("experiment evidence", () => {
 
     view.rerender(
       <AttachmentGallery
-        experiment={nextExperiment}
+        {...galleryProps(nextExperiment)}
         attachments={[]}
         onChanged={onChanged}
       />,
@@ -605,11 +628,11 @@ describe("experiment evidence", () => {
       created_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    vi.mocked(deleteExperimentAttachment).mockResolvedValue();
+    vi.mocked(deleteAttachment).mockResolvedValue();
 
     render(
       <AttachmentGallery
-        experiment={experiment}
+        {...galleryProps(experiment)}
         attachments={[attachment]}
         onChanged={() => undefined}
       />,
@@ -617,7 +640,7 @@ describe("experiment evidence", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete image" }));
 
     await waitFor(() =>
-      expect(deleteExperimentAttachment).toHaveBeenCalledWith(attachment)
+      expect(deleteAttachment).toHaveBeenCalledWith(attachment)
     );
     confirm.mockRestore();
   });
@@ -635,13 +658,13 @@ describe("experiment evidence", () => {
       created_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    vi.mocked(deleteExperimentAttachment).mockRejectedValue(
+    vi.mocked(deleteAttachment).mockRejectedValue(
       new Error("Attachment record was deleted, but Storage cleanup failed."),
     );
     const onChanged = vi.fn();
     render(
       <AttachmentGallery
-        experiment={experiment}
+        {...galleryProps(experiment)}
         attachments={[attachment]}
         onChanged={onChanged}
       />,
@@ -677,13 +700,13 @@ describe("experiment evidence", () => {
       caption: "B caption",
     } satisfies Attachment;
     const captionSave = deferred<void>();
-    vi.mocked(updateExperimentAttachment).mockReturnValue(captionSave.promise);
+    vi.mocked(updateAttachmentCaption).mockReturnValue(captionSave.promise);
     const onChangedA = vi.fn();
     const onChangedB = vi.fn();
     const onChangedA2 = vi.fn();
     const view = render(
       <AttachmentGallery
-        experiment={experimentA}
+        {...galleryProps(experimentA)}
         attachments={[attachmentA]}
         onChanged={onChangedA}
       />,
@@ -695,14 +718,14 @@ describe("experiment evidence", () => {
 
     view.rerender(
       <AttachmentGallery
-        experiment={experimentB}
+        {...galleryProps(experimentB)}
         attachments={[attachmentB]}
         onChanged={onChangedB}
       />,
     );
     view.rerender(
       <AttachmentGallery
-        experiment={experimentA}
+        {...galleryProps(experimentA)}
         attachments={[attachmentA]}
         onChanged={onChangedA2}
       />,
@@ -737,7 +760,7 @@ describe("experiment evidence", () => {
       created_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const captionSave = deferred<void>();
-    vi.mocked(updateExperimentAttachment)
+    vi.mocked(updateAttachmentCaption)
       .mockReturnValueOnce(captionSave.promise)
       .mockResolvedValueOnce();
     const onChanged = vi.fn();
@@ -753,7 +776,7 @@ describe("experiment evidence", () => {
       }, [experiment.id]);
       return (
         <AttachmentGallery
-          experiment={experiment}
+          {...galleryProps(experiment)}
           attachments={[attachmentA]}
           onChanged={onChanged}
         />
@@ -782,7 +805,7 @@ describe("experiment evidence", () => {
     fireEvent.change(currentCaption, { target: { value: "Fresh B update" } });
     fireEvent.blur(currentCaption);
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
-    expect(updateExperimentAttachment).toHaveBeenCalledTimes(2);
+    expect(updateAttachmentCaption).toHaveBeenCalledTimes(2);
   });
 
   it("adds only an explicit manual note and renders trigger-owned Activity", async () => {
@@ -823,12 +846,12 @@ describe("experiment evidence", () => {
     const experiment = row("00000000-0000-4000-8000-000000000002", 0.25, "npu:1");
     const upload = deferred<void>();
     const note = deferred<void>();
-    vi.mocked(uploadExperimentAttachment).mockReturnValue(upload.promise);
+    vi.mocked(uploadAttachment).mockReturnValue(upload.promise);
     vi.mocked(addExperimentTimelineNote).mockReturnValue(note.promise);
     const onAttachmentChanged = vi.fn();
     const attachmentRender = render(
       <AttachmentGallery
-        experiment={experiment}
+        {...galleryProps(experiment)}
         attachments={[]}
         onChanged={onAttachmentChanged}
       />,
@@ -870,7 +893,7 @@ describe("experiment evidence", () => {
     const newUpload = deferred<void>();
     const oldNote = deferred<void>();
     const newNote = deferred<void>();
-    vi.mocked(uploadExperimentAttachment)
+    vi.mocked(uploadAttachment)
       .mockReturnValueOnce(oldUpload.promise)
       .mockReturnValueOnce(newUpload.promise);
     vi.mocked(addExperimentTimelineNote)
@@ -881,7 +904,7 @@ describe("experiment evidence", () => {
     const onAttachmentA2 = vi.fn();
     const attachmentRender = render(
       <AttachmentGallery
-        experiment={experimentA}
+        {...galleryProps(experimentA)}
         attachments={[]}
         onChanged={onAttachmentA}
       />,
@@ -896,7 +919,7 @@ describe("experiment evidence", () => {
     );
     attachmentRender.rerender(
       <AttachmentGallery
-        experiment={experimentB}
+        {...galleryProps(experimentB)}
         attachments={[]}
         onChanged={onAttachmentB}
       />,
@@ -905,7 +928,7 @@ describe("experiment evidence", () => {
       .toBe(false);
     attachmentRender.rerender(
       <AttachmentGallery
-        experiment={experimentA}
+        {...galleryProps(experimentA)}
         attachments={[]}
         onChanged={onAttachmentA2}
       />,
@@ -983,7 +1006,7 @@ describe("experiment evidence", () => {
     const upload = deferred<void>();
     const note = deferred<void>();
     const never = new Promise<void>(() => undefined);
-    vi.mocked(uploadExperimentAttachment).mockReturnValue(upload.promise);
+    vi.mocked(uploadAttachment).mockReturnValue(upload.promise);
     vi.mocked(addExperimentTimelineNote).mockReturnValue(note.promise);
     const onAttachmentChanged = vi.fn();
     const onTimelineChanged = vi.fn();
@@ -1000,7 +1023,7 @@ describe("experiment evidence", () => {
       return (
         <Suspense fallback={<p>Loading experiment</p>}>
           <AttachmentGallery
-            experiment={experiment}
+            {...galleryProps(experiment)}
             attachments={[]}
             onChanged={onAttachmentChanged}
           />

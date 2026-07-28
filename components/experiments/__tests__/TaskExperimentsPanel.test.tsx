@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Experiment, Member, Task } from "@/lib/types";
+import type { Experiment, Member, TaskModel } from "@/lib/types";
 import TaskExperimentsPanel from "@/components/experiments/TaskExperimentsPanel";
 import { createExperiment } from "@/lib/experiments/repository";
 
@@ -23,15 +23,18 @@ vi.mock("@/lib/experiments/repository", () => ({
 
 const task = {
   id: "00000000-0000-4000-8000-000000000010",
-  module_id: "00000000-0000-4000-8000-000000000011",
+  typeId: "00000000-0000-4000-8000-000000000011",
   title: "Optimize conv2d",
   status: "in_progress",
-  assignees: [],
+  owners: [],
   notes: "",
+  tags: [],
+  priority: "medium",
+  dueDate: null,
   position: 0,
   created_at: "2026-07-24T00:00:00.000Z",
   updated_at: "2026-07-24T00:00:00.000Z",
-} satisfies Task;
+} satisfies TaskModel;
 
 const member = {
   id: "00000000-0000-4000-8000-000000000020",
@@ -45,7 +48,7 @@ const otherTask = {
   ...task,
   id: "00000000-0000-4000-8000-000000000030",
   title: "Optimize attention",
-} satisfies Task;
+} satisfies TaskModel;
 
 function experiment(
   id: string,

@@ -13,6 +13,11 @@ Everything syncs in real time across everyone's browser.
 
 ---
 
+### Runtime
+
+Use Node 24.18.0 (`nvm use`) for local development. The accepted engine range is
+`>=24.18.0 <25.0.0`.
+
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript) — UI

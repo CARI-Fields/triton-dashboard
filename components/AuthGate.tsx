@@ -1,9 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { TEAM_EMAIL } from "@/lib/auth";
+
+interface AuthActions {
+  logout: () => Promise<void>;
+}
+
+const AuthActionsContext = createContext<AuthActions | null>(null);
+
+export function useAuthActions(): AuthActions {
+  const context = useContext(AuthActionsContext);
+  if (!context) {
+    throw new Error("useAuthActions must be used within AuthGate");
+  }
+  return context;
+}
 
 /**
  * Gate that requires the shared team password before rendering anything.
@@ -23,15 +44,20 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       setReady(true);
       return;
     }
+    let active = true;
     const client = supabase;
     client.auth.getSession().then(({ data }) => {
+      if (!active) return;
       setSession(data.session);
       setReady(true);
     });
     const {
       data: { subscription },
     } = client.auth.onAuthStateChange((_event, s) => setSession(s));
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   async function login(e: React.FormEvent) {
@@ -51,12 +77,20 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function logout() {
+  const logout = useCallback(async () => {
     if (supabase) await supabase.auth.signOut();
-  }
+  }, []);
+
+  const authActions = useMemo(() => ({ logout }), [logout]);
 
   // Not configured yet -> let the child render its own setup screen.
-  if (!isSupabaseConfigured) return <>{children}</>;
+  if (!isSupabaseConfigured) {
+    return (
+      <AuthActionsContext.Provider value={authActions}>
+        {children}
+      </AuthActionsContext.Provider>
+    );
+  }
 
   if (!ready) {
     return (
@@ -91,11 +125,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <>
-      <button className="logout-btn" onClick={logout} title="Log out">
-        ⎋ Log out
-      </button>
+    <AuthActionsContext.Provider value={authActions}>
       {children}
-    </>
+    </AuthActionsContext.Provider>
   );
 }

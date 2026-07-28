@@ -1,19 +1,51 @@
 "use client";
 
 import {
+  type KeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import Link from "next/link";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import MarkdownField from "@/components/MarkdownField";
+import AddTaskDrawer from "@/components/tasks/AddTaskDrawer";
+import BoardSecondaryViews from "@/components/tasks/BoardSecondaryViews";
+import TaskBoardView, {
+  type BoardView,
+  type GroupBy,
+} from "@/components/tasks/TaskBoardView";
+import { Icon } from "@/components/ui/Icons";
+import PageHeader from "@/components/ui/PageHeader";
+import StatusDot from "@/components/ui/StatusDot";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import { logActivity } from "@/lib/activity";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import {
+  newTaskToStorage,
+  taskFromStorage,
+  taskPatchToStorage,
+  taskTypeFromStorage,
+  taskTypePatchToStorage,
+} from "@/lib/tasks/model";
 import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
-import { relTime } from "@/lib/time";
-import type { ActivityKind, Member, Module, Task } from "@/lib/types";
+import type {
+  ActivityKind,
+  Member,
+  Module,
+  NewTaskInput,
+  Status,
+  Task,
+  TaskModel,
+  TaskPatch,
+  TaskType,
+} from "@/lib/types";
+
+const BOARD_VIEWS: Array<{ value: BoardView; label: string }> = [
+  { value: "board", label: "Board" },
+  { value: "types", label: "Types" },
+  { value: "ownership", label: "Ownership" },
+  { value: "team", label: "Team" },
+];
 
 function initialsFromName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -22,411 +54,33 @@ function initialsFromName(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-function avatarText(name: string, members: Member[]): string {
-  const m = members.find((mem) => mem.name === name);
-  return m?.initials || initialsFromName(name);
+function nextPosition(items: Array<{ position: number }>): number {
+  return items.length > 0
+    ? Math.max(...items.map((item) => item.position)) + 1
+    : 0;
 }
 
-function nextPosition(items: { position: number }[]): number {
-  return items.length ? Math.max(...items.map((i) => i.position)) + 1 : 0;
-}
-
-/** Close a popover when clicking/tabbing outside of it. */
-function useClickOutside(onOutside: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onOutside();
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [onOutside]);
-  return ref;
-}
-
-/* ------------------------------------------------------------------ */
-/* Inline-editable text                                                */
-/* ------------------------------------------------------------------ */
-function EditableText({
-  value,
-  onSave,
-  placeholder,
-  multiline = false,
-  ariaLabel,
-}: {
-  value: string;
-  onSave: (v: string) => void;
-  placeholder?: string;
-  multiline?: boolean;
-  ariaLabel?: string;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-
-  // Keep local draft in sync with remote changes, but never clobber an edit in progress.
-  useEffect(() => {
-    if (!editing) setDraft(value);
-  }, [value, editing]);
-
-  function commit() {
-    setEditing(false);
-    const trimmed = draft.trim();
-    if (trimmed !== value) onSave(trimmed);
+function errorMessage(caught: unknown): string {
+  if (caught instanceof Error) return caught.message;
+  if (
+    typeof caught === "object"
+    && caught !== null
+    && "message" in caught
+    && typeof caught.message === "string"
+  ) {
+    return caught.message;
   }
-
-  if (editing) {
-    const shared = {
-      className: "edit-input",
-      value: draft,
-      autoFocus: true,
-      "aria-label": ariaLabel,
-      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-        setDraft(e.target.value),
-      onBlur: commit,
-    };
-    return multiline ? (
-      <textarea
-        {...shared}
-        rows={3}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            commit();
-          }
-          if (e.key === "Escape") {
-            setDraft(value);
-            setEditing(false);
-          }
-        }}
-      />
-    ) : (
-      <input
-        {...shared}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit();
-          }
-          if (e.key === "Escape") {
-            setDraft(value);
-            setEditing(false);
-          }
-        }}
-      />
-    );
-  }
-
-  return (
-    <span
-      className={`editable ${value ? "" : "placeholder"}`}
-      role="button"
-      tabIndex={0}
-      title="Click to edit"
-      onClick={() => setEditing(true)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          setEditing(true);
-        }
-      }}
-    >
-      {value || placeholder || "Click to edit"}
-    </span>
-  );
+  return "The request failed.";
 }
 
-/* ------------------------------------------------------------------ */
-/* Assignee picker                                                     */
-/* ------------------------------------------------------------------ */
-function AssigneePicker({
-  task,
-  members,
-  open,
-  onToggleOpen,
-  onClose,
-  onToggle,
-  onAddMember,
-}: {
-  task: Task;
-  members: Member[];
-  open: boolean;
-  onToggleOpen: () => void;
-  onClose: () => void;
-  onToggle: (name: string) => void;
-  onAddMember: (name: string) => void;
-}) {
-  const [newName, setNewName] = useState("");
-  const ref = useClickOutside(onClose);
-
-  function submitNew() {
-    const n = newName.trim();
-    if (!n) return;
-    onAddMember(n);
-    setNewName("");
-  }
-
-  const unassigned = members.filter((m) => !task.assignees.includes(m.name));
-
-  return (
-    <div className="picker" ref={ref}>
-      <div className="owners">
-        {task.assignees.map((name) => (
-          <span className="owner-chip" key={name} title={name}>
-            <span className="av">{avatarText(name, members)}</span>
-            <button
-              className="owner-x"
-              onClick={() => onToggle(name)}
-              aria-label={`Unassign ${name}`}
-              title={`Unassign ${name}`}
-            >
-              ✕
-            </button>
-          </span>
-        ))}
-        <button
-          className="add-owner"
-          onClick={onToggleOpen}
-          aria-label="Assign people"
-          title="Assign people"
-        >
-          +
-        </button>
-      </div>
-
-      {open && (
-        <div className="menu" role="menu">
-          {unassigned.map((m) => (
-            <button
-              key={m.id}
-              className="menu-item"
-              onClick={() => onToggle(m.name)}
-            >
-              <span className="av">{m.initials || initialsFromName(m.name)}</span>
-              {m.name}
-            </button>
-          ))}
-          {members.length > 0 && unassigned.length === 0 && (
-            <div className="menu-empty">Everyone is assigned.</div>
-          )}
-          <div className="menu-divider" />
-          <div className="menu-add">
-            <input
-              value={newName}
-              placeholder="Add teammate…"
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  submitNew();
-                }
-              }}
-            />
-            <button className="btn" onClick={submitNew}>
-              Add
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Task row                                                            */
-/* ------------------------------------------------------------------ */
-function TaskRow({
-  task,
-  members,
-  pickerOpen,
-  onTogglePicker,
-  onClosePicker,
-  onPatch,
-  onDelete,
-  onToggleAssignee,
-  onAddMember,
-}: {
-  task: Task;
-  members: Member[];
-  pickerOpen: boolean;
-  onTogglePicker: () => void;
-  onClosePicker: () => void;
-  onPatch: (patch: Partial<Task>) => void;
-  onDelete: () => void;
-  onToggleAssignee: (name: string) => void;
-  onAddMember: (name: string) => void;
-}) {
-  const [renaming, setRenaming] = useState(false);
-  return (
-    <div className="task">
-      <div className="task-title">
-        {renaming ? (
-          <input
-            className="edit-input"
-            autoFocus
-            defaultValue={task.title}
-            aria-label="Rename task"
-            onBlur={(e) => {
-              const v = e.target.value.trim();
-              if (v && v !== task.title) onPatch({ title: v });
-              setRenaming(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-              if (e.key === "Escape") setRenaming(false);
-            }}
-          />
-        ) : (
-          <>
-            <Link className="task-open" href={`/task/${task.id}`}>
-              {task.title}
-              <span className="open-hint" aria-hidden="true">↗</span>
-            </Link>
-            <button
-              className="icon-btn subtle rename-btn"
-              onClick={() => setRenaming(true)}
-              aria-label="Rename task"
-              title="Rename"
-            >
-              ✎
-            </button>
-            <span className="task-updated" title="Last updated">{relTime(task.updated_at)}</span>
-          </>
-        )}
-      </div>
-      <div className="task-meta">
-        <div className="task-left">
-          <AssigneePicker
-            task={task}
-            members={members}
-            open={pickerOpen}
-            onToggleOpen={onTogglePicker}
-            onClose={onClosePicker}
-            onToggle={onToggleAssignee}
-            onAddMember={onAddMember}
-          />
-        </div>
-        <div className="task-left">
-          <select
-            className={`pill ${task.status}`}
-            value={task.status}
-            aria-label="Status"
-            onChange={(e) => onPatch({ status: e.target.value as Task["status"] })}
-          >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <button className="icon-btn" onClick={onDelete} aria-label="Delete task" title="Delete task">
-            ✕
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Module card                                                         */
-/* ------------------------------------------------------------------ */
-function ModuleCard({
-  module,
-  number,
-  tasks,
-  members,
-  pickerId,
-  onSetPicker,
-  onPatchModule,
-  onDeleteModule,
-  onAddTask,
-  onPatchTask,
-  onDeleteTask,
-  onToggleAssignee,
-  onAddMemberToTask,
-}: {
-  module: Module;
-  number: number | null;
-  tasks: Task[];
-  members: Member[];
-  pickerId: string | null;
-  onSetPicker: (id: string | null) => void;
-  onPatchModule: (patch: Partial<Module>) => void;
-  onDeleteModule: () => void;
-  onAddTask: () => void;
-  onPatchTask: (taskId: string, patch: Partial<Task>) => void;
-  onDeleteTask: (taskId: string) => void;
-  onToggleAssignee: (taskId: string, name: string) => void;
-  onAddMemberToTask: (taskId: string, name: string) => void;
-}) {
-  const found = module.kind === "foundation";
-  return (
-    <article className={`stage ${found ? "found" : ""}`}>
-      <div className="stage-head">
-        {number !== null ? (
-          <span className="stage-num">{String(number).padStart(2, "0")}</span>
-        ) : (
-          <span className="stage-tag">Cross-cutting</span>
-        )}
-        <span className="stage-name">
-          <EditableText
-            value={module.name}
-            ariaLabel="Module name"
-            onSave={(v) => onPatchModule({ name: v })}
-          />
-        </span>
-        <button
-          className="icon-btn"
-          onClick={onDeleteModule}
-          aria-label="Delete module"
-          title="Delete module"
-        >
-          ✕
-        </button>
-      </div>
-
-      <div className="stage-obj">
-        <MarkdownField
-          value={module.objective}
-          placeholder="Describe the objective… (Markdown)"
-          onSave={(v) => onPatchModule({ objective: v })}
-        />
-      </div>
-
-      <div className="tasks">
-        {tasks.length === 0 && <div className="empty">No tasks yet</div>}
-        {tasks.map((t) => (
-          <TaskRow
-            key={t.id}
-            task={t}
-            members={members}
-            pickerOpen={pickerId === t.id}
-            onTogglePicker={() => onSetPicker(pickerId === t.id ? null : t.id)}
-            onClosePicker={() => {
-              if (pickerId === t.id) onSetPicker(null);
-            }}
-            onPatch={(patch) => onPatchTask(t.id, patch)}
-            onDelete={() => onDeleteTask(t.id)}
-            onToggleAssignee={(name) => onToggleAssignee(t.id, name)}
-            onAddMember={(name) => onAddMemberToTask(t.id, name)}
-          />
-        ))}
-        <button className="btn btn-add-task" onClick={onAddTask}>
-          + Add task
-        </button>
-      </div>
-    </article>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Setup screen (shown when env vars are missing)                      */
-/* ------------------------------------------------------------------ */
 function SetupScreen() {
   return (
     <div className="wrap setup">
       <p className="eyebrow">Setup needed</p>
       <h1>Connect your Supabase project</h1>
       <p className="lede">
-        The board is built — it just needs a database to talk to. Two values and you are live.
+        The board is built — it just needs a database to talk to. Two values
+        and you are live.
       </p>
       <div className="setup-card">
         <ol>
@@ -434,17 +88,17 @@ function SetupScreen() {
             Create a free project at <code>supabase.com</code>.
           </li>
           <li>
-            In the Supabase SQL Editor, run <code>supabase/schema.sql</code>, then{" "}
-            <code>supabase/seed.sql</code>.
+            In the Supabase SQL Editor, run <code>supabase/schema.sql</code>,
+            then <code>supabase/seed.sql</code>.
           </li>
           <li>
-            Copy <code>.env.local.example</code> to <code>.env.local</code> and fill in{" "}
-            <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>{" "}
-            (Project Settings → API).
+            Copy <code>.env.local.example</code> to <code>.env.local</code> and
+            fill in <code>NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+            <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> (Project Settings → API).
           </li>
           <li>
-            Restart the dev server (<code>npm run dev</code>). See <code>README.md</code> for the full
-            walkthrough and Vercel deploy.
+            Restart the dev server (<code>npm run dev</code>). See{" "}
+            <code>README.md</code> for the full walkthrough and Vercel deploy.
           </li>
         </ol>
       </div>
@@ -452,17 +106,24 @@ function SetupScreen() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Board                                                               */
-/* ------------------------------------------------------------------ */
 export default function Board() {
-  const [modules, setModules] = useState<Module[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [types, setTypes] = useState<TaskType[]>([]);
+  const [tasks, setTasks] = useState<TaskModel[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [view, setView] = useState<BoardView>("board");
+  const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [newMember, setNewMember] = useState("");
-  const [pickerId, setPickerId] = useState<string | null>(null);
+  const [hasSuccessfulSnapshot, setHasSuccessfulSnapshot] = useState(false);
+  const [loadErrorMsg, setLoadErrorMsg] = useState<string | null>(null);
+  const [mutationErrorMsg, setMutationErrorMsg] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDefaults, setCreateDefaults] = useState<{
+    status?: Status;
+    typeId?: string | null;
+  }>({});
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const reloadGenerationRef = useRef(0);
+  const memberRemovalLockRef = useRef(false);
 
   const recordActivity = useCallback((
     taskId: string,
@@ -472,34 +133,60 @@ export default function Board() {
     void logActivity(taskId, text, kind)
       .then((activityError) => {
         if (activityError) {
-          setErrorMsg(`Could not record activity. ${activityError}`);
+          setMutationErrorMsg(
+            `Could not record activity. ${activityError}`,
+          );
         }
       })
       .catch((caught: unknown) => {
-        const message = caught instanceof Error
-          ? caught.message
-          : "The request failed.";
-        setErrorMsg(`Could not record activity. ${message}`);
+        setMutationErrorMsg(
+          `Could not record activity. ${errorMessage(caught)}`,
+        );
       });
   }, []);
 
   const reload = useCallback(async () => {
-    if (!supabase) return;
-    const [m, t, mem] = await Promise.all([
-      supabase.from("modules").select("*").order("position"),
-      supabase.from("tasks").select("*").order("position"),
-      supabase.from("members").select("*").order("position"),
-    ]);
-    const firstError = m.error || t.error || mem.error;
-    if (firstError) {
-      setErrorMsg(firstError.message);
-    } else {
-      setModules((m.data ?? []) as Module[]);
-      setTasks((t.data ?? []) as Task[]);
-      setMembers((mem.data ?? []) as Member[]);
-      setErrorMsg(null);
+    const generation = reloadGenerationRef.current + 1;
+    reloadGenerationRef.current = generation;
+    setLoading(true);
+    if (!supabase) {
+      if (generation === reloadGenerationRef.current) {
+        setLoading(false);
+      }
+      return;
     }
-    setLoading(false);
+    try {
+      const [typeResult, taskResult, memberResult] = await Promise.all([
+        supabase.from("modules").select("*").order("position"),
+        supabase.from("tasks").select("*").order("position"),
+        supabase.from("members").select("*").order("position"),
+      ]);
+      const firstError =
+        typeResult.error || taskResult.error || memberResult.error;
+      if (firstError) throw firstError;
+      if (generation !== reloadGenerationRef.current) return;
+
+      setTypes(
+        (typeResult.data ?? []).map((row) => (
+          taskTypeFromStorage(row as Module)
+        )),
+      );
+      setTasks(
+        (taskResult.data ?? []).map((row) => (
+          taskFromStorage(row as Task)
+        )),
+      );
+      setMembers((memberResult.data ?? []) as Member[]);
+      setHasSuccessfulSnapshot(true);
+      setLoadErrorMsg(null);
+    } catch (caught) {
+      if (generation !== reloadGenerationRef.current) return;
+      setLoadErrorMsg(`Could not load board. ${errorMessage(caught)}`);
+    } finally {
+      if (generation === reloadGenerationRef.current) {
+        setLoading(false);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -508,394 +195,443 @@ export default function Board() {
       return;
     }
     const client = supabase;
-    reload();
+    void reload();
+    const refresh = () => {
+      void reload();
+    };
     const channel = client
       .channel("board-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "modules" }, reload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, reload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "members" }, reload)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "modules" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tasks" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "members" },
+        refresh,
+      )
       .subscribe();
     return () => {
-      client.removeChannel(channel);
+      void client.removeChannel(channel);
     };
   }, [reload]);
 
-  /* ---- mutations ---- */
-  const addModule = useCallback(
-    async (kind: Module["kind"]) => {
-      if (!supabase) return;
-      const siblings = modules.filter((m) => m.kind === kind);
-      await supabase
-        .from("modules")
-        .insert({ name: "New module", kind, objective: "", position: nextPosition(siblings) });
-      reload();
-    },
-    [modules, reload]
-  );
+  const exposeMutationError = useCallback(async (
+    action: string,
+    caught: unknown,
+  ) => {
+    await reload();
+    const message = errorMessage(caught);
+    setMutationErrorMsg(`Could not ${action}. ${message}`);
+    return new Error(message);
+  }, [reload]);
 
-  const patchModule = useCallback(
-    async (id: string, patch: Partial<Module>) => {
-      if (!supabase) return;
-      await supabase.from("modules").update(patch).eq("id", id);
-      reload();
-    },
-    [reload]
-  );
-
-  const deleteModule = useCallback(
-    async (id: string, name: string) => {
-      if (!supabase) return;
-      if (!window.confirm(`Delete module "${name}" and all its tasks?`)) return;
-      await supabase.from("modules").delete().eq("id", id);
-      reload();
-    },
-    [reload]
-  );
-
-  const addTask = useCallback(
-    async (moduleId: string) => {
-      if (!supabase) return;
-      const siblings = tasks.filter((t) => t.module_id === moduleId);
-      // Pin new tasks to the top of the column, and open the assignee picker
-      // right away so the task can be assigned without another click.
-      const topPos = siblings.length ? Math.min(...siblings.map((i) => i.position)) - 1 : 0;
-      const { data } = await supabase
+  const createTask = useCallback(async (input: NewTaskInput) => {
+    if (!supabase) {
+      const caught = new Error("Supabase is not configured.");
+      setMutationErrorMsg(`Could not create task. ${caught.message}`);
+      throw caught;
+    }
+    setMutationErrorMsg(null);
+    const position = tasks.length > 0
+      ? Math.min(...tasks.map((task) => task.position)) - 1
+      : 0;
+    try {
+      const result = await supabase
         .from("tasks")
+        .insert(newTaskToStorage(input, position))
+        .select("id")
+        .single();
+      if (result.error) throw result.error;
+      await reload();
+      if (result.data?.id) {
+        recordActivity(result.data.id, "Task created", "create");
+      }
+    } catch (caught) {
+      throw await exposeMutationError("create task", caught);
+    }
+  }, [exposeMutationError, recordActivity, reload, tasks]);
+
+  const patchTask = useCallback(async (
+    id: string,
+    patch: TaskPatch,
+  ) => {
+    if (!supabase) {
+      throw await exposeMutationError(
+        "update task",
+        new Error("Supabase is not configured."),
+      );
+    }
+    setMutationErrorMsg(null);
+    try {
+      const result = await supabase
+        .from("tasks")
+        .update(taskPatchToStorage(patch))
+        .eq("id", id);
+      if (result.error) throw result.error;
+      await reload();
+      if (patch.status) {
+        recordActivity(
+          id,
+          `Status set to ${statusLabel(patch.status)}`,
+          "status",
+        );
+      } else if (patch.title) {
+        recordActivity(id, `Renamed to “${patch.title}”`, "edit");
+      } else if (patch.owners) {
+        recordActivity(id, "Owner updated", "assign");
+      }
+    } catch (caught) {
+      throw await exposeMutationError("update task", caught);
+    }
+  }, [exposeMutationError, recordActivity, reload]);
+
+  const deleteTask = useCallback(async (id: string) => {
+    const task = tasks.find((item) => item.id === id);
+    if (!task || !supabase) return;
+    if (!window.confirm(
+      `Delete task “${task.title}”? This cannot be undone.`,
+    )) return;
+    setMutationErrorMsg(null);
+    try {
+      const result = await supabase.from("tasks").delete().eq("id", id);
+      if (result.error) throw result.error;
+      await reload();
+    } catch (caught) {
+      throw await exposeMutationError("delete task", caught);
+    }
+  }, [exposeMutationError, reload, tasks]);
+
+  const createType = useCallback(async (rawName: string) => {
+    const name = rawName.trim();
+    if (!name) {
+      throw new Error("Type name is required.");
+    }
+    if (!supabase) {
+      throw await exposeMutationError(
+        "create type",
+        new Error("Supabase is not configured."),
+      );
+    }
+    setMutationErrorMsg(null);
+    try {
+      const result = await supabase
+        .from("modules")
         .insert({
-          module_id: moduleId,
-          title: "New task",
-          status: "todo",
-          assignees: [],
-          position: topPos,
+          name,
+          objective: "",
+          kind: "pipeline",
+          position: nextPosition(types),
         })
         .select("id")
         .single();
-      if (data) {
-        recordActivity(data.id, "Task created", "create");
-        setPickerId(data.id);
+      if (result.error) throw result.error;
+      const typeId = result.data?.id;
+      if (!typeId) {
+        throw new Error("Created Type did not return an id.");
       }
-      reload();
-    },
-    [recordActivity, tasks, reload]
-  );
+      await reload();
+      return typeId;
+    } catch (caught) {
+      throw await exposeMutationError("create type", caught);
+    }
+  }, [exposeMutationError, reload, types]);
 
-  const patchTask = useCallback(
-    async (id: string, patch: Partial<Task>) => {
-      if (!supabase) return;
-      await supabase.from("tasks").update(patch).eq("id", id);
-      if (patch.status) {
-        recordActivity(id, `Status set to ${statusLabel(patch.status)}`, "status");
-      }
-      if (patch.title) {
-        recordActivity(id, `Renamed to “${patch.title}”`, "edit");
-      }
-      reload();
-    },
-    [recordActivity, reload]
-  );
-
-  const deleteTask = useCallback(
-    async (id: string) => {
-      if (!supabase) return;
-      await supabase.from("tasks").delete().eq("id", id);
-      reload();
-    },
-    [reload]
-  );
-
-  const toggleAssignee = useCallback(
-    async (taskId: string, name: string) => {
-      if (!supabase) return;
-      const task = tasks.find((t) => t.id === taskId);
-      if (!task) return;
-      const had = task.assignees.includes(name);
-      const next = had
-        ? task.assignees.filter((a) => a !== name)
-        : [...task.assignees, name];
-      await supabase.from("tasks").update({ assignees: next }).eq("id", taskId);
-      recordActivity(
-        taskId,
-        `${had ? "Unassigned" : "Assigned"} ${name}`,
-        "assign",
+  const patchType = useCallback(async (
+    id: string,
+    patch: Partial<TaskType>,
+  ) => {
+    if (!supabase) {
+      throw await exposeMutationError(
+        "update type",
+        new Error("Supabase is not configured."),
       );
-      reload();
-    },
-    [recordActivity, tasks, reload]
-  );
+    }
+    setMutationErrorMsg(null);
+    try {
+      const result = await supabase
+        .from("modules")
+        .update(taskTypePatchToStorage(patch))
+        .eq("id", id);
+      if (result.error) throw result.error;
+      await reload();
+    } catch (caught) {
+      throw await exposeMutationError("update type", caught);
+    }
+  }, [exposeMutationError, reload]);
 
-  const addMember = useCallback(
-    async (name: string) => {
-      if (!supabase) return;
-      const n = name.trim();
-      if (!n || members.some((m) => m.name === n)) return;
-      await supabase
-        .from("members")
-        .insert({ name: n, initials: initialsFromName(n), position: nextPosition(members) });
-      reload();
-    },
-    [members, reload]
-  );
+  const deleteType = useCallback(async (type: TaskType) => {
+    if (!supabase) return;
+    if (!window.confirm(
+      `Remove Type “${type.name}”? Its tasks will remain and move to No type.`,
+    )) return;
+    setMutationErrorMsg(null);
+    try {
+      const result = await supabase
+        .from("modules")
+        .delete()
+        .eq("id", type.id);
+      if (result.error) throw result.error;
+      await reload();
+    } catch (caught) {
+      throw await exposeMutationError("remove type", caught);
+    }
+  }, [exposeMutationError, reload]);
 
-  const addMemberToTask = useCallback(
-    async (taskId: string, name: string) => {
-      if (!supabase) return;
-      const n = name.trim();
-      if (!n) return;
-      if (!members.some((m) => m.name === n)) {
-        await supabase
-          .from("members")
-          .insert({ name: n, initials: initialsFromName(n), position: nextPosition(members) });
-      }
-      const task = tasks.find((t) => t.id === taskId);
-      if (task && !task.assignees.includes(n)) {
-        await supabase
+  const addMember = useCallback(async (rawName: string) => {
+    const name = rawName.trim();
+    if (
+      !name
+      || members.some((member) => member.name === name)
+    ) return;
+    if (!supabase) {
+      throw await exposeMutationError(
+        "add owner",
+        new Error("Supabase is not configured."),
+      );
+    }
+    setMutationErrorMsg(null);
+    try {
+      const result = await supabase.from("members").insert({
+        name,
+        initials: initialsFromName(name),
+        position: nextPosition(members),
+      });
+      if (result.error) throw result.error;
+      await reload();
+    } catch (caught) {
+      throw await exposeMutationError("add owner", caught);
+    }
+  }, [exposeMutationError, members, reload]);
+
+  const removeMember = useCallback(async (member: Member) => {
+    if (!supabase || memberRemovalLockRef.current) return;
+    if (!window.confirm(`Remove ${member.name} from the team?`)) return;
+    memberRemovalLockRef.current = true;
+    setMutationErrorMsg(null);
+
+    const affectedTasks = tasks.filter(
+      (task) => task.owners.includes(member.name),
+    );
+    try {
+      for (const task of affectedTasks) {
+        const owners = task.owners.filter(
+          (owner) => owner !== member.name,
+        );
+        const updateResult = await supabase
           .from("tasks")
-          .update({ assignees: [...task.assignees, n] })
-          .eq("id", taskId);
-        recordActivity(taskId, `Assigned ${n}`, "assign");
+          .update(taskPatchToStorage({ owners }))
+          .eq("id", task.id);
+        if (updateResult.error) throw updateResult.error;
       }
-      reload();
-    },
-    [members, recordActivity, tasks, reload]
-  );
 
-  const removeMember = useCallback(
-    async (member: Member) => {
-      if (!supabase) return;
-      if (!window.confirm(`Remove ${member.name} from the team?`)) return;
-      await supabase.from("members").delete().eq("id", member.id);
-      const affected = tasks.filter((t) => t.assignees.includes(member.name));
-      await Promise.all(
-        affected.map((t) =>
-          supabase!
-            .from("tasks")
-            .update({ assignees: t.assignees.filter((a) => a !== member.name) })
-            .eq("id", t.id)
-        )
-      );
-      reload();
-    },
-    [tasks, reload]
-  );
-
-  /* ---- derived ---- */
-  const pipeline = useMemo(() => modules.filter((m) => m.kind === "pipeline"), [modules]);
-  const foundations = useMemo(() => modules.filter((m) => m.kind === "foundation"), [modules]);
-  const tasksByModule = useCallback(
-    (moduleId: string) => tasks.filter((t) => t.module_id === moduleId),
-    [tasks]
-  );
-  const moduleName = useCallback(
-    (id: string) => modules.find((m) => m.id === id),
-    [modules]
-  );
+      const deleteResult = await supabase
+        .from("members")
+        .delete()
+        .eq("id", member.id);
+      if (deleteResult.error) throw deleteResult.error;
+      await reload();
+    } catch (caught) {
+      throw await exposeMutationError("remove member", caught);
+    } finally {
+      memberRemovalLockRef.current = false;
+    }
+  }, [exposeMutationError, reload, tasks]);
 
   const lastUpdated = useMemo(() => {
-    const times = tasks
-      .map((t) => new Date(t.updated_at ?? t.created_at).getTime())
-      .filter((n) => !Number.isNaN(n));
-    return times.length ? relTime(new Date(Math.max(...times)).toISOString()) : "just now";
+    const latest = tasks.reduce<number | null>((current, task) => {
+      const timestamp = new Date(task.updated_at).getTime();
+      if (Number.isNaN(timestamp)) return current;
+      return current === null ? timestamp : Math.max(current, timestamp);
+    }, null);
+    return latest === null ? null : new Date(latest).toISOString();
   }, [tasks]);
+  const errorMsg = mutationErrorMsg ?? loadErrorMsg;
 
-  const ownershipRows = useMemo(() => {
-    const rows: { member: string; task: string; module?: Module }[] = [];
-    for (const t of tasks) {
-      const mod = moduleName(t.module_id);
-      if (t.assignees.length === 0) continue;
-      for (const a of t.assignees) rows.push({ member: a, task: t.title, module: mod });
+  function handleViewTabKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") {
+      nextIndex = (index + 1) % BOARD_VIEWS.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (index - 1 + BOARD_VIEWS.length) % BOARD_VIEWS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = BOARD_VIEWS.length - 1;
     }
-    return rows.sort((a, b) => a.member.localeCompare(b.member));
-  }, [tasks, moduleName]);
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    setView(BOARD_VIEWS[nextIndex].value);
+    tabRefs.current[nextIndex]?.focus();
+  }
 
   if (!isSupabaseConfigured) return <SetupScreen />;
 
   return (
-    <div className="wrap">
-      <header>
-        <p className="eyebrow">Project Dashboard · Live</p>
-        <h1>Triton Kernel Agent — RL Training</h1>
-        <p className="lede">
-          Building an agentic system that writes / optimizes Triton kernels: distill agentic
-          trajectories from a large model to SFT Qwen3.6, then run RL. The training sequence is{" "}
-          <b>SFT → RL</b>, standing on two cross-cutting foundations — <b>Harness</b> and{" "}
-          <b>Skills</b> — that support every stage.
-        </p>
-        <div className="legend">
-          <span className="key"><span className="dot todo" />To do</span>
-          <span className="key"><span className="dot in_progress" />In progress</span>
-          <span className="key"><span className="dot done" />Done</span>
-          <span className="key"><span className="dot blocked" />Blocked</span>
-          <span className="updated">Last updated {lastUpdated} · everyone with the link</span>
-        </div>
-      </header>
+    <div className="board-page">
+      <PageHeader
+        eyebrow="Research Workspace"
+        title="Task Board"
+        description={(
+          <p>
+            Plan work, assign owners, and follow each task into its
+            experiment record.
+          </p>
+        )}
+        actions={(
+          <button
+            type="button"
+            className="btn primary board-new-task"
+            onClick={() => {
+              setCreateDefaults({});
+              setCreateOpen(true);
+            }}
+          >
+            <Icon name="plus" size={18} />
+            New task
+          </button>
+        )}
+      />
 
-      {errorMsg && (
-        <div className="error-banner">
-          Could not reach the database: {errorMsg}. Check your env vars and that the SQL from{" "}
-          <code>supabase/schema.sql</code> has been run.
-        </div>
-      )}
+      <div className="board-view-tabs" role="tablist" aria-label="Task views">
+        {BOARD_VIEWS.map((item, index) => (
+          <button
+            key={item.value}
+            ref={(node) => {
+              tabRefs.current[index] = node;
+            }}
+            id={`board-view-tab-${item.value}`}
+            type="button"
+            role="tab"
+            aria-selected={view === item.value}
+            aria-controls="board-view-panel"
+            tabIndex={view === item.value ? 0 : -1}
+            onClick={() => setView(item.value)}
+            onKeyDown={(event) => handleViewTabKeyDown(event, index)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
 
-      {loading ? (
-        <p className="state-note">Loading the board…</p>
-      ) : (
-        <>
-          <div className="section-label">
-            Training Pipeline
-            <span className="rule" />
-            <span className="section-actions">
-              <button className="btn" onClick={() => addModule("pipeline")}>
-                + Add stage
-              </button>
-            </span>
-          </div>
-          <div className="pipeline">
-            {pipeline.map((mod, i) => (
-              <div key={mod.id} style={{ display: "contents" }}>
-                {i > 0 && <div className="arrow" aria-hidden="true">→</div>}
-                <ModuleCard
-                  module={mod}
-                  number={i + 1}
-                  tasks={tasksByModule(mod.id)}
-                  members={members}
-                  pickerId={pickerId}
-                  onSetPicker={setPickerId}
-                  onPatchModule={(patch) => patchModule(mod.id, patch)}
-                  onDeleteModule={() => deleteModule(mod.id, mod.name)}
-                  onAddTask={() => addTask(mod.id)}
-                  onPatchTask={patchTask}
-                  onDeleteTask={deleteTask}
-                  onToggleAssignee={toggleAssignee}
-                  onAddMemberToTask={addMemberToTask}
+      <div
+        id="board-view-panel"
+        className="board-view-panel"
+        role="tabpanel"
+        aria-labelledby={`board-view-tab-${view}`}
+      >
+        {view === "board" ? (
+          <div className="board-toolbar">
+            <div className="board-status-legend" aria-label="Task statuses">
+              {STATUS_OPTIONS.map((option) => (
+                <StatusDot
+                  key={option.value}
+                  status={option.value}
+                  label={option.label}
                 />
-              </div>
-            ))}
-            {pipeline.length === 0 && (
-              <div className="empty" style={{ flex: 1 }}>
-                No pipeline stages yet — add one.
-              </div>
-            )}
+              ))}
+            </div>
+            <label className="group-control">
+              <span>Group by</span>
+              <select
+                aria-label="Group by"
+                value={groupBy}
+                onChange={(event) => (
+                  setGroupBy(event.target.value as GroupBy)
+                )}
+              >
+                <option value="status">Status</option>
+                <option value="type">Type</option>
+              </select>
+            </label>
           </div>
+        ) : null}
 
-          <div className="section-label">
-            Cross-cutting Foundations
-            <span className="rule" />
-            <span className="section-actions">
-              <button className="btn" onClick={() => addModule("foundation")}>
-                + Add foundation
+        {errorMsg ? (
+          <div className="error-banner board-error-banner" role="alert">
+            <span>{errorMsg}</span>
+            {loadErrorMsg ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={loading}
+                onClick={() => void reload()}
+              >
+                {loading ? "Retrying…" : "Retry"}
               </button>
-            </span>
+            ) : null}
           </div>
-          <div className="foundation-grid">
-            {foundations.map((mod) => (
-              <ModuleCard
-                key={mod.id}
-                module={mod}
-                number={null}
-                tasks={tasksByModule(mod.id)}
+        ) : null}
+
+        {loading && !hasSuccessfulSnapshot ? (
+          <WorkspaceSkeleton variant="board" label="Loading Task Board" />
+        ) : !hasSuccessfulSnapshot ? null : view === "board" ? (
+          <>
+            <p id="task-board-scroll-help" className="sr-only">
+              Scroll horizontally to reach every Task Board column.
+            </p>
+            <div
+              className="task-board-scroll"
+              role="region"
+              aria-label="Task Board columns"
+              aria-describedby="task-board-scroll-help"
+              tabIndex={0}
+            >
+              <TaskBoardView
+                tasks={tasks}
+                types={types}
                 members={members}
-                pickerId={pickerId}
-                onSetPicker={setPickerId}
-                onPatchModule={(patch) => patchModule(mod.id, patch)}
-                onDeleteModule={() => deleteModule(mod.id, mod.name)}
-                onAddTask={() => addTask(mod.id)}
+                groupBy={groupBy}
+                onOpenCreate={(defaults) => {
+                  setCreateDefaults(defaults);
+                  setCreateOpen(true);
+                }}
                 onPatchTask={patchTask}
                 onDeleteTask={deleteTask}
-                onToggleAssignee={toggleAssignee}
-                onAddMemberToTask={addMemberToTask}
               />
-            ))}
-            {foundations.length === 0 && (
-              <div className="empty">No foundations yet — add one.</div>
-            )}
-          </div>
+            </div>
+          </>
+        ) : (
+          <BoardSecondaryViews
+            view={view}
+            tasks={tasks}
+            types={types}
+            members={members}
+            onCreateType={createType}
+            onPatchType={patchType}
+            onDeleteType={deleteType}
+            onAddMember={addMember}
+            onRemoveMember={removeMember}
+          />
+        )}
 
-          <div className="section-label">
-            Ownership<span className="rule" />
-          </div>
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Member</th>
-                  <th>Task</th>
-                  <th>Module</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ownershipRows.map((r, idx) => (
-                  <tr key={`${r.member}-${r.task}-${idx}`}>
-                    <td>
-                      <span className="av">{avatarText(r.member, members)}</span>
-                      {r.member}
-                    </td>
-                    <td>{r.task}</td>
-                    <td>
-                      {r.module ? (
-                        <span className={`mod-chip ${r.module.kind === "foundation" ? "found" : ""}`}>
-                          {r.module.name}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {ownershipRows.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="muted-row">
-                      No one assigned yet — add assignees on any task.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+        {lastUpdated ? (
+          <p className="board-sync-note">
+            Live updates enabled · authoritative rows refreshed after every
+            change
+          </p>
+        ) : null}
+      </div>
 
-          <div className="section-label">
-            Team<span className="rule" />
-          </div>
-          <div className="team-bar">
-            <span className="label">Roster</span>
-            {members.map((m) => (
-              <span className="chip" key={m.id}>
-                <span className="av">{m.initials || initialsFromName(m.name)}</span>
-                {m.name}
-                <button className="x" onClick={() => removeMember(m)} aria-label={`Remove ${m.name}`}>
-                  ✕
-                </button>
-              </span>
-            ))}
-            <input
-              className="menu-add"
-              style={{ padding: "6px 10px", border: "1px solid var(--line)", borderRadius: 8, font: "inherit", fontSize: 13 }}
-              value={newMember}
-              placeholder="Add teammate…"
-              onChange={(e) => setNewMember(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  addMember(newMember);
-                  setNewMember("");
-                }
-              }}
-            />
-            <button
-              className="btn"
-              onClick={() => {
-                addMember(newMember);
-                setNewMember("");
-              }}
-            >
-              Add
-            </button>
-          </div>
-
-          <footer>
-            Triton Kernel Agent · RL Training — live board · changes save automatically and sync to
-            everyone with the link
-          </footer>
-        </>
-      )}
+      <AddTaskDrawer
+        open={createOpen}
+        types={types}
+        members={members}
+        defaults={createDefaults}
+        onClose={() => setCreateOpen(false)}
+        onCreate={createTask}
+        onCreateType={createType}
+      />
     </div>
   );
 }

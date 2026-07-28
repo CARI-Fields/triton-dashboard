@@ -19,11 +19,13 @@ import CreateExperimentDialog from "@/components/experiments/CreateExperimentDia
 import ExperimentFilters from "@/components/experiments/ExperimentFilters";
 import ExperimentTable from "@/components/experiments/ExperimentTable";
 import PageHeader from "@/components/ui/PageHeader";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 
 export default function ExperimentsDatabase() {
   const router = useRouter();
   const reloadVersion = useRef(0);
   const loadingRef = useRef(false);
+  const loadedRef = useRef(false);
   const [rows, setRows] = useState<ExperimentListRow[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -43,6 +45,7 @@ export default function ExperimentsDatabase() {
         loadExperimentReferenceData(),
       ]);
       if (requestVersion !== reloadVersion.current) return;
+      loadedRef.current = true;
       setRows(nextRows);
       setTasks(references.tasks);
       setMembers(references.members);
@@ -70,6 +73,7 @@ export default function ExperimentsDatabase() {
     return () => {
       reloadVersion.current += 1;
       loadingRef.current = false;
+      loadedRef.current = false;
       unsubscribe();
     };
   }, [reload]);
@@ -145,9 +149,24 @@ export default function ExperimentsDatabase() {
           </button>
         </div>
       )}
-      {loading
-        ? <p className="state-note">Loading experiments…</p>
-        : (
+      {loading && !loadedRef.current
+        ? <WorkspaceSkeleton variant="table" label="Loading Experiments" />
+        : !loadedRef.current && error
+          ? null
+          : visibleRows.length === 0
+            ? (
+              <div className="experiment-empty">
+                <p>No experiments match this view.</p>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setCreateOpen(true)}
+                >
+                  New experiment
+                </button>
+              </div>
+            )
+            : (
           <ExperimentTable
             rows={visibleRows}
             showTask
@@ -155,7 +174,7 @@ export default function ExperimentsDatabase() {
             selectedIds={selectedIds}
             onToggle={toggle}
           />
-        )}
+            )}
 
       <CreateExperimentDialog
         open={createOpen}

@@ -10,6 +10,7 @@ import {
 } from "react";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusDot from "@/components/ui/StatusDot";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import {
   deriveTaskAnalytics,
@@ -209,15 +210,7 @@ export default function Analytics() {
       />
 
       {loading ? (
-        <div
-          className="analytics-loading"
-          role="status"
-          aria-live="polite"
-        >
-          <p>Loading analytics…</p>
-          <span className="analytics-loading-line" aria-hidden="true" />
-          <span className="analytics-loading-line short" aria-hidden="true" />
-        </div>
+        <WorkspaceSkeleton variant="analytics" label="Loading Analytics" />
       ) : !hasSnapshot ? (
         errorBanner
       ) : (
@@ -300,8 +293,10 @@ export default function Analytics() {
             <h2 id="progress-type-title">Progress by type</h2>
             <div
               className="analytics-table-scroll"
+              role="region"
               tabIndex={0}
-              aria-label="Progress by type table; scroll horizontally"
+              aria-label="Progress by type table"
+              aria-describedby="progress-type-scroll-help"
             >
               <table
                 className="analytics-table"
@@ -331,6 +326,9 @@ export default function Analytics() {
                 </tbody>
               </table>
             </div>
+            <p id="progress-type-scroll-help" className="sr-only">
+              Scroll horizontally to inspect every Progress by type column.
+            </p>
           </section>
 
           <section
@@ -340,8 +338,10 @@ export default function Analytics() {
             <h2 id="workload-owner-title">Workload by owner</h2>
             <div
               className="analytics-table-scroll"
+              role="region"
               tabIndex={0}
-              aria-label="Workload by owner table; scroll horizontally"
+              aria-label="Workload by owner table"
+              aria-describedby="workload-owner-scroll-help"
             >
               <table
                 className="analytics-table"
@@ -400,6 +400,9 @@ export default function Analytics() {
                 </tbody>
               </table>
             </div>
+            <p id="workload-owner-scroll-help" className="sr-only">
+              Scroll horizontally to inspect every Workload by owner column.
+            </p>
           </section>
         </>
       )}

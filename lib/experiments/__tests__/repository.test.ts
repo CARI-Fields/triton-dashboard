@@ -410,12 +410,16 @@ describe("required experiment inputs", () => {
 });
 
 describe("repository query contracts", () => {
-  it("uses the exact named baseline foreign key in the bundle select", async () => {
+  it("uses the PostgREST-compatible baseline column hint in the bundle select", async () => {
     enqueue("experiments", "select", { data: null, error: null });
 
     await expect(loadExperimentBundle(experiment.id)).resolves.toBeNull();
 
-    expect(trace("experiments", "select").selectCalls[0]).toContain(
+    const select = trace("experiments", "select").selectCalls[0];
+    expect(select).toContain(
+      "baseline:experiments!baseline_experiment_id(",
+    );
+    expect(select).not.toContain(
       "baseline:experiments!experiments_baseline_experiment_id_fkey(",
     );
   });

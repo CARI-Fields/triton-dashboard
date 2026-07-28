@@ -96,6 +96,66 @@ describe("workspace visual contracts", () => {
     expect(globals).not.toMatch(/gradient\s*\(/i);
   });
 
+  it("keeps dark tables, inputs, cards, and drawers on semantic surfaces", () => {
+    const darkTokens = ruleBody(globals, '[data-theme="dark"]');
+    expect(darkTokens).toMatch(/color-scheme\s*:\s*dark/);
+
+    for (const { css, selector } of [
+      { css: workspaceCss(), selector: ".experiment-table-scroll" },
+      {
+        css: workspaceCss(),
+        selector: ".database-toolbar input,\n.database-toolbar select",
+      },
+      { css: globals, selector: ".task-card" },
+      { css: globals, selector: ".drawer-panel" },
+      { css: workspaceCss(), selector: ".experiment-dialog" },
+    ]) {
+      const body = ruleBody(css, selector);
+      expect(body, selector).toMatch(
+        /(?:background|background-color)\s*:\s*var\(--surface(?:-subtle)?\)/,
+      );
+      expect(body, selector).not.toMatch(
+        /(?:background|background-color)\s*:\s*#(?:fff(?:fff)?|000(?:000)?)/i,
+      );
+    }
+
+    const input = ruleBody(
+      workspaceCss(),
+      ".database-toolbar input,\n.database-toolbar select",
+    );
+    expect(input).toMatch(/color\s*:\s*var\(--text-primary\)/);
+    expect(input).toMatch(/border\s*:\s*1px\s+solid\s+var\(--border-strong\)/);
+    expect(ruleBody(globals, ".drawer-panel")).toMatch(
+      /border-left\s*:\s*1px\s+solid\s+var\(--border\)/,
+    );
+    expect(ruleBody(workspaceCss(), ".experiment-dialog")).toMatch(
+      /border\s*:\s*1px\s+solid\s+var\(--border-strong\)/,
+    );
+    expect(ruleBody(globals, ".task-card")).toMatch(
+      /border\s*:\s*1px\s+solid\s+var\(--border\)/,
+    );
+  });
+
+  it("keeps focus, disabled states, and reduced motion readable", () => {
+    expect(globals).toMatch(
+      /\.brand:focus-visible,[\s\S]+?box-shadow\s*:\s*var\(--focus-ring\)/,
+    );
+
+    const disabled = ruleBody(workspaceCss(), ".btn.disabled, .btn:disabled");
+    expect(disabled).toMatch(/background\s*:\s*var\(--surface-subtle\)/);
+    expect(disabled).toMatch(/color\s*:\s*var\(--text-secondary\)/);
+    expect(disabled).toMatch(/border-color\s*:\s*var\(--border\)/);
+    expect(disabled).not.toMatch(/opacity\s*:\s*(?:0|\\.)/);
+
+    const reduced = globals.match(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]+?)\n\}/,
+    )?.[1] ?? "";
+    expect(reduced).toMatch(/\*\s*,\s*\*::before\s*,\s*\*::after/);
+    expect(reduced).toMatch(/scroll-behavior\s*:\s*auto\s*!important/);
+    expect(reduced).toMatch(/animation-duration\s*:\s*0\.01ms\s*!important/);
+    expect(reduced).toMatch(/transition-duration\s*:\s*0\.01ms\s*!important/);
+  });
+
   it("uses an AA accent foreground for Experiment Record active text", () => {
     const lightTokens = ruleBody(globals, ":root");
     const darkTokens = ruleBody(globals, '[data-theme="dark"]');
@@ -255,6 +315,25 @@ describe("workspace visual contracts", () => {
     expect(ruleBody(globals, ".drawer-footer")).toMatch(/grid-row\s*:\s*2/);
   });
 
+  it("styles structural loading placeholders with semantic, motion-safe shapes", () => {
+    expect(ruleBody(globals, ".workspace-skeleton")).toMatch(
+      /padding\s*:\s*24px/,
+    );
+    const visual = ruleBody(globals, ".skeleton-visual i");
+    expect(visual).toMatch(/background\s*:\s*var\(--surface-subtle\)/);
+    expect(visual).toMatch(/animation\s*:\s*skeleton-pulse\s+1\.4s/);
+    expect(ruleBody(globals, ".skeleton-board-columns")).toMatch(
+      /grid-template-columns\s*:\s*repeat\(4,\s*minmax\(240px,\s*1fr\)\)/,
+    );
+    expect(ruleBody(globals, ".skeleton-record")).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s+320px/,
+    );
+    expect(ruleBody(globals, ".skeleton-analytics")).toMatch(
+      /grid-template-columns\s*:\s*repeat\(5,\s*1fr\)/,
+    );
+    expect(globals).toMatch(/@keyframes\s+skeleton-pulse/);
+  });
+
   it("keeps Tag remove icons subdued and at least 3:1 across tones and themes", () => {
     const tag = ruleBody(globals, ".tag");
     expect(tag).toMatch(
@@ -293,10 +372,48 @@ describe("workspace visual contracts", () => {
     }
   });
 
-  it("switches the shell to an accessible navigation sheet at 768px", () => {
-    const mobile = mediaBody(globals, 768);
+  it("keeps desktop, compact, tablet, narrow, and phone workspace contracts", () => {
+    expect(ruleBody(globals, ".app-shell")).toMatch(
+      /grid-template-columns\s*:\s*256px\s+minmax\(0,\s*1fr\)/,
+    );
+
+    const compact = mediaBody(globals, 1279);
+    expect(ruleBody(compact, ".app-shell")).toMatch(
+      /grid-template-columns\s*:\s*72px\s+minmax\(0,\s*1fr\)/,
+    );
+    expect(compact).toMatch(
+      /\.task-board-scroll[\s\S]*overflow-x\s*:\s*auto/,
+    );
+    expect(compact).toMatch(
+      /\.activity-rail[\s\S]*position\s*:\s*static/,
+    );
+    const compactLabels = ruleBody(
+      compact,
+      ".brand strong,\n  .project-context,\n  .nav-btn > span,\n  .team-context > span,\n  .theme-toggle button > span,\n  .sidebar-logout > span",
+    );
+    expect(compactLabels).toMatch(/position\s*:\s*absolute/);
+    expect(compactLabels).toMatch(/clip-path\s*:\s*inset\(50%\)/);
+    expect(compactLabels).not.toMatch(/display\s*:\s*none/);
+
+    const tablet = mediaBody(globals, 1023);
+    expect(ruleBody(tablet, ".app-content")).toMatch(
+      /padding-inline\s*:\s*24px/,
+    );
+    expect(ruleBody(tablet, ".analytics-split")).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/,
+    );
+
+    const mobile = mediaBody(globals, 767);
     expect(mobile).toMatch(/\.app-shell\s*\{\s*display\s*:\s*block/);
     expect(ruleBody(mobile, ".mobile-app-bar")).toMatch(/display\s*:\s*flex/);
+    const mobileBrand = ruleBody(mobile, ".mobile-app-bar .brand");
+    expect(mobileBrand).toMatch(/justify-content\s*:\s*flex-start/);
+    expect(mobileBrand).toMatch(/width\s*:\s*auto/);
+    const mobileBrandText = ruleBody(mobile, ".mobile-app-bar .brand strong");
+    expect(mobileBrandText).toMatch(/position\s*:\s*static/);
+    expect(mobileBrandText).toMatch(/width\s*:\s*auto/);
+    expect(mobileBrandText).toMatch(/height\s*:\s*auto/);
+    expect(mobileBrandText).toMatch(/clip-path\s*:\s*none/);
     expect(ruleBody(mobile, ".app-sidebar")).toMatch(/position\s*:\s*fixed/);
     expect(ruleBody(mobile, ".app-sidebar")).toMatch(
       /transform\s*:\s*translateX\(-100%\)/,
@@ -315,10 +432,29 @@ describe("workspace visual contracts", () => {
       /pointer-events\s*:\s*auto/,
     );
     expect(ruleBody(mobile, ".nav-backdrop")).toMatch(/display\s*:\s*block/);
+    expect(ruleBody(mobile, ".drawer-panel")).toMatch(/width\s*:\s*100%/);
+    expect(ruleBody(mobile, ".dialog-panel")).toMatch(/width\s*:\s*100%/);
+    expect(mobile).toMatch(
+      /button\s*,[\s\S]*textarea\s*\{[\s\S]*min-height\s*:\s*44px/,
+    );
+    expect(ruleBody(mobile, ".board-toolbar")).toMatch(
+      /flex-wrap\s*:\s*wrap/,
+    );
+    expect(ruleBody(mobile, ".group-control")).toMatch(
+      /margin-left\s*:\s*auto/,
+    );
+
+    const phone = mediaBody(globals, 479);
+    expect(ruleBody(phone, ".workspace-skeleton")).toMatch(
+      /padding-inline\s*:\s*12px/,
+    );
+    expect(ruleBody(phone, ".skeleton-analytics")).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/,
+    );
   });
 
   it("gives narrow Analytics Retry and attention links 44px targets", () => {
-    const mobile = mediaBody(globals, 768);
+    const mobile = mediaBody(globals, 767);
     expect(ruleBody(mobile, ".analytics-error .btn")).toMatch(
       /min-height\s*:\s*44px/,
     );
@@ -330,15 +466,15 @@ describe("workspace visual contracts", () => {
     expect(attentionLink).toMatch(/min-height\s*:\s*44px/);
   });
 
-  it("stacks the pipeline and current Analytics hierarchy before the sidebar leaves them 820px", () => {
+  it("stacks the pipeline and current Analytics hierarchy at the tablet breakpoint", () => {
     expect(globals).not.toMatch(/@media\s*\(max-width:\s*820px\)/);
-    const sidebarAware = mediaBody(globals, 1052);
+    const sidebarAware = mediaBody(globals, 1023);
     expect(sidebarAware).toMatch(/\.pipeline\s*\{\s*flex-direction\s*:\s*column/);
     expect(sidebarAware).toMatch(
       /\.foundation-grid\s*\{\s*grid-template-columns\s*:\s*1fr/,
     );
     expect(sidebarAware).toMatch(
-      /\.analytics-split\s*\{\s*grid-template-columns\s*:\s*1fr/,
+      /\.analytics-split\s*\{\s*grid-template-columns\s*:\s*(?:1fr|minmax\(0,\s*1fr\))/,
     );
     expect(sidebarAware).toMatch(
       /\.kpi-strip\s*\{\s*grid-template-columns\s*:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
@@ -353,6 +489,12 @@ describe("workspace visual contracts", () => {
     const identity = ruleBody(css, ".compare-table .compare-identity");
     expect(identity).toMatch(/position\s*:\s*sticky/);
     expect(identity).toMatch(/left\s*:\s*0/);
+  });
+
+  it("contains visually hidden filter labels inside the horizontal toolbar", () => {
+    const toolbar = ruleBody(workspaceCss(), ".database-toolbar");
+    expect(toolbar).toMatch(/position\s*:\s*relative/);
+    expect(toolbar).toMatch(/overflow-x\s*:\s*auto/);
   });
 
   it("pins all three desktop Compare identity columns at their exact widths", () => {
@@ -632,7 +774,7 @@ describe("workspace visual contracts", () => {
 
   it("stacks editor forms and lets narrow save actions wrap", () => {
     const css = workspaceCss();
-    const mobile = mediaBody(css, 760);
+    const mobile = mediaBody(css, 767);
     expect(mobile).toMatch(
       /\.dataset-row\s*,\s*\.property-grid\s*\{\s*grid-template-columns\s*:\s*1fr/,
     );
@@ -644,7 +786,7 @@ describe("workspace visual contracts", () => {
   });
 
   it("stacks the Task experiments header and actions on mobile", () => {
-    const mobile = mediaBody(workspaceCss(), 760);
+    const mobile = mediaBody(workspaceCss(), 767);
     const header = ruleBody(
       mobile,
       ".task-experiments-section .detail-section-head",
@@ -656,7 +798,7 @@ describe("workspace visual contracts", () => {
   });
 
   it("wraps long Baseline and context values instead of widening mobile pages", () => {
-    const mobile = mediaBody(workspaceCss(), 760);
+    const mobile = mediaBody(workspaceCss(), 767);
     const baseline = ruleBody(mobile, ".baseline-reference");
     expect(baseline).toMatch(/white-space\s*:\s*normal/);
     expect(baseline).toMatch(/overflow-wrap\s*:\s*anywhere/);

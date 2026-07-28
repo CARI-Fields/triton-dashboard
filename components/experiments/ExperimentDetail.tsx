@@ -13,6 +13,7 @@ import type { Experiment } from "@/lib/types";
 import { fmtDate } from "@/lib/time";
 import MarkdownField from "@/components/MarkdownField";
 import PageHeader from "@/components/ui/PageHeader";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import {
   clearSessionExperimentDraft,
   editableExperimentPatch,
@@ -803,9 +804,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
 
   if (visitLoading) {
     return (
-      <div className="workspace-page">
-        <p className="state-note">Loading experiment…</p>
-      </div>
+      <WorkspaceSkeleton variant="record" label="Loading Experiment" />
     );
   }
 

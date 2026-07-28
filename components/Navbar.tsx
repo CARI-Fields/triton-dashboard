@@ -15,7 +15,7 @@ const FOCUSABLE_SELECTOR = [
   "textarea:not([disabled])",
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
-const NARROW_NAVIGATION_QUERY = "(max-width: 768px)";
+const NARROW_NAVIGATION_QUERY = "(max-width: 767px)";
 
 const NAV_ITEMS = [
   {

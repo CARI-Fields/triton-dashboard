@@ -17,6 +17,7 @@ import TaskBoardView, {
 import { Icon } from "@/components/ui/Icons";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusDot from "@/components/ui/StatusDot";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import { logActivity } from "@/lib/activity";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import {
@@ -560,22 +561,33 @@ export default function Board() {
         ) : null}
 
         {loading ? (
-          <p className="state-note">Loading the board…</p>
+          <WorkspaceSkeleton variant="board" label="Loading Task Board" />
         ) : view === "board" ? (
-          <div className="task-board-scroll">
-            <TaskBoardView
-              tasks={tasks}
-              types={types}
-              members={members}
-              groupBy={groupBy}
-              onOpenCreate={(defaults) => {
-                setCreateDefaults(defaults);
-                setCreateOpen(true);
-              }}
-              onPatchTask={patchTask}
-              onDeleteTask={deleteTask}
-            />
-          </div>
+          <>
+            <p id="task-board-scroll-help" className="sr-only">
+              Scroll horizontally to reach every Task Board column.
+            </p>
+            <div
+              className="task-board-scroll"
+              role="region"
+              aria-label="Task Board columns"
+              aria-describedby="task-board-scroll-help"
+              tabIndex={0}
+            >
+              <TaskBoardView
+                tasks={tasks}
+                types={types}
+                members={members}
+                groupBy={groupBy}
+                onOpenCreate={(defaults) => {
+                  setCreateDefaults(defaults);
+                  setCreateOpen(true);
+                }}
+                onPatchTask={patchTask}
+                onDeleteTask={deleteTask}
+              />
+            </div>
+          </>
         ) : (
           <BoardSecondaryViews
             view={view}

@@ -31,6 +31,7 @@ import {
   formatExperimentId,
 } from "@/lib/experiments/policy";
 import { ShareRequestAuthority } from "@/components/experiments/share-request-authority";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 
 const GROUPS: { value: CompareGroup; label: string }[] = [
   { value: "data", label: "Data" },
@@ -428,23 +429,34 @@ export default function ExperimentCompare({
         </p>
       )}
 
-      {loading && (
+      {loading && !loadedRef.current ? (
+        <WorkspaceSkeleton variant="table" label="Loading Comparison" />
+      ) : loading ? (
         <p className="state-note" role="status">
-          {loadedRef.current ? "Refreshing comparison…" : "Loading comparison…"}
+          Refreshing comparison…
         </p>
-      )}
+      ) : null}
 
       {!loading && !initialLoadFailed && noMatchingSelection
         ? (
           <div className="experiment-empty">
-            No selected experiments could be found. They may have been deleted
-            or are unavailable. Choose another experiment to continue.
+            <p>
+              No selected experiments could be found. They may have been
+              deleted or are unavailable. Choose another experiment to
+              continue.
+            </p>
+            <Link href="/experiments" className="btn">
+              Back to experiments
+            </Link>
           </div>
         )
         : !loading && !initialLoadFailed && selected.length === 0
           ? (
             <div className="experiment-empty">
-              Add experiments to build a comparison.
+              <p>Add experiments to build a comparison.</p>
+              <Link href="/experiments" className="btn">
+                Back to experiments
+              </Link>
             </div>
           )
           : selected.length > 0 && (

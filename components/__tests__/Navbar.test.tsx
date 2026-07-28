@@ -13,7 +13,7 @@ import ThemeProvider from "@/components/theme/ThemeProvider";
 
 const pathnameState = vi.hoisted(() => ({ value: "/" }));
 const logout = vi.hoisted(() => vi.fn());
-const NARROW_NAVIGATION_QUERY = "(max-width: 768px)";
+const NARROW_NAVIGATION_QUERY = "(max-width: 767px)";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameState.value,

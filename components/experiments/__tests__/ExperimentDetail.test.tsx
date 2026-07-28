@@ -242,6 +242,23 @@ describe("ExperimentDetail orchestration", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses a labelled record skeleton for the initial Experiment load", async () => {
+    const current = experiment();
+    const pending = deferred<ExperimentBundle | null>();
+    vi.mocked(loadExperimentBundle).mockReturnValue(pending.promise);
+    const view = render(<ExperimentDetail id={current.id} />);
+
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Experiment",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-record");
+    expect(skeleton.querySelectorAll(".skeleton-record i")).toHaveLength(13);
+    expect(screen.queryByText("Loading experiment…")).toBeNull();
+
+    view.unmount();
+    await act(async () => pending.resolve(bundle(current)));
+  });
+
   it("renders the approved document record layout", async () => {
     const current = experiment();
     const saveRequest = deferred<ExperimentUpdateResult>();

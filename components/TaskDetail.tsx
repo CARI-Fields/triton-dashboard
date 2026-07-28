@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import MarkdownField from "@/components/MarkdownField";
 import PageHeader from "@/components/ui/PageHeader";
+import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import TaskProperties from "@/components/tasks/TaskProperties";
 import AttachmentGallery from "@/components/experiments/AttachmentGallery";
 import TaskExperimentsPanel from "@/components/experiments/TaskExperimentsPanel";
@@ -1070,9 +1071,7 @@ export default function TaskDetail({ id }: { id: string }) {
 
   if (visitLoading) {
     return (
-      <div className="wrap">
-        <p className="state-note">Loading task…</p>
-      </div>
+      <WorkspaceSkeleton variant="record" label="Loading Task" />
     );
   }
 

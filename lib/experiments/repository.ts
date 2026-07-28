@@ -103,7 +103,7 @@ const LIST_SELECT = [
 ].join(",");
 const BUNDLE_SELECT = [
   LIST_SELECT,
-  `baseline:experiments!experiments_baseline_experiment_id_fkey(*,task:tasks(id,title),owner:members(${MEMBER_SELECT}))`,
+  `baseline:experiments!baseline_experiment_id(*,task:tasks(id,title),owner:members(${MEMBER_SELECT}))`,
 ].join(",");
 
 function normalizeExperiment(row: Experiment): Experiment {

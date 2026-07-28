@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useId } from "react";
 import type { ExperimentListRow } from "@/lib/types";
 import { relTime } from "@/lib/time";
 import {
@@ -25,12 +26,20 @@ export default function ExperimentTable({
   selectedIds?: ReadonlySet<string>;
   onToggle?: (id: string) => void;
 }) {
+  const helpId = useId();
   if (rows.length === 0) {
     return <div className="experiment-empty">No experiments match this view.</div>;
   }
   return (
-    <div className="experiment-table-scroll">
-      <table className="experiment-table">
+    <>
+      <div
+        className="experiment-table-scroll"
+        role="region"
+        aria-label="Experiments table"
+        aria-describedby={helpId}
+        tabIndex={0}
+      >
+        <table className="experiment-table">
         <thead>
           <tr>
             {selectable && <th className="select-column"><span className="sr-only">Select</span></th>}
@@ -99,7 +108,11 @@ export default function ExperimentTable({
             );
           })}
         </tbody>
-      </table>
-    </div>
+        </table>
+      </div>
+      <p id={helpId} className="sr-only">
+        Scroll horizontally to inspect every Experiment table column.
+      </p>
+    </>
   );
 }

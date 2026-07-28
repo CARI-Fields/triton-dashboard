@@ -437,6 +437,22 @@ afterEach(() => {
 });
 
 describe("Board", () => {
+  it("uses a labelled structural board skeleton only for the initial load", async () => {
+    const pending = deferred();
+    supabaseState.readDelays.push(pending.promise);
+    const view = render(<Board />);
+
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Task Board",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-board");
+    expect(skeleton.querySelectorAll(".skeleton-board-column")).toHaveLength(4);
+    expect(screen.queryByText("Loading the board…")).toBeNull();
+
+    view.unmount();
+    await act(async () => pending.resolve());
+  });
+
   it("uses the exact generic Status columns and four approved views", async () => {
     await renderLoadedBoard();
 
@@ -452,6 +468,15 @@ describe("Board", () => {
     expect(document.body.textContent).not.toMatch(
       /\b(Module|Foundation|Pipeline|Assignee|Assignees)\b/i,
     );
+    const boardRegion = screen.getByRole("region", {
+      name: "Task Board columns",
+    });
+    const helpId = boardRegion.getAttribute("aria-describedby");
+    expect(helpId).toBe("task-board-scroll-help");
+    expect(document.getElementById(helpId ?? "")?.textContent).toContain(
+      "Scroll horizontally",
+    );
+    expect(boardRegion.tabIndex).toBe(0);
   });
 
   it("implements keyboard activation and relationships for the view tabs", async () => {

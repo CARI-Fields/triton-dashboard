@@ -368,6 +368,22 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TaskDetail orchestration", () => {
+  it("uses a labelled record skeleton for the initial Task load", async () => {
+    const pending = deferred<QueryResult>();
+    enqueue("tasks", pending.promise);
+    const view = render(<TaskDetail id={taskA.id} />);
+
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Task",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-record");
+    expect(skeleton.querySelectorAll(".skeleton-record i")).toHaveLength(13);
+    expect(screen.queryByText("Loading task…")).toBeNull();
+
+    view.unmount();
+    await act(async () => pending.resolve(ok(taskA)));
+  });
+
   it("loads and renders only Task-level attachments", async () => {
     enqueueLoad(taskA, [], [], [member], [taskAttachment]);
 

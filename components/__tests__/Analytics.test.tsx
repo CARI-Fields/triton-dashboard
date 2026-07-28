@@ -340,6 +340,17 @@ describe("Analytics", () => {
     expect(screen.getByLabelText(
       "1 done, 1 in progress, 0 to do, 0 blocked",
     )).toBeDefined();
+    for (const name of [
+      "Progress by type table",
+      "Workload by owner table",
+    ]) {
+      const region = screen.getByRole("region", { name });
+      const helpId = region.getAttribute("aria-describedby");
+      expect(document.getElementById(helpId ?? "")?.textContent).toContain(
+        "Scroll horizontally",
+      );
+      expect(region.tabIndex).toBe(0);
+    }
     expect(document.body.textContent).not.toMatch(
       /\b(Module|Assignee|Assignees|Trend|Forecast|Significance)\b/i,
     );
@@ -588,9 +599,12 @@ describe("Analytics", () => {
     });
     const loading = render(<Analytics />);
     expect(screen.getByRole("heading", { name: "Analytics" })).toBeDefined();
-    expect(screen.getByRole("status").textContent).toContain(
-      "Loading analytics",
-    );
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Analytics",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-analytics");
+    expect(skeleton.querySelectorAll(".skeleton-analytics > i")).toHaveLength(5);
+    expect(screen.queryByText("Loading analytics…")).toBeNull();
     loading.unmount();
 
     await act(async () => {

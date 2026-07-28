@@ -143,6 +143,14 @@ describe("ExperimentsDatabase", () => {
     expect(screen.queryByRole("button", { name: "Archived" })).toBeNull();
     expect(screen.getByRole("columnheader", { name: "Featured metrics" }))
       .toBeDefined();
+    const region = screen.getByRole("region", {
+      name: "Experiments table",
+    });
+    expect(region.tabIndex).toBe(0);
+    const helpId = region.getAttribute("aria-describedby");
+    expect(document.getElementById(helpId ?? "")?.textContent).toContain(
+      "Scroll horizontally",
+    );
   });
 
   it("shows the filtered result count in the compact toolbar", async () => {
@@ -195,9 +203,15 @@ describe("ExperimentsDatabase", () => {
     );
 
     const selection = screen.getByRole("status");
-    const empty = screen.getByText("No experiments match this view.");
+    const empty = screen.getByText("No experiments match this view.")
+      .closest(".experiment-empty") as HTMLElement;
     expect(within(selection).getByText("2 selected")).toBeDefined();
     expect(selection.nextElementSibling).toBe(empty);
+    fireEvent.click(within(empty).getByRole("button", {
+      name: "New experiment",
+    }));
+    expect(screen.getByRole("dialog", { name: "Create experiment" }))
+      .toBeDefined();
     expect(screen.getByText("0 experiments")).toBeDefined();
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
     expect(compare.getAttribute("aria-disabled")).toBe("false");
@@ -214,7 +228,12 @@ describe("ExperimentsDatabase", () => {
 
     const { unmount } = render(<ExperimentsDatabase />);
 
-    expect(screen.getByText("Loading experiments…")).toBeDefined();
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Experiments",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-table");
+    expect(skeleton.querySelectorAll(".skeleton-table > i")).toHaveLength(7);
+    expect(screen.queryByText("Loading experiments…")).toBeNull();
     expect(await screen.findByRole("link", { name: "Guardrail run" })).toBeDefined();
     expect(listExperimentRows).toHaveBeenCalledTimes(1);
     expect(loadExperimentReferenceData).toHaveBeenCalledTimes(1);
@@ -225,6 +244,40 @@ describe("ExperimentsDatabase", () => {
 
     unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the last successful table visible during a background refresh", async () => {
+    const refreshRows = deferred<ExperimentListRow[]>();
+    const refreshReferences = deferred<{ tasks: Task[]; members: Member[] }>();
+    let refresh: () => void = () => undefined;
+    vi.mocked(listExperimentRows)
+      .mockResolvedValueOnce([first, second])
+      .mockReturnValueOnce(refreshRows.promise);
+    vi.mocked(loadExperimentReferenceData)
+      .mockResolvedValueOnce({ tasks: [task], members: [member] })
+      .mockReturnValueOnce(refreshReferences.promise);
+    vi.mocked(watchExperimentIndex).mockImplementation((onChange) => {
+      refresh = onChange;
+      return () => undefined;
+    });
+
+    render(<ExperimentsDatabase />);
+    await screen.findByRole("link", { name: "Guardrail run" });
+
+    act(() => refresh());
+    await waitFor(() => expect(listExperimentRows).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("link", { name: "Guardrail run" })).toBeDefined();
+    expect(screen.queryByRole("status", {
+      name: "Loading Experiments",
+    })).toBeNull();
+
+    await act(async () => {
+      refreshRows.resolve([second]);
+      refreshReferences.resolve({ tasks: [task], members: [member] });
+      await Promise.all([refreshRows.promise, refreshReferences.promise]);
+    });
+    expect(screen.queryByRole("link", { name: "Guardrail run" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Baseline run" })).toBeDefined();
   });
 
   it("ignores an older reload that resolves after a newer Realtime refresh", async () => {

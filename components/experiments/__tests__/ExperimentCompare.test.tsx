@@ -128,6 +128,26 @@ describe("ExperimentCompare", () => {
     });
   });
 
+  it("uses a labelled table skeleton only for the initial comparison load", async () => {
+    const pending = deferred<ExperimentListRow[]>();
+    vi.mocked(listExperimentRows).mockReturnValue(pending.promise);
+    const view = render(
+      <ExperimentCompare
+        initialSelection={{ ids: [id(1)], baselineId: null }}
+      />,
+    );
+
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Comparison",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-table");
+    expect(skeleton.querySelectorAll(".skeleton-table > i")).toHaveLength(7);
+    expect(screen.queryByText("Loading comparison…")).toBeNull();
+
+    view.unmount();
+    await act(async () => pending.resolve([row(1)]));
+  });
+
   it("keeps experiments as rows, pins the Baseline first, and exposes the scrollable schema table", async () => {
     const current = row(2, { metrics: { "pass@1": 0.25 } });
     const baseline = row(1, { metrics: { "pass@1": 0.1 } });
@@ -168,6 +188,13 @@ describe("ExperimentCompare", () => {
     expect(baselineIdentity.classList)
       .toContain("compare-experiment-column");
     expect(tableRows[1].children[1].classList).toContain("compare-task-column");
+    const region = screen.getByRole("region", {
+      name: "Experiment comparison table",
+    });
+    expect(region.tabIndex).toBe(0);
+    expect(region.getAttribute("aria-describedby")).toBe("compare-table-help");
+    expect(document.getElementById("compare-table-help")?.textContent)
+      .toContain("Experiment schema");
     expect(tableRows[1].children[2].classList).toContain("compare-status-column");
     expect(screen.getAllByRole("columnheader").every(
       (header) => header.getAttribute("scope") === "col",
@@ -841,8 +868,12 @@ describe("ExperimentCompare", () => {
         initialSelection={{ ids: [], baselineId: null }}
       />,
     );
-    expect(await screen.findByText("Add experiments to build a comparison."))
-      .toBeDefined();
+    const emptySelection = (await screen.findByText(
+      "Add experiments to build a comparison.",
+    )).closest(".experiment-empty") as HTMLElement;
+    expect(within(emptySelection).getByRole("link", {
+      name: "Back to experiments",
+    }).getAttribute("href")).toBe("/experiments");
     expect(screen.getByRole("option", { name: /EXP-0002/ })).toBeDefined();
 
     routerReplace.mockClear();

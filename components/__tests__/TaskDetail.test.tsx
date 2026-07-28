@@ -103,6 +103,7 @@ vi.mock("@/lib/supabase", () => {
         return builder;
       });
       builder.maybeSingle = vi.fn(() => builder);
+      builder.single = vi.fn(() => builder);
       builder.order = vi.fn((
         column: string,
         options?: { ascending?: boolean },
@@ -193,6 +194,14 @@ const bob = {
   id: "00000000-0000-4000-8000-000000000022",
   name: "Bob",
   initials: "BO",
+} satisfies Member;
+
+const nova = {
+  ...member,
+  id: "00000000-0000-4000-8000-000000000023",
+  name: "Nova",
+  initials: "N",
+  position: 1,
 } satisfies Member;
 
 const taskAttachment = {
@@ -874,8 +883,10 @@ describe("TaskDetail orchestration", () => {
     const firstWrite = deferred<QueryResult>();
     const secondWrite = deferred<QueryResult>();
     enqueue("tasks", firstWrite.promise);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Alice" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Bob" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Bob" }));
 
     expect(taskUpdates().map((call) => call.payload)).toEqual([
       { assignees: ["Alice"] },
@@ -903,6 +914,118 @@ describe("TaskDetail orchestration", () => {
     await act(async () => secondWrite.resolve(ok(null)));
   });
 
+  it("creates a Team member before assigning it as an Owner", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    enqueue("members", ok(nova));
+    enqueue("tasks", ok(null));
+    enqueue("activity", ok(null));
+    enqueueLoad(
+      { ...taskA, assignees: ["Nova"] },
+      [],
+      [],
+      [member, nova],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    await waitFor(() => expect(taskUpdates()).toContainEqual(
+      expect.objectContaining({
+        payload: { assignees: ["Nova"] },
+      }),
+    ));
+    expect(supabaseState.mutations).toContainEqual({
+      table: "members",
+      kind: "insert",
+      payload: expect.objectContaining({
+        name: "Nova",
+        initials: "N",
+      }),
+    });
+    expect(screen.getByRole("button", { name: "Remove Nova" })).toBeDefined();
+  });
+
+  it("keeps the Owner create draft and selection when member creation fails", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    enqueue("members", failure("Owner insert failed."));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "Could not add owner. Owner insert failed.",
+    );
+    expect(taskUpdates()).toHaveLength(0);
+    expect(screen.getByLabelText("New owner name")).toHaveProperty(
+      "value",
+      "Nova",
+    );
+    expect(screen.getByText("No owners yet.")).toBeDefined();
+  });
+
+  it("does not assign a created Owner after navigation to another Task", async () => {
+    enqueueLoad(taskA);
+    const view = render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const memberInsert = deferred<QueryResult>();
+    enqueue("members", memberInsert.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    enqueueLoad(taskB);
+    view.rerender(<TaskDetail id={taskB.id} />);
+    await screen.findByRole("button", { name: "Task B" });
+    enqueue("tasks", failure("Stale Owner patch escaped."));
+
+    await act(async () => memberInsert.resolve(ok(nova)));
+
+    expect(taskUpdates()).toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("does not assign a created Owner after an A to B to A revisit", async () => {
+    enqueueLoad(taskA);
+    const view = render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const memberInsert = deferred<QueryResult>();
+    enqueue("members", memberInsert.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    enqueueLoad(taskB);
+    view.rerender(<TaskDetail id={taskB.id} />);
+    await screen.findByRole("button", { name: "Task B" });
+    enqueueLoad(taskA);
+    view.rerender(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+    enqueue("tasks", failure("Stale Owner patch escaped."));
+
+    await act(async () => memberInsert.resolve(ok(nova)));
+
+    expect(taskUpdates()).toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("rolls back one optimistic Owner toggle when its write is rejected", async () => {
     enqueueLoad(taskA, [], [], [member, alice]);
     render(<TaskDetail id={taskA.id} />);
@@ -910,20 +1033,18 @@ describe("TaskDetail orchestration", () => {
 
     const ownerWrite = deferred<QueryResult>();
     enqueue("tasks", ownerWrite.promise);
-    const aliceCheckbox = screen.getByRole(
-      "checkbox",
-      { name: "Alice" },
-    ) as HTMLInputElement;
-
-    fireEvent.click(aliceCheckbox);
-    expect(aliceCheckbox.checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
+    expect(screen.getByRole("button", { name: "Remove Alice" })).toBeDefined();
 
     await act(async () => ownerWrite.resolve(failure("Owner update denied.")));
 
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Owner update denied.",
     );
-    await waitFor(() => expect(aliceCheckbox.checked).toBe(false));
+    await waitFor(() => expect(
+      screen.queryByRole("button", { name: "Remove Alice" }),
+    ).toBeNull());
   });
 
   it("serializes rapid Tag intent without losing the cumulative draft", async () => {
@@ -993,8 +1114,10 @@ describe("TaskDetail orchestration", () => {
     const aliceWrite = deferred<QueryResult>();
     const bobWrite = deferred<QueryResult>();
     enqueue("tasks", aliceWrite.promise);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Alice" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Bob" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Bob" }));
     expect(taskUpdates().map((call) => call.payload)).toEqual([
       { assignees: ["Alice"] },
     ]);
@@ -1015,17 +1138,11 @@ describe("TaskDetail orchestration", () => {
     await act(async () => bobWrite.resolve(ok(null)));
 
     expect(
-      (await screen.findByRole(
-        "checkbox",
-        { name: "Bob" },
-      ) as HTMLInputElement).checked,
-    ).toBe(true);
+      await screen.findByRole("button", { name: "Remove Bob" }),
+    ).toBeDefined();
     expect(
-      (screen.getByRole(
-        "checkbox",
-        { name: "Alice" },
-      ) as HTMLInputElement).checked,
-    ).toBe(false);
+      screen.queryByRole("button", { name: "Remove Alice" }),
+    ).toBeNull();
     expect(activityInserts().map((call) => call.payload)).toEqual([
       expect.objectContaining({
         task_id: taskA.id,
@@ -1043,8 +1160,9 @@ describe("TaskDetail orchestration", () => {
 
     const assignWrite = deferred<QueryResult>();
     enqueue("tasks", assignWrite.promise);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Alice" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Alice" }));
 
     enqueue("tasks", ok(null));
     enqueue("activity", ok(null));
@@ -1057,23 +1175,21 @@ describe("TaskDetail orchestration", () => {
     ]);
     expect(activityInserts()).toHaveLength(0);
     expect(
-      (screen.getByRole(
-        "checkbox",
-        { name: "Alice" },
-      ) as HTMLInputElement).checked,
-    ).toBe(false);
+      screen.queryByRole("button", { name: "Remove Alice" }),
+    ).toBeNull();
   });
 
   it("skips a queued assign that becomes a no-op after unassign fails", async () => {
     const assignedTask = { ...taskA, assignees: ["Alice"] };
     enqueueLoad(assignedTask, [], [], [member, alice]);
     render(<TaskDetail id={taskA.id} />);
-    await screen.findByRole("checkbox", { name: "Alice" });
+    await screen.findByRole("button", { name: "Remove Alice" });
 
     const unassignWrite = deferred<QueryResult>();
     enqueue("tasks", unassignWrite.promise);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Alice" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
 
     enqueue("tasks", ok(null));
     enqueue("activity", ok(null));
@@ -1086,11 +1202,8 @@ describe("TaskDetail orchestration", () => {
     ]);
     expect(activityInserts()).toHaveLength(0);
     expect(
-      (screen.getByRole(
-        "checkbox",
-        { name: "Alice" },
-      ) as HTMLInputElement).checked,
-    ).toBe(true);
+      screen.getByRole("button", { name: "Remove Alice" }),
+    ).toBeDefined();
   });
 
   it("reports partial Task success truthfully and reconciles after activity failure", async () => {

@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import TaskProperties from "@/components/tasks/TaskProperties";
@@ -62,6 +63,7 @@ describe("TaskProperties", () => {
         members={[maya]}
         ownerSyncRevision={0}
         tagSyncRevision={0}
+        onCreateOwner={vi.fn()}
         onPatch={vi.fn()}
       />,
     );
@@ -84,6 +86,7 @@ describe("TaskProperties", () => {
         members={[maya]}
         ownerSyncRevision={0}
         tagSyncRevision={0}
+        onCreateOwner={vi.fn()}
         onPatch={onPatch}
       />,
     );
@@ -118,25 +121,55 @@ describe("TaskProperties", () => {
         members={[maya, theo]}
         ownerSyncRevision={0}
         tagSyncRevision={0}
+        onCreateOwner={vi.fn()}
         onPatch={onPatch}
       />,
     );
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Maya" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Theo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Maya" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Theo" }));
 
     expect(onPatch.mock.calls.map(([patch]) => patch)).toEqual([
       { owners: ["Maya"] },
       { owners: ["Maya", "Theo"] },
     ]);
-    expect(
-      (screen.getByRole("checkbox", { name: "Maya" }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("checkbox", { name: "Theo" }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Remove Maya" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Remove Theo" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Add Maya" })).toBeNull();
+  });
+
+  it("retains the create panel without patching when Owner creation fails", async () => {
+    const onCreateOwner = vi.fn().mockRejectedValue(
+      new Error("Owner insert failed."),
+    );
+    const onPatch = vi.fn();
+    render(
+      <TaskProperties
+        task={task}
+        types={[kernelType]}
+        members={[maya]}
+        ownerSyncRevision={0}
+        tagSyncRevision={0}
+        onCreateOwner={onCreateOwner}
+        onPatch={onPatch}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    await waitFor(() => expect(onCreateOwner).toHaveBeenCalledWith("Nova"));
+    expect(screen.getByRole("dialog", { name: "Add owner" })).toBeDefined();
+    expect(screen.getByLabelText("New owner name")).toHaveProperty(
+      "value",
+      "Nova",
+    );
+    expect(onPatch).not.toHaveBeenCalled();
   });
 
   it("keeps rapid Tag additions cumulative and normalizes duplicates", () => {
@@ -148,6 +181,7 @@ describe("TaskProperties", () => {
         members={[maya]}
         ownerSyncRevision={0}
         tagSyncRevision={0}
+        onCreateOwner={vi.fn()}
         onPatch={onPatch}
       />,
     );

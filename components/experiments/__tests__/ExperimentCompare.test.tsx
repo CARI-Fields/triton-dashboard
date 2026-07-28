@@ -118,9 +118,16 @@ describe("ExperimentCompare", () => {
     vi.mocked(watchExperimentIndex).mockReturnValue(() => undefined);
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    window.history.replaceState(null, "", "/");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+  });
 
-  it("pins the Baseline first and renders raw plus neutral metric Delta columns", async () => {
+  it("keeps experiments as rows, pins the Baseline first, and exposes the scrollable schema table", async () => {
     const current = row(2, { metrics: { "pass@1": 0.25 } });
     const baseline = row(1, { metrics: { "pass@1": 0.1 } });
     vi.mocked(listExperimentRows).mockResolvedValue([current, baseline]);
@@ -138,17 +145,170 @@ describe("ExperimentCompare", () => {
     expect(deltaHeader.classList.contains("neutral-delta")).toBe(true);
     const tableRows = screen.getAllByRole("row");
     expect(within(tableRows[1]).getByText("EXP-0001")).toBeDefined();
+    expect(within(tableRows[2]).getByText("EXP-0002")).toBeDefined();
     expect(within(tableRows[1]).getByText("Baseline")).toBeDefined();
     expect(within(tableRows[2]).getByText("+0.15")).toBeDefined();
-    expect(screen.getByRole("columnheader", { name: /Experiment/ }).classList)
-      .toContain("compare-identity");
+    expect(screen.getByRole("columnheader", { name: /Dataset 1 Name/ }))
+      .toBeDefined();
+    expect(screen.queryByRole("rowheader", { name: /Dataset 1 Name/ }))
+      .toBeNull();
+    const experimentHeader = screen.getByRole("columnheader", {
+      name: /Experiment/,
+    });
+    expect(experimentHeader.classList).toContain("compare-identity");
+    expect(experimentHeader.classList).toContain("compare-experiment-column");
+    expect(screen.getByRole("columnheader", { name: "Task" }).classList)
+      .toContain("compare-task-column");
+    expect(screen.getByRole("columnheader", { name: "Status" }).classList)
+      .toContain("compare-status-column");
     const baselineIdentity = within(tableRows[1]).getByRole("rowheader");
     expect(baselineIdentity.getAttribute("scope")).toBe("row");
+    expect(baselineIdentity.classList).toContain("compare-identity");
     expect(baselineIdentity.classList)
-      .toContain("compare-identity");
+      .toContain("compare-experiment-column");
+    expect(tableRows[1].children[1].classList).toContain("compare-task-column");
+    expect(tableRows[1].children[2].classList).toContain("compare-status-column");
     expect(screen.getAllByRole("columnheader").every(
       (header) => header.getAttribute("scope") === "col",
     )).toBe(true);
+
+    const scrollRegion = screen.getByRole("region", {
+      name: "Experiment comparison table",
+    });
+    expect(scrollRegion.getAttribute("tabindex")).toBe("0");
+    expect(scrollRegion.getAttribute("aria-describedby")).toBe("compare-table-help");
+    const help = document.getElementById("compare-table-help");
+    expect(help?.textContent).toBe(
+      "Missing values are shown as —. Context fields are flattened from the Experiment schema; numeric Result deltas are current minus baseline.",
+    );
+  });
+
+  it("renders the baseline-ordered selected strip as the only Remove control", async () => {
+    const current = row(2);
+    const baseline = row(1);
+    vi.mocked(listExperimentRows).mockResolvedValue([current, baseline]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [current.id, baseline.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    const selection = await screen.findByLabelText("Selected experiments");
+    expect(within(selection).getByText("2 selected")).toBeDefined();
+    const selectedItems = within(selection).getAllByRole("listitem");
+    expect(selectedItems).toHaveLength(2);
+    expect(within(selectedItems[0]).getByText(/EXP-0001 · run-1 · Baseline/))
+      .toBeDefined();
+    expect(within(selectedItems[1]).getByText(/EXP-0002 · run-2/)).toBeDefined();
+    const removeButtons = screen.getAllByRole("button", { name: /Remove EXP-/ });
+    expect(removeButtons).toHaveLength(2);
+    expect(removeButtons.every((button) => selection.contains(button))).toBe(true);
+  });
+
+  it("uses a native field-group disclosure with an accessible group count", async () => {
+    vi.mocked(listExperimentRows).mockResolvedValue([row(1)]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [id(1)], baselineId: null }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    const summary = screen.getByText("Fields · 6 groups");
+    expect(summary.tagName).toBe("SUMMARY");
+    const disclosure = summary.parentElement;
+    expect(disclosure?.tagName).toBe("DETAILS");
+    expect(disclosure?.classList).toContain("field-groups");
+    expect(disclosure?.querySelectorAll('input[type="checkbox"]')).toHaveLength(6);
+  });
+
+  it("copies the current Share URL, blocks duplicate copies, and resets after selection changes", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const copy = deferred<void>();
+    const writeText = vi.fn(() => copy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const href = `/experiments/compare?ids=${encodeURIComponent(
+      `${baseline.id},${current.id}`,
+    )}&baseline=${baseline.id}`;
+    window.history.replaceState(null, "", href);
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    const copying = screen.getByRole("button", { name: "Copying…" });
+    expect((copying as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(copying);
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith(window.location.href);
+
+    await act(async () => copy.resolve());
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Compare Baseline" }), {
+      target: { value: "" },
+    });
+    expect(await screen.findByRole("button", { name: "Share" })).toBeDefined();
+  });
+
+  it("reports clipboard failure without changing the selection or its URL state", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const writeText = vi.fn().mockRejectedValue(new Error("Permission denied."));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const href = `/experiments/compare?ids=${encodeURIComponent(
+      `${baseline.id},${current.id}`,
+    )}&baseline=${baseline.id}`;
+    window.history.replaceState(null, "", href);
+    const initialHref = window.location.href;
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    const selection = await screen.findByLabelText("Selected experiments");
+    routerReplace.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not copy link",
+    );
+    expect(writeText).toHaveBeenCalledWith(initialHref);
+    expect(window.location.href).toBe(initialHref);
+    expect(routerReplace).not.toHaveBeenCalled();
+    expect(within(selection).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(selection).getByText(/EXP-0001 · run-1 · Baseline/))
+      .toBeDefined();
+    expect((screen.getByRole("combobox", {
+      name: "Compare Baseline",
+    }) as HTMLSelectElement).value).toBe(baseline.id);
   });
 
   it("removes every Delta column when Baseline is off", async () => {

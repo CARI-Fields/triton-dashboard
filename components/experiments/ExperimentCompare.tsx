@@ -40,6 +40,8 @@ const GROUPS: { value: CompareGroup; label: string }[] = [
   { value: "decision_note", label: "Decision & Note" },
 ];
 
+type ShareState = "idle" | "copying" | "copied" | "error";
+
 function canonicalSelection(selection: CompareSelection): CompareSelection {
   const query = new URLSearchParams(serializeCompareSelection(selection));
   return parseCompareSearchParams({
@@ -119,6 +121,7 @@ export default function ExperimentCompare({
     GROUPS.map((group) => group.value),
   );
   const [diffOnly, setDiffOnly] = useState(false);
+  const [shareState, setShareState] = useState<ShareState>("idle");
   const [candidateId, setCandidateId] = useState("");
   const [unavailableIds, setUnavailableIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -228,6 +231,20 @@ export default function ExperimentCompare({
     if (candidateId && !candidateAvailable) setCandidateId("");
   }, [candidateAvailable, candidateId]);
 
+  useEffect(() => {
+    setShareState("idle");
+  }, [selection.baselineId, selection.ids]);
+
+  async function copyShareUrl() {
+    setShareState("copying");
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareState("copied");
+    } catch {
+      setShareState("error");
+    }
+  }
+
   return (
     <div className="workspace-page compare-page">
       <header className="workspace-page-header">
@@ -306,26 +323,79 @@ export default function ExperimentCompare({
           Diff only
         </label>
 
-        <div className="compare-groups" aria-label="Field groups">
-          {GROUPS.map((group) => (
-            <label key={group.value}>
-              <input
-                type="checkbox"
-                checked={groups.includes(group.value)}
-                onChange={(event) => setGroups((current) => {
-                  if (event.target.checked) {
-                    return current.includes(group.value)
-                      ? current
-                      : [...current, group.value];
-                  }
-                  return current.filter((value) => value !== group.value);
-                })}
-              />
-              {group.label}
-            </label>
-          ))}
-        </div>
+        <details className="field-groups">
+          <summary>Fields · {groups.length} groups</summary>
+          <div className="field-groups-menu">
+            {GROUPS.map((group) => (
+              <label key={group.value}>
+                <input
+                  type="checkbox"
+                  checked={groups.includes(group.value)}
+                  onChange={(event) => setGroups((current) => {
+                    if (event.target.checked) {
+                      return current.includes(group.value)
+                        ? current
+                        : [...current, group.value];
+                    }
+                    return current.filter((value) => value !== group.value);
+                  })}
+                />
+                {group.label}
+              </label>
+            ))}
+          </div>
+        </details>
       </section>
+
+      {selected.length > 0 && (
+        <div
+          className="compare-selection"
+          role="group"
+          aria-label="Selected experiments"
+        >
+          <span>{selected.length} selected</span>
+          <ul>
+            {selected.map((row) => (
+              <li key={row.id}>
+                <span>
+                  {formatExperimentId(row.experiment_no)} · {row.name}
+                  {row.id === selection.baselineId ? " · Baseline" : ""}
+                </span>
+                <button
+                  type="button"
+                  className="remove-compare"
+                  aria-label={`Remove ${formatExperimentId(row.experiment_no)}`}
+                  onClick={() => replaceSelection({
+                    ids: selectionRef.current.ids.filter((id) => id !== row.id),
+                    baselineId: selectionRef.current.baselineId === row.id
+                      ? null
+                      : selectionRef.current.baselineId,
+                  })}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className="btn"
+            disabled={shareState === "copying"}
+            onClick={() => void copyShareUrl()}
+          >
+            {shareState === "copying"
+              ? "Copying…"
+              : shareState === "copied"
+                ? "Copied"
+                : "Share"}
+          </button>
+          {shareState === "error" && (
+            <span className="form-error" role="alert">
+              Could not copy link
+            </span>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="error-banner" role="alert">
@@ -364,13 +434,24 @@ export default function ExperimentCompare({
             </div>
           )
           : selected.length > 0 && (
-            <div className="compare-table-scroll">
+            <div
+              className="compare-table-scroll"
+              role="region"
+              aria-label="Experiment comparison table"
+              aria-describedby="compare-table-help"
+              tabIndex={0}
+            >
               <table className="compare-table">
                 <thead>
                   <tr>
-                    <th scope="col" className="compare-identity">Experiment</th>
-                    <th scope="col">Task</th>
-                    <th scope="col">Status</th>
+                    <th
+                      scope="col"
+                      className="compare-identity compare-experiment-column"
+                    >
+                      Experiment
+                    </th>
+                    <th scope="col" className="compare-task-column">Task</th>
+                    <th scope="col" className="compare-status-column">Status</th>
                     {columns.map((column) => (
                       <th
                         key={JSON.stringify(column.identity)}
@@ -391,7 +472,10 @@ export default function ExperimentCompare({
                       key={row.id}
                       className={row.id === selection.baselineId ? "baseline-row" : ""}
                     >
-                      <th scope="row" className="compare-identity">
+                      <th
+                        scope="row"
+                        className="compare-identity compare-experiment-column"
+                      >
                         <Link href={`/experiments/${row.id}`}>
                           {formatExperimentId(row.experiment_no)}
                         </Link>
@@ -399,22 +483,13 @@ export default function ExperimentCompare({
                         {row.id === selection.baselineId && (
                           <span className="baseline-chip">Baseline</span>
                         )}
-                        <button
-                          type="button"
-                          className="remove-compare"
-                          aria-label={`Remove ${formatExperimentId(row.experiment_no)}`}
-                          onClick={() => replaceSelection({
-                            ids: selectionRef.current.ids.filter((id) => id !== row.id),
-                            baselineId: selectionRef.current.baselineId === row.id
-                              ? null
-                              : selectionRef.current.baselineId,
-                          })}
-                        >
-                          Remove
-                        </button>
                       </th>
-                      <td>{row.task?.title ?? "—"}</td>
-                      <td>{EXPERIMENT_STATUS_LABELS[row.status]}</td>
+                      <td className="compare-task-column">
+                        {row.task?.title ?? "—"}
+                      </td>
+                      <td className="compare-status-column">
+                        {EXPERIMENT_STATUS_LABELS[row.status]}
+                      </td>
                       {columns.map((column) => (
                         <td
                           key={JSON.stringify(column.identity)}
@@ -434,9 +509,8 @@ export default function ExperimentCompare({
             </div>
           )}
 
-      <p className="field-help">
-        Missing values are shown as —. Context differences are descriptive; no
-        statistical significance or good/bad direction is inferred.
+      <p id="compare-table-help" className="field-help">
+        {"Missing values are shown as —. Context fields are flattened from the Experiment schema; numeric Result deltas are current minus baseline."}
       </p>
     </div>
   );

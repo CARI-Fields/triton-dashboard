@@ -170,6 +170,49 @@ describe("AddTaskDrawer", () => {
     expect(screen.queryByText(/Module|Foundation|Pipeline|Assignee/i)).toBeNull();
   });
 
+  it("submits every selected Owner", async () => {
+    const create = vi.fn().mockResolvedValue(undefined);
+    renderDrawer({ onCreate: create });
+
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Pair owner coverage" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Maya" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Yubai" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ owners: ["Maya", "Yubai"] }),
+    ));
+  });
+
+  it("preserves the full accessible name for a visually truncatable Owner", () => {
+    const longName = "Alexandria Cassandra Montgomery-Wellington";
+    render(
+      <AddTaskDrawer
+        open
+        types={types}
+        members={[{
+          id: "member-long",
+          name: longName,
+          initials: "AM",
+          position: 0,
+          created_at: "2026-07-28T00:00:00.000Z",
+        }]}
+        onClose={vi.fn()}
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+        onCreateType={vi.fn().mockResolvedValue("type-kernel")}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: longName });
+    expect(checkbox.getAttribute("aria-label")).toBe(longName);
+    const name = checkbox.closest(".owner-option")
+      ?.querySelector(".owner-option-name");
+    expect(name?.textContent).toBe(longName);
+    expect(name?.getAttribute("title")).toBe(longName);
+  });
+
   it("renders the exact field order and generic create defaults", () => {
     renderDrawer();
 

@@ -65,6 +65,29 @@ function contrastRatio(first: Rgb, second: Rgb): number {
 }
 
 describe("workspace visual contracts", () => {
+  it("renders Create Task owners one per row and ellipsizes long names", () => {
+    expect(ruleBody(globals, ".owner-options")).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/,
+    );
+    expect(ruleBody(globals, ".owner-option")).toMatch(/width\s*:\s*100%/);
+    expect(ruleBody(globals, ".owner-option input")).toMatch(
+      /flex\s*:\s*0\s+0\s+auto/,
+    );
+    expect(ruleBody(globals, ".owner-option .owner-avatar")).toMatch(
+      /flex\s*:\s*0\s+0\s+auto/,
+    );
+    const ownerControl = ruleBody(globals, ".owner-field .owner-options");
+    expect(ownerControl).toMatch(/grid-column\s*:\s*2/);
+    expect(ownerControl).toMatch(/width\s*:\s*100%/);
+
+    const name = ruleBody(globals, ".owner-option-name");
+    expect(name).toMatch(/flex\s*:\s*1\s+1\s+auto/);
+    expect(name).toMatch(/min-width\s*:\s*0/);
+    expect(name).toMatch(/overflow\s*:\s*hidden/);
+    expect(name).toMatch(/text-overflow\s*:\s*ellipsis/);
+    expect(name).toMatch(/white-space\s*:\s*nowrap/);
+  });
+
   it("mounts the global workspace shell through the root layout", () => {
     const globalsImport = layout.indexOf('import "./globals.css"');
     const workspaceImport = layout.indexOf('import "./experiment-workspace.css"');

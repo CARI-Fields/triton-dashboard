@@ -307,8 +307,9 @@ RPC 保证以下检查和写入处于同一事务：
 - 审计写入。
 - POST 幂等结果。
 
-Key 身份验证、scope 和请求 schema 由 Next.js API 层负责。RPC 中再次检查 Task
-关系是为了避免 Member 恰好在权限检查与数据写入之间被移出 Task。
+Key 身份验证和请求 schema 由 Next.js API 层负责。API 层先检查 scope 以尽早返回
+清晰错误；RPC 在写入事务中再次检查该操作所需的固定 scope 和 Task 关系，避免 Admin
+刚好收回 scope，或 Member 恰好在权限检查与数据写入之间被移出 Task。
 
 RPC 不包含 Task 或 Experiment 删除逻辑。
 
@@ -339,7 +340,7 @@ GET /capabilities
 | `GET` | `/tasks` | 过滤和分页查询 Task |
 | `GET` | `/tasks/{id}` | Task 详情 |
 | `GET` | `/experiments` | 过滤和分页查询 Experiment |
-| `GET` | `/experiments/{id}` | Experiment 详情 |
+| `GET` | `/experiments/{id}` | Experiment 详情，包含带 `updated_at` 的附件 |
 | `GET` | `/tasks/{id}/activity` | Task Timeline |
 | `GET` | `/audit` | 当前协作范围内的 API 审计 |
 
@@ -354,7 +355,7 @@ Experiment 查询支持 `task_id`、`owner_id`、`status` 和 `updated_after`。
 | 方法 | 路径 | 行为 |
 |---|---|---|
 | `PATCH` | `/tasks/{id}` | 修改 Task 可写字段 |
-| `POST` | `/tasks/{id}/experiments` | 创建 Experiment，Owner 固定为 Key 对应 Member |
+| `POST` | `/tasks/{id}/experiments` | 用名称创建 `planned` Experiment，Owner 固定为 Key 对应 Member |
 | `PATCH` | `/experiments/{id}` | 修改 Experiment 可写字段 |
 | `POST` | `/tasks/{id}/activity` | 追加 Activity |
 | `POST` | `/experiments/{id}/attachments` | 上传附件 |
@@ -457,9 +458,18 @@ body 结构：
 
 `started_at` 和 `completed_at` 继续由 Experiment 状态触发器维护。
 
-创建 Experiment 时，请求 body 不接受 `owner_id` 或 `task_id`。`task_id` 来自 URL，
-`owner_id` 由服务端设置为当前 Key 的 `member_id`。创建后这两个字段都不能通过
-Agent API 修改。
+创建 Experiment 时，请求 body 只接受：
+
+```json
+{
+  "name": "Benchmark fused attention"
+}
+```
+
+`task_id` 来自 URL，`owner_id` 由服务端设置为当前 Key 的 `member_id`，`status`
+固定从 `planned` 开始。其他正常字段在创建后通过受 ETag 保护的 PATCH 修改。这样
+创建端点没有第二套字段规则，也不能绕过 Experiment workflow。Owner 和 Task 在
+创建后仍不能通过 Agent API 修改。
 
 ## 11. 并发控制
 
@@ -500,6 +510,10 @@ Idempotency-Key: <UUID>
 - 同一 Key、同一 Idempotency-Key、不同 request hash：返回
   `409 IDEMPOTENCY_KEY_REUSED`。
 
+服务端先重新确认当前 Task 协作权限，再查询幂等记录。命中相同请求时直接返回首次
+结果，不重复占用写入限额；只有新的写入才检查第 14 节的额度。附件重试若已上传
+新的临时对象但命中旧结果，服务端只清理这次新上传的对象，绝不删除首次结果的路径。
+
 PATCH 不要求 Idempotency-Key。客户端在 PATCH 响应丢失时重新 GET，确认目标状态。
 
 ## 13. 输入限制与状态规则
@@ -526,7 +540,8 @@ API 层必须：
 
 服务端在执行下一次写入前，通过该 Key 最近的成功审计记录计算额度。达到限制时返回
 `429 Too Many Requests` 和 `Retry-After`。schema 或权限校验失败的请求不进入该
-成功写入计数。
+成功写入计数。同一 Key 的“检查额度 + 成功写入”在数据库中串行化，避免并发请求
+一起越过 30 次上限；已命中的幂等重试不占新额度。
 
 不实现每日预算、自动封禁、动态令牌桶或复杂熔断。Admin 可随时吊销 Key。
 
@@ -604,6 +619,9 @@ API 审计，两者不互相替代。
 | `500/503` | 服务端或依赖暂时失败 |
 
 所有响应都包含 request ID。
+
+所有 Agent API 与 Admin Key API 响应都发送 `Cache-Control: no-store`，避免 Board 数据
+或一次性 Key secret 被浏览器、代理或 CDN 缓存。
 
 ## 17. 代码边界
 
@@ -709,6 +727,7 @@ Skill 明确要求：
 - Bruce Key 不能修改 Alice-only Task。
 - Bruce Key 可以修改共同 Task 下 Alice Owner 的 Experiment。
 - Bruce Key 创建的 Experiment 自动以 Bruce 为 Owner。
+- Bruce Key 创建的 Experiment 只接受名称并从 `planned` 开始。
 - 从共同 Task 移除 Bruce 后，Bruce Key 立即失去写权限。
 - 删除 Bruce Member 后，Bruce 的 Key 自动吊销且历史 Key/审计记录保留。
 - 缺少相应 scope 时，即使参与 Task 也不能写。

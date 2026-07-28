@@ -502,6 +502,14 @@ describe("Board", () => {
   it("uses the exact generic Status columns and four approved views", async () => {
     await renderLoadedBoard();
 
+    const pageHeader = screen.getByRole("heading", {
+      name: "Task Board",
+    }).closest("header");
+    expect(pageHeader).not.toBeNull();
+    expect(within(pageHeader!).getByText("Research Workspace")).toBeDefined();
+    expect(pageHeader?.textContent).not.toMatch(
+      /\b(Distill|SFT|RL|Pipeline)\b/i,
+    );
     expect(screen.getByRole("heading", { name: "To do" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "In progress" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Done" })).toBeDefined();

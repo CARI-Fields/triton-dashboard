@@ -294,7 +294,59 @@ describe("ExperimentCompare", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Compare Baseline" }), {
       target: { value: "" },
     });
-    expect(await screen.findByRole("button", { name: "Share" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText.mock.calls[1]?.[0]).toBe(
+      `${window.location.origin}/experiments/compare?ids=${encodeURIComponent(
+        `${baseline.id},${current.id}`,
+      )}`,
+    );
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+  });
+
+  it("copies the latest Add and Remove selections before navigation updates location", async () => {
+    const first = row(1);
+    const second = row(2);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    window.history.replaceState(
+      null,
+      "",
+      `/experiments/compare?ids=${first.id}`,
+    );
+    vi.mocked(listExperimentRows).mockResolvedValue([first, second]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [first.id], baselineId: null }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Add experiment" }), {
+      target: { value: second.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(writeText.mock.calls[1]?.[0]).toBe(
+      `${window.location.origin}/experiments/compare?ids=${encodeURIComponent(
+        `${first.id},${second.id}`,
+      )}`,
+    );
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove EXP-0002" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(writeText.mock.calls[2]?.[0]).toBe(
+      `${window.location.origin}/experiments/compare?ids=${first.id}`,
+    );
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
   });
 
   it("ignores an old Share resolution after the Baseline changes", async () => {

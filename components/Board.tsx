@@ -480,7 +480,7 @@ export default function Board() {
   return (
     <div className="board-page">
       <PageHeader
-        eyebrow="Kernel Agent / RL Training"
+        eyebrow="Research Workspace"
         title="Task Board"
         description={(
           <p>

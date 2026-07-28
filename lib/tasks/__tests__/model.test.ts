@@ -65,6 +65,15 @@ describe("task domain mapping", () => {
     });
   });
 
+  it("does not alias a patch Owner array into the storage payload", () => {
+    const owners = ["Maya"];
+    const storage = taskPatchToStorage({ owners });
+
+    owners.push("Yubai");
+
+    expect(storage.assignees).toEqual(["Maya"]);
+  });
+
   it("normalizes tags and assigns a stable case-insensitive visual tone", () => {
     expect(normalizeTags([
       " NPU ",
@@ -130,5 +139,23 @@ describe("task domain mapping", () => {
       due_date: null,
       position: -1,
     });
+  });
+
+  it("does not alias a new Task Owner array into the storage payload", () => {
+    const owners = ["Maya"];
+    const storage = newTaskToStorage({
+      title: "Validate kernels",
+      status: "todo",
+      typeId: null,
+      tags: [],
+      owners,
+      priority: "medium",
+      dueDate: null,
+      description: "",
+    }, 0);
+
+    owners.push("Yubai");
+
+    expect(storage.assignees).toEqual(["Maya"]);
   });
 });

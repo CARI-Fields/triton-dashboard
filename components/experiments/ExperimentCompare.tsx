@@ -253,7 +253,11 @@ export default function ExperimentCompare({
     const request = shareAuthority.issue();
     setShareState("copying");
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      const href = new URL(
+        compareHref(selectionRef.current),
+        window.location.origin,
+      ).href;
+      await navigator.clipboard.writeText(href);
       if (shareAuthority.isCurrent(request)) setShareState("copied");
     } catch {
       if (shareAuthority.isCurrent(request)) setShareState("error");

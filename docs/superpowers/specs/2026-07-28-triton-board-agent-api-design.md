@@ -238,7 +238,7 @@ id            uuid primary key
 name          text not null
 key_prefix    text not null
 key_digest    text unique not null
-member_id     uuid not null → members.id
+member_id     uuid null → members.id on delete set null
 scopes        text[] not null
 expires_at    timestamptz null
 revoked_at    timestamptz null
@@ -252,6 +252,10 @@ updated_at    timestamptz not null
 
 该表启用 RLS，并撤销 `anon` 和普通 `authenticated` 的直接表权限。Admin 和 Agent
 都只能通过 Next.js API 使用它。
+
+创建 Key 时 `member_id` 必填。删除 Member 时，数据库触发器先吊销该 Member 的全部
+Key，再由 FK 把历史 Key 记录的 `member_id` 置空。Key 和审计记录继续保留；没有
+Member 的 Key 无法通过 Agent API 认证。
 
 ### 8.2 `agent_api_audit_log`
 
@@ -706,6 +710,7 @@ Skill 明确要求：
 - Bruce Key 可以修改共同 Task 下 Alice Owner 的 Experiment。
 - Bruce Key 创建的 Experiment 自动以 Bruce 为 Owner。
 - 从共同 Task 移除 Bruce 后，Bruce Key 立即失去写权限。
+- 删除 Bruce Member 后，Bruce 的 Key 自动吊销且历史 Key/审计记录保留。
 - 缺少相应 scope 时，即使参与 Task 也不能写。
 
 ### 19.2 字段保护

@@ -76,6 +76,9 @@ describe("workspace visual contracts", () => {
     expect(ruleBody(globals, ".owner-option .owner-avatar")).toMatch(
       /flex\s*:\s*0\s+0\s+auto/,
     );
+    const ownerControl = ruleBody(globals, ".owner-field .owner-options");
+    expect(ownerControl).toMatch(/grid-column\s*:\s*2/);
+    expect(ownerControl).toMatch(/width\s*:\s*100%/);
 
     const name = ruleBody(globals, ".owner-option-name");
     expect(name).toMatch(/flex\s*:\s*1\s+1\s+auto/);

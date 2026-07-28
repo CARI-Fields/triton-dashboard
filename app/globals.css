@@ -1989,6 +1989,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
+.owner-field .owner-options {
+  grid-column: 2;
+  width: 100%;
+}
 .owner-option {
   display: flex;
   align-items: center;

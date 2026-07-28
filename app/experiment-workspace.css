@@ -1276,9 +1276,6 @@ input[type="checkbox"]:focus-visible {
   .experiment-detail-page select {
     min-height: 44px;
   }
-  .experiment-detail-page textarea {
-    min-height: 44px;
-  }
   .experiment-detail-page .stacked-field textarea,
   .experiment-detail-page .decision-editor textarea {
     min-height: 110px;

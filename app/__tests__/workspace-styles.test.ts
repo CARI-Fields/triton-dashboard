@@ -362,7 +362,6 @@ describe("workspace visual contracts", () => {
       ".experiment-detail-page .attachment-preview",
       '.experiment-detail-page input:not([type="checkbox"]):not([type="file"])',
       ".experiment-detail-page select",
-      ".experiment-detail-page textarea",
     ]) {
       expect(ruleBody(narrow, selector), selector).toMatch(
         /(?:min-)?height\s*:\s*44px/,
@@ -379,6 +378,23 @@ describe("workspace visual contracts", () => {
       .toMatch(/width\s*:\s*44px/);
     expect(ruleBody(narrow, ".metric-edit-row")).toMatch(
       /grid-template-columns\s*:[^;]*44px\s+44px/,
+    );
+  });
+
+  it("preserves Experiment Record textarea heights on narrow screens", () => {
+    const css = workspaceCss();
+    const narrow = mediaBody(css, 767);
+    expect(narrow).not.toMatch(
+      /\.experiment-detail-page textarea\s*\{[^}]*min-height/,
+    );
+    expect(ruleBody(css, ".property-grid textarea")).toMatch(
+      /min-height\s*:\s*82px/,
+    );
+    expect(css).toMatch(
+      /\.stacked-field textarea\s*,\s*\.decision-editor textarea\s*\{[^}]*min-height\s*:\s*110px/,
+    );
+    expect(ruleBody(css, ".timeline-note-form textarea")).toMatch(
+      /min-height\s*:\s*76px/,
     );
   });
 

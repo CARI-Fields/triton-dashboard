@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExperimentListRow } from "@/lib/types";
 import ExperimentCompare from "@/components/experiments/ExperimentCompare";
+import { ShareRequestAuthority } from "@/components/experiments/share-request-authority";
 import {
   listExperimentRows,
   watchExperimentIndex,
@@ -376,30 +377,34 @@ describe("ExperimentCompare", () => {
     expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
   });
 
-  it("settles a pending Share request safely after unmount", async () => {
+  it("disposes Share request authority when unmounted with a pending copy", async () => {
     const experiment = row(1);
     const copy = deferred<void>();
     const writeText = vi.fn(() => copy.promise);
+    const dispose = vi.spyOn(ShareRequestAuthority.prototype, "dispose");
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },
     });
     vi.mocked(listExperimentRows).mockResolvedValue([experiment]);
 
-    const { unmount } = render(
-      <ExperimentCompare
-        initialSelection={{ ids: [experiment.id], baselineId: null }}
-      />,
-    );
+    try {
+      const { unmount } = render(
+        <ExperimentCompare
+          initialSelection={{ ids: [experiment.id], baselineId: null }}
+        />,
+      );
 
-    await screen.findByText("EXP-0001");
-    fireEvent.click(screen.getByRole("button", { name: "Share" }));
-    expect(writeText).toHaveBeenCalledOnce();
-    unmount();
+      await screen.findByText("EXP-0001");
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      expect(writeText).toHaveBeenCalledOnce();
+      unmount();
 
-    await act(async () => copy.resolve());
-    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
-    expect(screen.queryByRole("alert")).toBeNull();
+      expect(dispose).toHaveBeenCalledOnce();
+      await act(async () => copy.resolve());
+    } finally {
+      dispose.mockRestore();
+    }
   });
 
   it("reports clipboard failure without changing the selection or its URL state", async () => {

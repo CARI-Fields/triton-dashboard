@@ -30,6 +30,7 @@ import {
   EXPERIMENT_STATUS_LABELS,
   formatExperimentId,
 } from "@/lib/experiments/policy";
+import { ShareRequestAuthority } from "@/components/experiments/share-request-authority";
 
 const GROUPS: { value: CompareGroup; label: string }[] = [
   { value: "data", label: "Data" },
@@ -114,8 +115,12 @@ export default function ExperimentCompare({
   const loadedRef = useRef(false);
   const selectionRef = useRef(initial);
   const reloadVersion = useRef(0);
-  const shareVersion = useRef(0);
+  const shareAuthorityRef = useRef<ShareRequestAuthority | null>(null);
   const loadingRef = useRef(false);
+  if (shareAuthorityRef.current === null) {
+    shareAuthorityRef.current = new ShareRequestAuthority();
+  }
+  const shareAuthority = shareAuthorityRef.current;
   const [rows, setRows] = useState<ExperimentListRow[]>([]);
   const [selection, setSelection] = useState(initial);
   const [groups, setGroups] = useState<CompareGroup[]>(
@@ -130,9 +135,9 @@ export default function ExperimentCompare({
   routerRef.current = router;
 
   const invalidateShare = useCallback(() => {
-    shareVersion.current += 1;
+    shareAuthority.invalidate();
     setShareState("idle");
-  }, []);
+  }, [shareAuthority]);
 
   const commitSelection = useCallback((
     requested: CompareSelection,
@@ -204,8 +209,8 @@ export default function ExperimentCompare({
   }, [reload]);
 
   useEffect(() => () => {
-    shareVersion.current += 1;
-  }, []);
+    shareAuthority.dispose();
+  }, [shareAuthority]);
 
   function retry() {
     if (!loadingRef.current) void reload();
@@ -244,13 +249,13 @@ export default function ExperimentCompare({
   }, [candidateAvailable, candidateId]);
 
   async function copyShareUrl() {
-    const requestVersion = ++shareVersion.current;
+    const request = shareAuthority.issue();
     setShareState("copying");
     try {
       await navigator.clipboard.writeText(window.location.href);
-      if (requestVersion === shareVersion.current) setShareState("copied");
+      if (shareAuthority.isCurrent(request)) setShareState("copied");
     } catch {
-      if (requestVersion === shareVersion.current) setShareState("error");
+      if (shareAuthority.isCurrent(request)) setShareState("error");
     }
   }
 

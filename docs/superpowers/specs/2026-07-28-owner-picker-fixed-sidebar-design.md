@@ -23,6 +23,9 @@ It does not rename the internal `light` theme value, change theme storage or
 colors, change the database schema, redesign the Team view, or redesign mobile
 navigation and scrolling.
 
+This specification supersedes
+`2026-07-28-create-task-owner-list-design.md` for the Create Task Owner field.
+
 ## Theme terminology
 
 - The light-theme button displays `Default`.

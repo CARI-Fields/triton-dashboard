@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   deriveTaskAnalytics,
   taskAnalyticsCsv,
@@ -237,6 +237,40 @@ describe("deriveTaskAnalytics", () => {
         blocked: 0,
       },
     ]);
+  });
+
+  it("normalizes Owner keys independently of runtime locale casing", () => {
+    const localeCasing = vi.spyOn(
+      String.prototype,
+      "toLocaleLowerCase",
+    ).mockImplementation(function simulatedTurkishLocale(this: string) {
+      return String(this).replaceAll("I", "ı").toLowerCase();
+    });
+
+    try {
+      const analytics = deriveTaskAnalytics(
+        [
+          task("locale-owner", "in_progress", {
+            owners: ["ipek"],
+          }),
+        ],
+        [],
+        [member("ipek", "Ipek", 0)],
+      );
+
+      expect(analytics.byOwner).toEqual([
+        {
+          name: "Ipek",
+          total: 1,
+          todo: 0,
+          inProgress: 1,
+          done: 0,
+          blocked: 0,
+        },
+      ]);
+    } finally {
+      localeCasing.mockRestore();
+    }
   });
 
   it("sorts only blocked attention Tasks by updated time without mutating input", () => {

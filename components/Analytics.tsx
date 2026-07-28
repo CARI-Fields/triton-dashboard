@@ -29,25 +29,12 @@ import type {
   TaskType,
 } from "@/lib/types";
 
-function errorMessage(caught: unknown): string {
-  if (caught instanceof Error) return caught.message;
-  if (
-    typeof caught === "object"
-    && caught !== null
-    && "message" in caught
-    && typeof caught.message === "string"
-  ) {
-    return caught.message;
-  }
-  return "The request failed.";
-}
-
 function ownerSummary(owners: string[]): string {
   const seen = new Set<string>();
   const names: string[] = [];
   for (const owner of owners) {
     const name = owner.trim();
-    const key = name.toLocaleLowerCase();
+    const key = name.toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
     names.push(name);
@@ -61,6 +48,7 @@ export default function Analytics() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasSnapshot, setHasSnapshot] = useState(false);
   const reloadGenerationRef = useRef(0);
 
   const reload = useCallback(async () => {
@@ -79,26 +67,37 @@ export default function Analytics() {
         supabase.from("tasks").select("*").order("position"),
         supabase.from("members").select("*").order("position"),
       ]);
-      const firstError =
-        typeResult.error || taskResult.error || memberResult.error;
-      if (firstError) throw firstError;
       if (generation !== reloadGenerationRef.current) return;
 
-      setTypes(
-        (typeResult.data ?? []).map((row) => (
-          taskTypeFromStorage(row as Module)
-        )),
-      );
-      setTasks(
-        (taskResult.data ?? []).map((row) => (
-          taskFromStorage(row as Task)
-        )),
-      );
-      setMembers((memberResult.data ?? []) as Member[]);
+      const failedPart = typeResult.error
+        ? "Type"
+        : taskResult.error
+          ? "Task"
+          : memberResult.error
+            ? "Owner"
+            : null;
+      if (failedPart) {
+        setLoadError(
+          `Could not load analytics. ${failedPart} data is unavailable.`,
+        );
+        return;
+      }
+
+      const nextTypes = (typeResult.data ?? []).map((row) => (
+        taskTypeFromStorage(row as Module)
+      ));
+      const nextTasks = (taskResult.data ?? []).map((row) => (
+        taskFromStorage(row as Task)
+      ));
+      const nextMembers = (memberResult.data ?? []) as Member[];
+      setTypes(nextTypes);
+      setTasks(nextTasks);
+      setMembers(nextMembers);
+      setHasSnapshot(true);
       setLoadError(null);
-    } catch (caught) {
+    } catch {
       if (generation !== reloadGenerationRef.current) return;
-      setLoadError(`Could not load analytics. ${errorMessage(caught)}`);
+      setLoadError("Could not load analytics. Try again.");
     } finally {
       if (generation === reloadGenerationRef.current) {
         setLoading(false);
@@ -151,6 +150,7 @@ export default function Analytics() {
   );
 
   function exportCsv() {
+    if (!hasSnapshot) return;
     const blob = new Blob([taskAnalyticsCsv(analytics)], {
       type: "text/csv;charset=utf-8",
     });
@@ -164,6 +164,19 @@ export default function Analytics() {
       URL.revokeObjectURL(url);
     }
   }
+
+  const errorBanner = loadError ? (
+    <div className="error-banner analytics-error" role="alert">
+      <span>{loadError}</span>
+      <button
+        type="button"
+        className="btn"
+        onClick={() => void reload()}
+      >
+        Retry
+      </button>
+    </div>
+  ) : null;
 
   if (!isSupabaseConfigured) {
     return (
@@ -188,7 +201,7 @@ export default function Analytics() {
             type="button"
             className="btn"
             onClick={exportCsv}
-            disabled={loading}
+            disabled={loading || !hasSnapshot}
           >
             Export CSV
           </button>
@@ -205,21 +218,11 @@ export default function Analytics() {
           <span className="analytics-loading-line" aria-hidden="true" />
           <span className="analytics-loading-line short" aria-hidden="true" />
         </div>
+      ) : !hasSnapshot ? (
+        errorBanner
       ) : (
         <>
-          {loadError ? (
-            <div className="error-banner analytics-error" role="alert">
-              <span>{loadError}</span>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => void reload()}
-              >
-                Retry
-              </button>
-            </div>
-          ) : null}
-
+          {errorBanner}
           <dl className="kpi-strip">
             {([
               ["Total tasks", analytics.kpis.total],

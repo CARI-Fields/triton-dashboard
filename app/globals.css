@@ -899,7 +899,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .attention-list span {
   overflow: hidden;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: 11px;
   line-height: 17px;
   text-overflow: ellipsis;
@@ -1264,6 +1264,14 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   }
   .analytics-page .page-actions .btn {
     min-height: 44px;
+  }
+  .analytics-error .btn {
+    min-height: 44px;
+  }
+  .analytics-page .attention-list a {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
   }
 }
 

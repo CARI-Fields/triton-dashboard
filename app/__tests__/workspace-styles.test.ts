@@ -135,6 +135,28 @@ describe("workspace visual contracts", () => {
     )).toMatch(/border-bottom-color\s*:\s*var\(--accent\)/);
   });
 
+  it("uses an AA semantic foreground for Analytics attention metadata", () => {
+    const lightTokens = ruleBody(globals, ":root");
+    const darkTokens = ruleBody(globals, '[data-theme="dark"]');
+
+    for (const { name, tokens } of [
+      { name: "light", tokens: lightTokens },
+      { name: "dark", tokens: darkTokens },
+    ]) {
+      expect(
+        contrastRatio(
+          hexColor(tokens, "--text-secondary"),
+          hexColor(tokens, "--surface"),
+        ),
+        `${name} Analytics attention metadata contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+
+    expect(ruleBody(globals, ".attention-list span")).toMatch(
+      /color\s*:\s*var\(--text-secondary\)/,
+    );
+  });
+
   it("uses theme-specific semantic foregrounds and status colors for every pill", () => {
     const lightTokens = ruleBody(globals, ":root");
     const darkTokens = ruleBody(globals, '[data-theme="dark"]');
@@ -293,6 +315,19 @@ describe("workspace visual contracts", () => {
       /pointer-events\s*:\s*auto/,
     );
     expect(ruleBody(mobile, ".nav-backdrop")).toMatch(/display\s*:\s*block/);
+  });
+
+  it("gives narrow Analytics Retry and attention links 44px targets", () => {
+    const mobile = mediaBody(globals, 768);
+    expect(ruleBody(mobile, ".analytics-error .btn")).toMatch(
+      /min-height\s*:\s*44px/,
+    );
+    const attentionLink = ruleBody(
+      mobile,
+      ".analytics-page .attention-list a",
+    );
+    expect(attentionLink).toMatch(/display\s*:\s*flex/);
+    expect(attentionLink).toMatch(/min-height\s*:\s*44px/);
   });
 
   it("stacks the pipeline and current Analytics hierarchy before the sidebar leaves them 820px", () => {

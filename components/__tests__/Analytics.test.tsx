@@ -345,32 +345,114 @@ describe("Analytics", () => {
     );
   });
 
-  it.each<TableName>(["modules", "tasks", "members"])(
-    "surfaces a %s query error with Retry",
-    async (table) => {
-      enqueueSnapshot({ errors: { [table]: `${table} failed.` } });
+  it("deduplicates attention Owners independently of runtime locale casing", async () => {
+    vi.spyOn(
+      String.prototype,
+      "toLocaleLowerCase",
+    ).mockImplementation(function simulatedTurkishLocale(this: string) {
+      return String(this).replaceAll("I", "ı").toLowerCase();
+    });
+    enqueueSnapshot({
+      tasks: taskRows.map((taskRow) => (
+        taskRow.id === "task-blocked"
+          ? { ...taskRow, assignees: ["Ipek", "ipek"] }
+          : taskRow
+      )),
+    });
+    render(<Analytics />);
+
+    const attentionLink = await screen.findByRole("link", {
+      name: "Recover failed NPU runner",
+    });
+    expect(attentionLink.closest("li")?.textContent).toContain("Ipek");
+    expect(attentionLink.closest("li")?.textContent).not.toContain(
+      "Ipek, ipek",
+    );
+  });
+
+  it.each<[TableName, string, string]>([
+    ["modules", "Type", "relation public.modules does not exist"],
+    ["tasks", "Task", "permission denied for public.tasks"],
+    ["members", "Owner", "column members.initials is missing"],
+  ])(
+    "sanitizes an initial %s query error and withholds the snapshot",
+    async (table, safeLabel, rawMessage) => {
+      enqueueSnapshot({ errors: { [table]: rawMessage } });
       render(<Analytics />);
 
       const alert = await screen.findByRole("alert");
       expect(alert.textContent).toContain(
-        `Could not load analytics. ${table} failed.`,
+        `Could not load analytics. ${safeLabel} data is unavailable.`,
       );
+      expect(alert.textContent).not.toContain(rawMessage);
       expect(within(alert).getByRole("button", {
         name: "Retry",
       })).toBeDefined();
+      expect(screen.queryByText("Total tasks", {
+        selector: "dt",
+      })).toBeNull();
+      expect(screen.queryByRole("table", {
+        name: "Progress by type",
+      })).toBeNull();
+      expect(screen.queryByRole("table", {
+        name: "Workload by owner",
+      })).toBeNull();
+      expect(screen.queryByRole("img", {
+        name: "0% complete",
+      })).toBeNull();
+      expect((screen.getByRole("button", {
+        name: "Export CSV",
+      }) as HTMLButtonElement).disabled).toBe(true);
     },
   );
 
+  it("sanitizes an unknown thrown request error", async () => {
+    supabaseState.queues.modules.push(new Promise<QueryResult>(
+      (_resolve, reject) => {
+        setTimeout(() => reject(
+          new Error("Module storage adapter exploded."),
+        ), 0);
+      },
+    ));
+    supabaseState.queues.tasks.push(Promise.resolve(ok(taskRows)));
+    supabaseState.queues.members.push(Promise.resolve(ok(memberRows)));
+    render(<Analytics />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "Could not load analytics. Try again.",
+    );
+    expect(alert.textContent).not.toContain(
+      "Module storage adapter exploded.",
+    );
+    expect(document.body.textContent).not.toMatch(/\bModule\b/i);
+    expect(screen.queryByText("Total tasks", {
+      selector: "dt",
+    })).toBeNull();
+  });
+
   it("retains the last successful snapshot after a refresh error and retries", async () => {
     await renderLoadedAnalytics();
-    enqueueSnapshot({ errors: { tasks: "Refresh failed." } });
+    const rawMessage = "permission denied for public.tasks";
+    enqueueSnapshot({ errors: { tasks: rawMessage } });
 
     act(() => realtimeHandler("tasks").callback());
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain(
-      "Could not load analytics. Refresh failed.",
+      "Could not load analytics. Task data is unavailable.",
     );
+    expect(alert.textContent).not.toContain(rawMessage);
+    expectMetric("Total tasks", "4");
+    expect(screen.getByRole("table", {
+      name: "Progress by type",
+    })).toBeDefined();
+    expect(screen.getByRole("table", {
+      name: "Workload by owner",
+    })).toBeDefined();
+    expect((screen.getByRole("button", {
+      name: "Export CSV",
+    }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByRole("link", {
       name: "Recover failed NPU runner",
     })).toBeDefined();
@@ -408,7 +490,7 @@ describe("Analytics", () => {
     enqueueSnapshot({ errors: { modules: "Newest request failed." } });
     act(() => realtimeHandler("tasks").callback());
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Newest request failed.",
+      "Could not load analytics. Type data is unavailable.",
     );
 
     await act(async () => {
@@ -427,7 +509,7 @@ describe("Analytics", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toContain(
-      "Newest request failed.",
+      "Could not load analytics. Type data is unavailable.",
     );
     expect(screen.queryByRole("link", {
       name: "Stale successful snapshot",

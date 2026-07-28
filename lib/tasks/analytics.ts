@@ -65,7 +65,7 @@ function incrementStatus(counts: StatusCounts, status: Status) {
 }
 
 function normalizedName(name: string): string {
-  return name.trim().toLocaleLowerCase();
+  return name.trim().toLowerCase();
 }
 
 function validOwnerNames(owners: string[]): string[] {

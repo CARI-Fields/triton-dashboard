@@ -369,14 +369,27 @@ describe("workspace visual contracts", () => {
   });
 
   it("uses the approved 256px desktop shell and semantic sidebar surface", () => {
-    expect(ruleBody(globals, ".app-shell")).toMatch(
+    const shell = ruleBody(globals, ".app-shell");
+    expect(shell).toMatch(
       /grid-template-columns\s*:\s*256px\s+minmax\(0,\s*1fr\)/,
     );
-    expect(ruleBody(globals, ".app-shell")).toMatch(/background\s*:\s*var\(--canvas\)/);
-    expect(ruleBody(globals, ".app-sidebar")).toMatch(
+    expect(shell).toMatch(/background\s*:\s*var\(--canvas\)/);
+    expect(shell).toMatch(/height\s*:\s*100dvh/);
+    expect(shell).toMatch(/min-height\s*:\s*0/);
+    expect(shell).toMatch(/overflow\s*:\s*hidden/);
+
+    const content = ruleBody(globals, ".app-content");
+    expect(content).toMatch(/height\s*:\s*100dvh/);
+    expect(content).toMatch(/min-height\s*:\s*0/);
+    expect(content).toMatch(/overflow-y\s*:\s*auto/);
+
+    const sidebar = ruleBody(globals, ".app-sidebar");
+    expect(sidebar).toMatch(
       /background\s*:\s*var\(--surface-subtle\)/,
     );
-    expect(ruleBody(globals, ".app-sidebar")).toMatch(/border-right\s*:/);
+    expect(sidebar).toMatch(/border-right\s*:/);
+    expect(sidebar).toMatch(/position\s*:\s*static/);
+    expect(sidebar).toMatch(/height\s*:\s*100dvh/);
   });
 
   it("keeps Drawer content in one scrollable body row with a stable footer row", () => {
@@ -484,6 +497,10 @@ describe("workspace visual contracts", () => {
 
     const mobile = mediaBody(globals, 767);
     expect(mobile).toMatch(/\.app-shell\s*\{\s*display\s*:\s*block/);
+    expect(ruleBody(mobile, ".app-shell")).toMatch(/height\s*:\s*auto/);
+    expect(ruleBody(mobile, ".app-shell")).toMatch(/overflow\s*:\s*visible/);
+    expect(ruleBody(mobile, ".app-content")).toMatch(/height\s*:\s*auto/);
+    expect(ruleBody(mobile, ".app-content")).toMatch(/overflow-y\s*:\s*visible/);
     expect(ruleBody(mobile, ".mobile-app-bar")).toMatch(/display\s*:\s*flex/);
     const mobileBrand = ruleBody(mobile, ".mobile-app-bar .brand");
     expect(mobileBrand).toMatch(/justify-content\s*:\s*flex-start/);

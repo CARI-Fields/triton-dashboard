@@ -42,15 +42,19 @@ export default function ExperimentTable({
         <table className="experiment-table">
         <thead>
           <tr>
-            {selectable && <th className="select-column"><span className="sr-only">Select</span></th>}
-            <th>ID</th>
-            <th>Name</th>
-            {showTask && <th>Task</th>}
-            <th>Owner</th>
-            <th>Status</th>
-            <th>Decision</th>
-            <th>Featured metrics</th>
-            <th>Updated</th>
+            {selectable && (
+              <th scope="col" className="select-column">
+                <span className="sr-only">Select</span>
+              </th>
+            )}
+            <th scope="col">ID</th>
+            <th scope="col">Name</th>
+            {showTask && <th scope="col">Task</th>}
+            <th scope="col">Owner</th>
+            <th scope="col">Status</th>
+            <th scope="col">Decision</th>
+            <th scope="col">Featured metrics</th>
+            <th scope="col">Updated</th>
           </tr>
         </thead>
         <tbody>

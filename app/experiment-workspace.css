@@ -38,7 +38,7 @@
 }
 .workspace-page-header h1 { margin-bottom: 8px; }
 .workspace-page-header p:not(.eyebrow) {
-  max-width: 720px; margin: 0; color: #787774; font-size: 14px;
+  max-width: 720px; margin: 0; color: var(--text-secondary); font-size: 14px;
 }
 .workspace-actions {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -133,7 +133,7 @@
 .stacked-field > span,
 .decision-editor label > span,
 .baseline-picker label > span {
-  color: #787774; font-size: 11.5px; font-weight: 600;
+  color: var(--text-secondary); font-size: 11.5px; font-weight: 600;
 }
 .database-toolbar input,
 .database-toolbar select {
@@ -184,7 +184,7 @@
 .database-toolbar input:focus-visible,
 .database-toolbar select:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: var(--focus-ring);
 }
 .experiment-dialog input:focus-visible,
 .experiment-dialog select:focus-visible,
@@ -203,8 +203,8 @@
 .key-value-row input:focus-visible,
 .key-value-row select:focus-visible,
 .metric-edit-row input:focus-visible {
-  border-color: #9b9a97;
-  box-shadow: 0 0 0 2px rgba(55, 53, 47, .12);
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 .selection-strip {
@@ -404,7 +404,7 @@
   display: flex; justify-content: flex-end; gap: 8px; margin: 8px 0 0;
   font-family: inherit; text-align: initial;
 }
-.dialog-help { color: #787774; font-size: 12px; margin: 0; }
+.dialog-help { color: var(--text-secondary); font-size: 12px; margin: 0; }
 .create-experiment-dialog {
   border-color: var(--border-strong);
   background: var(--surface);
@@ -424,7 +424,7 @@
 .create-experiment-dialog input:focus-visible,
 .create-experiment-dialog select:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: var(--focus-ring);
 }
 .baseline-confirmation {
   padding: 10px 12px;
@@ -486,7 +486,7 @@
 }
 .experiment-title-input:focus-visible {
   border-bottom-color: var(--accent);
-  box-shadow: 0 2px 0 var(--accent-subtle);
+  box-shadow: var(--focus-ring);
 }
 
 .experiment-properties {
@@ -544,7 +544,7 @@
 .experiment-detail-page .experiment-properties input:focus-visible,
 .experiment-detail-page .experiment-properties select:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: var(--focus-ring);
 }
 .experiment-properties > .baseline-picker {
   display: grid;
@@ -677,7 +677,7 @@
 .experiment-detail-page .key-value-row input:focus-visible,
 .experiment-detail-page .key-value-row select:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: var(--focus-ring);
 }
 .structured-editor {
   display: flex;
@@ -763,7 +763,7 @@
 }
 .experiment-detail-page .metric-edit-row input:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: var(--focus-ring);
 }
 .featured-toggle {
   position: relative;
@@ -906,7 +906,7 @@
 }
 .experiment-image-grid figcaption input:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: var(--focus-ring);
 }
 
 .baseline-summary {
@@ -1067,7 +1067,7 @@
 .timeline-note-form textarea:focus-visible {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: var(--focus-ring);
 }
 .timeline-note-form .btn { align-self: flex-end; }
 .experiment-detail-page .activity-rail .tl-row { gap: 10px; }
@@ -1356,6 +1356,7 @@ input[type="checkbox"]:focus-visible {
     margin-top: 0;
   }
   .experiments-database .page-actions .btn {
+    min-height: 44px;
     justify-content: center;
   }
   .saved-view-tabs { gap: 2px; }

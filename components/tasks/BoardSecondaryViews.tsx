@@ -214,11 +214,11 @@ export default function BoardSecondaryViews({
           <table className="board-table types-table">
             <thead>
               <tr>
-                <th>Type</th>
-                <th>Description</th>
-                <th>Task count</th>
-                <th>Progress</th>
-                <th>Position</th>
+                <th scope="col">Type</th>
+                <th scope="col">Description</th>
+                <th scope="col">Task count</th>
+                <th scope="col">Progress</th>
+                <th scope="col">Position</th>
               </tr>
             </thead>
             <tbody>
@@ -263,11 +263,11 @@ export default function BoardSecondaryViews({
           <table className="board-table ownership-table">
             <thead>
               <tr>
-                <th>Owner</th>
-                <th>Task</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Updated</th>
+                <th scope="col">Owner</th>
+                <th scope="col">Task</th>
+                <th scope="col">Type</th>
+                <th scope="col">Status</th>
+                <th scope="col">Updated</th>
               </tr>
             </thead>
             <tbody>

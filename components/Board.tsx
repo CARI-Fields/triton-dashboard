@@ -113,6 +113,7 @@ export default function Board() {
   const [view, setView] = useState<BoardView>("board");
   const [groupBy, setGroupBy] = useState<GroupBy>("status");
   const [loading, setLoading] = useState(true);
+  const [hasSuccessfulSnapshot, setHasSuccessfulSnapshot] = useState(false);
   const [loadErrorMsg, setLoadErrorMsg] = useState<string | null>(null);
   const [mutationErrorMsg, setMutationErrorMsg] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -147,6 +148,7 @@ export default function Board() {
   const reload = useCallback(async () => {
     const generation = reloadGenerationRef.current + 1;
     reloadGenerationRef.current = generation;
+    setLoading(true);
     if (!supabase) {
       if (generation === reloadGenerationRef.current) {
         setLoading(false);
@@ -175,6 +177,7 @@ export default function Board() {
         )),
       );
       setMembers((memberResult.data ?? []) as Member[]);
+      setHasSuccessfulSnapshot(true);
       setLoadErrorMsg(null);
     } catch (caught) {
       if (generation !== reloadGenerationRef.current) return;
@@ -556,13 +559,23 @@ export default function Board() {
 
         {errorMsg ? (
           <div className="error-banner board-error-banner" role="alert">
-            {errorMsg}
+            <span>{errorMsg}</span>
+            {loadErrorMsg ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={loading}
+                onClick={() => void reload()}
+              >
+                {loading ? "Retrying…" : "Retry"}
+              </button>
+            ) : null}
           </div>
         ) : null}
 
-        {loading ? (
+        {loading && !hasSuccessfulSnapshot ? (
           <WorkspaceSkeleton variant="board" label="Loading Task Board" />
-        ) : view === "board" ? (
+        ) : !hasSuccessfulSnapshot ? null : view === "board" ? (
           <>
             <p id="task-board-scroll-help" className="sr-only">
               Scroll horizontally to reach every Task Board column.

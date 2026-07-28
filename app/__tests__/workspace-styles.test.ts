@@ -195,6 +195,67 @@ describe("workspace visual contracts", () => {
     )).toMatch(/border-bottom-color\s*:\s*var\(--accent\)/);
   });
 
+  it("uses an AA semantic foreground on primary accent buttons in both themes", () => {
+    const lightTokens = ruleBody(globals, ":root");
+    const darkTokens = ruleBody(globals, '[data-theme="dark"]');
+
+    for (const { name, tokens } of [
+      { name: "light", tokens: lightTokens },
+      { name: "dark", tokens: darkTokens },
+    ]) {
+      const foreground = hexColor(tokens, "--on-accent");
+      for (const property of ["--accent", "--accent-hover"]) {
+        expect(
+          contrastRatio(foreground, hexColor(tokens, property)),
+          `${name} ${property} button contrast`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+
+    expect(ruleBody(globals, ".btn.primary")).toMatch(
+      /color\s*:\s*var\(--on-accent\)/,
+    );
+    expect(ruleBody(globals, ".btn.primary:hover")).toMatch(
+      /color\s*:\s*var\(--on-accent\)/,
+    );
+  });
+
+  it("keeps workspace metadata on AA semantic text instead of a raw gray", () => {
+    const css = workspaceCss();
+    expect(css).not.toMatch(/#787774/i);
+
+    for (const { name, tokens } of [
+      { name: "light", tokens: ruleBody(globals, ":root") },
+      { name: "dark", tokens: ruleBody(globals, '[data-theme="dark"]') },
+    ]) {
+      const foreground = hexColor(tokens, "--text-secondary");
+      for (const property of ["--canvas", "--surface"]) {
+        expect(
+          contrastRatio(foreground, hexColor(tokens, property)),
+          `${name} metadata contrast on ${property}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("preserves the global accent focus ring through workspace field overrides", () => {
+    const fieldFocusRules = Array.from(
+      workspaceCss().matchAll(/([^{}]+)\{([^{}]*)\}/g),
+    ).filter(([, selector, body]) => (
+      selector.includes(":focus-visible")
+      && /(?:input|select|textarea)/.test(selector)
+      && /box-shadow\s*:/.test(body)
+      && !selector.includes(".featured-toggle input")
+    ));
+
+    expect(fieldFocusRules.length).toBeGreaterThanOrEqual(9);
+    for (const [, selector, body] of fieldFocusRules) {
+      expect(body, selector.trim()).toMatch(
+        /box-shadow\s*:\s*var\(--focus-ring\)/,
+      );
+    }
+  });
+
   it("uses an AA semantic foreground for Analytics attention metadata", () => {
     const lightTokens = ruleBody(globals, ":root");
     const darkTokens = ruleBody(globals, '[data-theme="dark"]');
@@ -462,8 +523,38 @@ describe("workspace visual contracts", () => {
       mobile,
       ".analytics-page .attention-list a",
     );
-    expect(attentionLink).toMatch(/display\s*:\s*flex/);
+    expect(attentionLink).toMatch(/display\s*:\s*(?:inline-)?flex/);
+    expect(attentionLink).toMatch(/min-width\s*:\s*44px/);
     expect(attentionLink).toMatch(/min-height\s*:\s*44px/);
+  });
+
+  it("gives narrow links and icon controls a 44 by 44 CSS target", () => {
+    const mobile = mediaBody(globals, 767);
+    const links = ruleBody(
+      mobile,
+      ".btn,\n  .brand,\n  .back-link,\n  .task-open,\n  .task-card-title,\n  .board-table a,\n  .experiment-table a,\n  .analytics-page .attention-list a",
+    );
+    expect(links).toMatch(/display\s*:\s*inline-flex/);
+    expect(links).toMatch(/min-width\s*:\s*44px/);
+    expect(links).toMatch(/min-height\s*:\s*44px/);
+
+    const icons = ruleBody(
+      mobile,
+      ".nav-menu-toggle,\n  .sidebar-sheet-close,\n  .icon-btn,\n  .tag-remove,\n  .action-menu > summary",
+    );
+    expect(icons).toMatch(/width\s*:\s*44px/);
+    expect(icons).toMatch(/height\s*:\s*44px/);
+    expect(icons).toMatch(/min-width\s*:\s*44px/);
+    expect(icons).toMatch(/min-height\s*:\s*44px/);
+  });
+
+  it("keeps the narrow Experiments primary action at 44px after the final cascade", () => {
+    expect(
+      ruleBody(
+        mediaBody(workspaceCss(), 767),
+        ".experiments-database .page-actions .btn",
+      ),
+    ).toMatch(/min-height\s*:\s*44px/);
   });
 
   it("stacks the pipeline and current Analytics hierarchy at the tablet breakpoint", () => {

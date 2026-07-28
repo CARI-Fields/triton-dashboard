@@ -14,6 +14,8 @@
   --text-secondary: #6f748c;
   --text-tertiary: #929292;
   --accent: #1e96eb;
+  --accent-hover: #1887d4;
+  --on-accent: #050b10;
   --accent-foreground: #075f9f;
   --accent-subtle: #eaf5fd;
   --status-todo: #abb3bf;
@@ -40,7 +42,6 @@
   --ink-soft: var(--text-secondary);
   --line: var(--border);
   --line-strong: var(--border-strong);
-  --accent-hover: color-mix(in srgb, var(--accent) 84%, #000);
   --accent-soft: var(--accent-subtle);
   --found-bg: var(--surface-hover);
   --warn: var(--status-warning);
@@ -71,6 +72,8 @@
   --text-secondary: #929292;
   --text-tertiary: #7a7a7a;
   --accent: #1e96eb;
+  --accent-hover: #1887d4;
+  --on-accent: #050b10;
   --accent-foreground: #8dcef7;
   --accent-subtle: rgb(30 150 235 / 12%);
   --status-todo-foreground: #c7ccd4;
@@ -1135,8 +1138,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .notes-area { min-height: 200px; font-size: 14px; line-height: 1.6; box-shadow: none; }
 .notes-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .notes-actions .hint { font-size: 12px; color: var(--todo); font-family: var(--mono); }
-.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-.btn.primary:hover { background: var(--accent-hover); color: #fff; border-color: var(--accent-hover); }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn.primary:hover { background: var(--accent-hover); color: var(--on-accent); border-color: var(--accent-hover); }
 
 /* charts */
 .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
@@ -1367,6 +1370,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .board-error-banner {
   position: relative;
   z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin: 12px 0 0;
   border-color: color-mix(
     in srgb,
@@ -2524,6 +2531,29 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   textarea {
     min-height: 44px;
   }
+  .btn,
+  .brand,
+  .back-link,
+  .task-open,
+  .task-card-title,
+  .board-table a,
+  .experiment-table a,
+  .analytics-page .attention-list a {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
+  .nav-menu-toggle,
+  .sidebar-sheet-close,
+  .icon-btn,
+  .tag-remove,
+  .action-menu > summary {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
   .kpi-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2576,6 +2606,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   }
   .analytics-page .attention-list a {
     display: flex;
+    min-width: 44px;
     min-height: 44px;
     align-items: center;
   }

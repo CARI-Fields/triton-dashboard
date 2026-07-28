@@ -52,8 +52,8 @@ describe("ExperimentTable", () => {
   it("renders real stored fields, status and decision labels, and real links", () => {
     const decidedRow = { ...row, decision_outcome: "accepted" as const };
     render(<ExperimentTable rows={[decidedRow]} showTask selectable={false} />);
-    expect(screen.getAllByRole("columnheader").map((header) => header.textContent))
-      .toEqual([
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers.map((header) => header.textContent)).toEqual([
         "ID",
         "Name",
         "Task",
@@ -63,6 +63,8 @@ describe("ExperimentTable", () => {
         "Featured metrics",
         "Updated",
       ]);
+    expect(headers.every((header) => header.getAttribute("scope") === "col"))
+      .toBe(true);
     expect(screen.getByText("EXP-0007")).toBeDefined();
     expect(screen.getByRole("link", { name: "Manual NPU run" }).getAttribute("href"))
       .toBe("/experiments/00000000-0000-4000-8000-000000000001");

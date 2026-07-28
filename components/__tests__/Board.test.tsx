@@ -453,6 +453,52 @@ describe("Board", () => {
     await act(async () => pending.resolve());
   });
 
+  it("shows only a retryable error when the initial three-table read fails", async () => {
+    failNextRead("modules", "Types unavailable.");
+    failNextRead("tasks", "Tasks unavailable.");
+    failNextRead("members", "Owners unavailable.");
+    render(<Board />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not load board. Types unavailable.",
+    );
+    expect(screen.queryByRole("region", {
+      name: "Task Board columns",
+    })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "To do" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("link", {
+      name: "Validate NPU kernels",
+    })).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("retains the last successful Board snapshot when a refresh fails", async () => {
+    await renderLoadedBoard();
+    failNextRead("modules", "Refresh unavailable.");
+    failNextRead("tasks", "Refresh tasks unavailable.");
+    failNextRead("members", "Refresh owners unavailable.");
+
+    const taskHandler = supabaseState.handlers.find(
+      ({ table }) => table === "tasks",
+    );
+    act(() => {
+      taskHandler?.callback({});
+    });
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not load board. Refresh unavailable.",
+    );
+    expect(screen.getByRole("link", {
+      name: "Validate NPU kernels",
+    })).toBeDefined();
+    expect(screen.queryByRole("status", {
+      name: "Loading Task Board",
+    })).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+  });
+
   it("uses the exact generic Status columns and four approved views", async () => {
     await renderLoadedBoard();
 
@@ -695,7 +741,9 @@ describe("Board", () => {
       "Progress",
       "Position",
     ]) {
-      expect(screen.getByRole("columnheader", { name: heading })).toBeDefined();
+      expect(
+        screen.getByRole("columnheader", { name: heading }).getAttribute("scope"),
+      ).toBe("col");
     }
     const kernelRow = screen.getByRole("cell", { name: "Kernel" })
       .closest("tr") as HTMLElement;
@@ -711,7 +759,9 @@ describe("Board", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Ownership" }));
     for (const heading of ["Owner", "Task", "Type", "Status", "Updated"]) {
-      expect(screen.getByRole("columnheader", { name: heading })).toBeDefined();
+      expect(
+        screen.getByRole("columnheader", { name: heading }).getAttribute("scope"),
+      ).toBe("col");
     }
     expect(screen.getByText("No owner yet")).toBeDefined();
     expect(screen.getAllByText("Validate NPU kernels")).toHaveLength(2);

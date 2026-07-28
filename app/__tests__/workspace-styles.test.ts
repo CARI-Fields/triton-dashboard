@@ -65,14 +65,29 @@ function contrastRatio(first: Rgb, second: Rgb): number {
 }
 
 describe("workspace visual contracts", () => {
-  it("anchors the owner picker and ellipsizes selected chip names", () => {
+  it("gives owner names and the add-owner panel the available field width", () => {
     const picker = ruleBody(globals, ".owner-picker");
     expect(picker).toMatch(/position\s*:\s*relative/);
     expect(picker).toMatch(/min-width\s*:\s*0/);
+
+    const drawerControl = ruleBody(globals, ".owner-field > .field-control");
+    expect(drawerControl).toMatch(/grid-column\s*:\s*2/);
+    expect(drawerControl).toMatch(/width\s*:\s*100%/);
+
+    const detailPicker = ruleBody(
+      globals,
+      ".task-property-owner > .owner-picker",
+    );
+    expect(detailPicker).toMatch(/grid-column\s*:\s*2/);
+    expect(detailPicker).toMatch(/width\s*:\s*100%/);
+
     const panel = ruleBody(globals, ".owner-picker-panel");
     expect(panel).toMatch(/position\s*:\s*absolute/);
     expect(panel).toMatch(/top\s*:\s*calc\(100%\s*\+\s*6px\)/);
-    expect(panel).toMatch(/left\s*:\s*0/);
+    expect(panel).toMatch(/right\s*:\s*0/);
+    expect(panel).toMatch(
+      /width\s*:\s*min\(360px,\s*calc\(100vw\s*-\s*32px\)\)/,
+    );
 
     const name = ruleBody(globals, ".selected-owner-name");
     expect(name).toMatch(/min-width\s*:\s*0/);

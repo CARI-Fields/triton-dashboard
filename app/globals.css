@@ -1993,8 +1993,12 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   position: relative;
   min-width: 0;
 }
-.owner-field .owner-picker {
+.owner-field > .field-control {
   grid-column: 2;
+  min-width: 0;
+  width: 100%;
+}
+.owner-field .owner-picker {
   width: 100%;
 }
 .owner-picker-selected {
@@ -2040,8 +2044,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   position: absolute;
   z-index: 35;
   top: calc(100% + 6px);
-  left: 0;
-  width: min(320px, 100%);
+  right: 0;
+  width: min(360px, calc(100vw - 32px));
   max-height: min(360px, calc(100dvh - 120px));
   overflow-y: auto;
   padding: 10px;
@@ -2284,6 +2288,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .task-property-owner > legend {
   padding-top: 8px;
+}
+.task-property-owner > .owner-picker {
+  grid-column: 2;
+  width: 100%;
 }
 .task-detail-page .record-section,
 .task-detail-page .task-experiments-section {

@@ -60,6 +60,8 @@ describe("TaskProperties", () => {
         task={task}
         types={[kernelType]}
         members={[maya]}
+        ownerSyncRevision={0}
+        tagSyncRevision={0}
         onPatch={vi.fn()}
       />,
     );
@@ -80,6 +82,8 @@ describe("TaskProperties", () => {
         task={task}
         types={[kernelType]}
         members={[maya]}
+        ownerSyncRevision={0}
+        tagSyncRevision={0}
         onPatch={onPatch}
       />,
     );
@@ -112,6 +116,8 @@ describe("TaskProperties", () => {
         task={task}
         types={[kernelType]}
         members={[maya, theo]}
+        ownerSyncRevision={0}
+        tagSyncRevision={0}
         onPatch={onPatch}
       />,
     );
@@ -140,6 +146,8 @@ describe("TaskProperties", () => {
         task={task}
         types={[kernelType]}
         members={[maya]}
+        ownerSyncRevision={0}
+        tagSyncRevision={0}
         onPatch={onPatch}
       />,
     );

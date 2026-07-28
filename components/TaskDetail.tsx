@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import MarkdownField from "@/components/MarkdownField";
@@ -260,6 +266,8 @@ export default function TaskDetail({ id }: { id: string }) {
   const [retrying, setRetrying] = useState(false);
   const [notePending, setNotePending] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [ownerSyncRevision, setOwnerSyncRevision] = useState(0);
+  const [tagSyncRevision, setTagSyncRevision] = useState(0);
 
   if (visit.id !== id) {
     setVisit({ id, generation: visit.generation + 1 });
@@ -447,6 +455,8 @@ export default function TaskDetail({ id }: { id: string }) {
     setRetrying(false);
     setNotePending(false);
     setDeleting(false);
+    setOwnerSyncRevision(0);
+    setTagSyncRevision(0);
 
     if (!id) {
       setLoadedGeneration(visit.generation);
@@ -766,6 +776,9 @@ export default function TaskDetail({ id }: { id: string }) {
           activityEvent.coordinator.pending.filter(
             (change) => change !== activityEvent.change,
           );
+        if (visitRef.current === activityEvent.coordinator.visit) {
+          setOwnerSyncRevision((current) => current + 1);
+        }
       };
       const settleTagChange = (succeeded: boolean) => {
         if (!tagEvent) return;
@@ -775,6 +788,9 @@ export default function TaskDetail({ id }: { id: string }) {
         tagEvent.coordinator.pending = tagEvent.coordinator.pending.filter(
           (change) => change !== tagEvent.change,
         );
+        if (visitRef.current === tagEvent.coordinator.visit) {
+          setTagSyncRevision((current) => current + 1);
+        }
       };
       if (ownerChangeIsNoOp || tagChangeIsNoOp) {
         settleOwnerChange(false);
@@ -1032,6 +1048,25 @@ export default function TaskDetail({ id }: { id: string }) {
   const mutationError: DetailError | null = mutationMessage
     ? { message: mutationMessage, phase: null }
     : null;
+  const propertyTask = useMemo(() => {
+    if (!task) return null;
+    const ownerCoordinator = ownerCoordinatorRef.current;
+    const tagCoordinator = tagCoordinatorRef.current;
+    const owners = ownerCoordinator?.visit === visitRef.current
+      ? ownerCoordinator.pending.reduce(
+        applyOwnerChange,
+        ownerCoordinator.confirmed,
+      )
+      : task.owners;
+    const tags = tagCoordinator?.visit === visitRef.current
+      ? (
+        tagCoordinator.pending[tagCoordinator.pending.length - 1]?.tags
+        ?? tagCoordinator.confirmed
+      )
+      : task.tags;
+    if (owners === task.owners && tags === task.tags) return task;
+    return { ...task, owners, tags };
+  }, [ownerSyncRevision, tagSyncRevision, task]);
 
   if (visitLoading) {
     return (
@@ -1069,30 +1104,9 @@ export default function TaskDetail({ id }: { id: string }) {
     );
   }
 
-  const currentOwnerCoordinator = ownerCoordinatorRef.current;
-  const currentTagCoordinator = tagCoordinatorRef.current;
-  const propertyTask: TaskModel = {
-    ...task,
-    owners:
-      currentOwnerCoordinator?.visit === visitRef.current
-      && currentOwnerCoordinator.pending.length > 0
-        ? currentOwnerCoordinator.pending.reduce(
-          applyOwnerChange,
-          currentOwnerCoordinator.confirmed,
-        )
-        : task.owners,
-    tags:
-      currentTagCoordinator?.visit === visitRef.current
-      && currentTagCoordinator.pending.length > 0
-        ? currentTagCoordinator.pending[
-          currentTagCoordinator.pending.length - 1
-        ].tags
-        : task.tags,
-  };
-
   return (
     <div className="record-page task-detail-page">
-      <main className="record-main">
+      <div className="record-main">
         <Link href="/" className="back-link">← Task Board</Link>
 
         {mutationError && (
@@ -1150,9 +1164,11 @@ export default function TaskDetail({ id }: { id: string }) {
         />
 
         <TaskProperties
-          task={propertyTask}
+          task={propertyTask ?? task}
           types={types}
           members={members}
+          ownerSyncRevision={ownerSyncRevision}
+          tagSyncRevision={tagSyncRevision}
           onPatch={patchTask}
         />
 
@@ -1195,7 +1211,7 @@ export default function TaskDetail({ id }: { id: string }) {
             }}
           />
         </section>
-      </main>
+      </div>
 
       <aside className="activity-rail" aria-label="Task activity">
         <h2>Activity</h2>

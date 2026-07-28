@@ -15,6 +15,8 @@ interface TaskPropertiesProps {
   task: TaskModel;
   types: TaskType[];
   members: Member[];
+  ownerSyncRevision: number;
+  tagSyncRevision: number;
   onPatch: (patch: TaskPatch) => void;
 }
 
@@ -34,6 +36,8 @@ export default function TaskProperties({
   task,
   types,
   members,
+  ownerSyncRevision,
+  tagSyncRevision,
   onPatch,
 }: TaskPropertiesProps) {
   const [ownerDraft, setOwnerDraft] = useState(task.owners);
@@ -48,14 +52,14 @@ export default function TaskProperties({
     const next = [...task.owners];
     ownerDraftRef.current = next;
     setOwnerDraft(next);
-  }, [ownerKey, task.id, task.owners]);
+  }, [ownerKey, ownerSyncRevision, task.id, task.owners]);
 
   useEffect(() => {
     const next = normalizeTags(task.tags);
     tagDraftRef.current = next;
     setTagDraft(next);
     setTagInput("");
-  }, [tagKey, task.id, task.tags]);
+  }, [tagKey, tagSyncRevision, task.id, task.tags]);
 
   function toggleOwner(name: string) {
     const current = ownerDraftRef.current;

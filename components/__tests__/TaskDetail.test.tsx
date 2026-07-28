@@ -389,10 +389,13 @@ describe("TaskDetail orchestration", () => {
   it("renders a document record with a dedicated Activity rail", async () => {
     enqueueLoad(taskA);
 
-    render(<TaskDetail id={taskA.id} />);
+    const { container } = render(<TaskDetail id={taskA.id} />);
 
     expect(await screen.findByRole("link", { name: "← Task Board" }))
       .toBeDefined();
+    const recordMain = container.querySelector(".record-main");
+    expect(recordMain?.tagName).toBe("DIV");
+    expect(container.querySelector("main")).toBeNull();
     expect(screen.getByRole("heading", { name: "Description" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Experiments" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Attachments" })).toBeDefined();
@@ -884,6 +887,29 @@ describe("TaskDetail orchestration", () => {
     await act(async () => secondWrite.resolve(ok(null)));
   });
 
+  it("rolls back one optimistic Owner toggle when its write is rejected", async () => {
+    enqueueLoad(taskA, [], [], [member, alice]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const ownerWrite = deferred<QueryResult>();
+    enqueue("tasks", ownerWrite.promise);
+    const aliceCheckbox = screen.getByRole(
+      "checkbox",
+      { name: "Alice" },
+    ) as HTMLInputElement;
+
+    fireEvent.click(aliceCheckbox);
+    expect(aliceCheckbox.checked).toBe(true);
+
+    await act(async () => ownerWrite.resolve(failure("Owner update denied.")));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Owner update denied.",
+    );
+    await waitFor(() => expect(aliceCheckbox.checked).toBe(false));
+  });
+
   it("serializes rapid Tag intent without losing the cumulative draft", async () => {
     enqueueLoad(taskA);
     render(<TaskDetail id={taskA.id} />);
@@ -918,6 +944,29 @@ describe("TaskDetail orchestration", () => {
 
     await act(async () => secondWrite.resolve(ok(null)));
     await waitFor(() => expect(screen.getByText("Verifier")).toBeDefined());
+  });
+
+  it("rolls back one optimistic Tag addition when its write is rejected", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const tagWrite = deferred<QueryResult>();
+    enqueue("tasks", tagWrite.promise);
+    const input = screen.getByLabelText("Task tags");
+
+    fireEvent.change(input, { target: { value: "NPU" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Remove NPU" })).toBeDefined();
+
+    await act(async () => tagWrite.resolve(failure("Tag update denied.")));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Tag update denied.",
+    );
+    await waitFor(() => expect(
+      screen.queryByRole("button", { name: "Remove NPU" }),
+    ).toBeNull());
   });
 
   it("rebases a queued assignee change after an earlier assignee write fails", async () => {

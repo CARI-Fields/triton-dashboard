@@ -315,6 +315,183 @@ describe("workspace visual contracts", () => {
     expect(identity).toMatch(/left\s*:\s*0/);
   });
 
+  it("pins all three desktop Compare identity columns at their exact widths", () => {
+    const css = workspaceCss();
+    const table = ruleBody(css, ".compare-table");
+    expect(table).toMatch(/--compare-experiment-width\s*:\s*220px/);
+    expect(table).toMatch(/--compare-task-width\s*:\s*180px/);
+    expect(table).toMatch(/--compare-status-width\s*:\s*120px/);
+
+    const experiment = ruleBody(css, ".compare-table .compare-experiment-column");
+    expect(experiment).toMatch(/position\s*:\s*sticky/);
+    expect(experiment).toMatch(/left\s*:\s*0/);
+    expect(experiment).toMatch(
+      /(?:min-)?width\s*:\s*var\(--compare-experiment-width\)/,
+    );
+
+    const task = ruleBody(css, ".compare-table .compare-task-column");
+    expect(task).toMatch(/position\s*:\s*sticky/);
+    expect(task).toMatch(/left\s*:\s*var\(--compare-experiment-width\)/);
+    expect(task).toMatch(
+      /(?:min-)?width\s*:\s*var\(--compare-task-width\)/,
+    );
+
+    const status = ruleBody(css, ".compare-table .compare-status-column");
+    expect(status).toMatch(/position\s*:\s*sticky/);
+    expect(status).toMatch(
+      /left\s*:\s*calc\(var\(--compare-experiment-width\)\s*\+\s*var\(--compare-task-width\)\)/,
+    );
+    expect(status).toMatch(
+      /(?:min-)?width\s*:\s*var\(--compare-status-width\)/,
+    );
+  });
+
+  it("keeps only the narrower Experiment identity sticky at 767px", () => {
+    const narrow = mediaBody(workspaceCss(), 767);
+    const table = ruleBody(narrow, ".compare-table");
+    const width = table.match(/--compare-experiment-width\s*:\s*(\d+)px/);
+    expect(width).not.toBeNull();
+    expect(Number(width?.[1])).toBeLessThanOrEqual(180);
+
+    const experiment = ruleBody(
+      narrow,
+      ".compare-table .compare-experiment-column",
+    );
+    expect(experiment).toMatch(/position\s*:\s*sticky/);
+    expect(experiment).toMatch(/left\s*:\s*0/);
+
+    for (const selector of [
+      ".compare-table .compare-task-column",
+      ".compare-table .compare-status-column",
+    ]) {
+      const released = ruleBody(narrow, selector);
+      expect(released, selector).toMatch(/position\s*:\s*static/);
+      expect(released, selector).toMatch(/left\s*:\s*auto/);
+      expect(released, selector).toMatch(/box-shadow\s*:\s*none/);
+    }
+  });
+
+  it("uses 44px Compare targets and the narrow layout from 761 through 767px", () => {
+    const css = workspaceCss();
+    const narrow = mediaBody(css, 767);
+    for (const selector of [
+      ".compare-page .btn",
+      ".compare-controls select",
+      ".field-groups > summary",
+      ".field-groups-menu label",
+      ".compare-controls .diff-toggle",
+      ".compare-selection .remove-compare",
+      ".compare-table .compare-experiment-column a",
+    ]) {
+      expect(ruleBody(narrow, selector), selector).toMatch(
+        /min-height\s*:\s*44px/,
+      );
+    }
+    expect(ruleBody(narrow, ".compare-selection .remove-compare")).toMatch(
+      /min-width\s*:\s*44px/,
+    );
+    expect(
+      ruleBody(narrow, ".compare-table .compare-experiment-column a"),
+    ).toMatch(/min-width\s*:\s*44px/);
+
+    const selection = ruleBody(narrow, ".compare-selection");
+    expect(selection).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/,
+    );
+    expect(selection).toMatch(/align-items\s*:\s*start/);
+    const fields = ruleBody(narrow, ".field-groups");
+    expect(fields).toMatch(/width\s*:\s*100%/);
+    expect(fields).toMatch(/margin-left\s*:\s*0/);
+    expect(ruleBody(narrow, ".field-groups-menu")).toMatch(/left\s*:\s*0/);
+
+    expect(ruleBody(css, ".field-groups > summary")).toMatch(
+      /min-height\s*:\s*34px/,
+    );
+    expect(ruleBody(css, ".compare-selection")).toMatch(
+      /grid-template-columns\s*:\s*max-content\s+minmax\(0,\s*1fr\)\s+max-content/,
+    );
+  });
+
+  it("uses AA semantic text for small Compare labels and Baseline accents", () => {
+    const css = workspaceCss();
+    for (const selector of [
+      ".compare-table th",
+      ".compare-controls > label",
+      ".field-groups-menu label",
+      ".compare-table th small",
+      ".compare-selection li button",
+    ]) {
+      expect(ruleBody(css, selector), selector).toMatch(
+        /color\s*:\s*var\(--text-primary\)/,
+      );
+    }
+    expect(
+      ruleBody(css, ".compare-table .compare-experiment-column a"),
+    ).toMatch(/color\s*:\s*var\(--text-secondary\)/);
+    expect(
+      ruleBody(css, ".baseline-row > .compare-experiment-column a"),
+    ).toMatch(/color\s*:\s*var\(--accent-foreground\)/);
+    expect(ruleBody(css, ".baseline-chip")).toMatch(
+      /color\s*:\s*var\(--accent-foreground\)/,
+    );
+    expect(ruleBody(css, ".baseline-row > .neutral-delta")).toMatch(
+      /color\s*:\s*var\(--accent-foreground\)/,
+    );
+
+    const lightTokens = ruleBody(globals, ":root");
+    const darkTokens = ruleBody(globals, '[data-theme="dark"]');
+    const themes = [
+      {
+        name: "light",
+        tokens: lightTokens,
+        accentSubtle: hexColor(lightTokens, "--accent-subtle"),
+      },
+      {
+        name: "dark",
+        tokens: darkTokens,
+        accentSubtle: mixColors(
+          hexColor(darkTokens, "--accent"),
+          hexColor(darkTokens, "--surface"),
+          0.12,
+        ),
+      },
+    ];
+
+    for (const { name, tokens, accentSubtle } of themes) {
+      const primary = hexColor(tokens, "--text-primary");
+      const accentForeground = hexColor(tokens, "--accent-foreground");
+      expect(
+        contrastRatio(primary, hexColor(tokens, "--surface-subtle")),
+        `${name} small Compare label contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(accentForeground, accentSubtle),
+        `${name} Baseline identity contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(accentForeground, accentSubtle),
+        `${name} Baseline Delta contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(accentForeground, hexColor(tokens, "--surface-hover")),
+        `${name} Baseline chip contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("paints sticky identities with the correct normal and Baseline hover surface", () => {
+    const css = workspaceCss();
+    const columns = ":is(.compare-experiment-column, .compare-task-column, .compare-status-column)";
+    expect(ruleBody(
+      css,
+      `.compare-table tbody tr:not(.baseline-row):hover > ${columns}`,
+    )).toMatch(/background\s*:\s*var\(--surface-hover\)/);
+    expect(ruleBody(
+      css,
+      ".compare-table tbody .baseline-row:hover > :is(th, td)",
+    )).toMatch(/background\s*:\s*var\(--accent-subtle\)/);
+  });
+
   it("joins a selected strip to table, empty, and loading surfaces without a doubled seam", () => {
     const css = workspaceCss();
     const strip = ruleBody(css, ".selection-strip");

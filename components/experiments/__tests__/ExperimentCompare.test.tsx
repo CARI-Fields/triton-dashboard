@@ -269,6 +269,139 @@ describe("ExperimentCompare", () => {
     expect(await screen.findByRole("button", { name: "Share" })).toBeDefined();
   });
 
+  it("ignores an old Share resolution after the Baseline changes", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const copy = deferred<void>();
+    const writeText = vi.fn(() => copy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(screen.getByRole("button", { name: "Copying…" })).toBeDefined();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Compare Baseline" }), {
+      target: { value: "" },
+    });
+    expect(await screen.findByRole("button", { name: "Share" })).toBeDefined();
+
+    await act(async () => copy.resolve());
+    expect(screen.getByRole("button", { name: "Share" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("ignores an old Share rejection after the selected experiments change", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const copy = deferred<void>();
+    const writeText = vi.fn(() => copy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    const selection = await screen.findByLabelText("Selected experiments");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove EXP-0002" }));
+    expect(await screen.findByRole("button", { name: "Share" })).toBeDefined();
+    expect(within(selection).getAllByRole("listitem")).toHaveLength(1);
+
+    await act(async () => copy.reject(new Error("Old permission failure.")));
+    expect(screen.getByRole("button", { name: "Share" })).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a newer Share request authoritative when an old request settles first", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const oldCopy = deferred<void>();
+    const newCopy = deferred<void>();
+    const writeText = vi.fn()
+      .mockImplementationOnce(() => oldCopy.promise)
+      .mockImplementationOnce(() => newCopy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Compare Baseline" }), {
+      target: { value: "" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Share" }));
+    expect(writeText).toHaveBeenCalledTimes(2);
+
+    await act(async () => oldCopy.resolve());
+    const copying = screen.getByRole("button", { name: "Copying…" });
+    expect((copying as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(async () => newCopy.resolve());
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+  });
+
+  it("settles a pending Share request safely after unmount", async () => {
+    const experiment = row(1);
+    const copy = deferred<void>();
+    const writeText = vi.fn(() => copy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([experiment]);
+
+    const { unmount } = render(
+      <ExperimentCompare
+        initialSelection={{ ids: [experiment.id], baselineId: null }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(writeText).toHaveBeenCalledOnce();
+    unmount();
+
+    await act(async () => copy.resolve());
+    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("reports clipboard failure without changing the selection or its URL state", async () => {
     const baseline = row(1);
     const current = row(2);

@@ -295,7 +295,7 @@
 }
 .compare-table th {
   background: var(--surface-subtle);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 10.5px;
   font-weight: 600; letter-spacing: .04em; text-transform: none;
 }
@@ -916,12 +916,19 @@
   font-size: 17px;
 }
 .baseline-summary .eyebrow { margin-bottom: 4px; }
-.baseline-reference,
-.baseline-chip {
+.baseline-reference {
   padding: 3px 7px;
   border-radius: 4px;
   background: var(--surface-hover);
   color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.baseline-chip {
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--surface-hover);
+  color: var(--accent-foreground);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -1091,7 +1098,7 @@
 }
 .compare-controls > label {
   display: flex; flex-direction: column; gap: 4px;
-  color: var(--text-secondary); font-size: 11px;
+  color: var(--text-primary); font-size: 11px;
 }
 .compare-controls .diff-toggle {
   flex-direction: row; align-items: center; padding-bottom: 7px;
@@ -1134,7 +1141,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -1186,7 +1193,7 @@
   padding: 2px;
   border: 0;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   font: inherit;
   font-size: 11px;
@@ -1219,41 +1226,46 @@
 .compare-table th small {
   display: block;
   margin-top: 2px;
-  color: var(--text-tertiary);
+  color: var(--text-primary);
   font-weight: 400;
+}
+.compare-table th.neutral-delta {
+  color: var(--text-primary);
 }
 .compare-table .compare-identity {
   position: sticky;
   left: 0;
 }
-.compare-table .compare-experiment-column,
-.compare-table .compare-task-column,
-.compare-table .compare-status-column {
+.compare-table .compare-experiment-column {
   position: sticky;
   z-index: 2;
   background: var(--surface);
+  left: 0;
+  width: var(--compare-experiment-width);
+  min-width: var(--compare-experiment-width);
+}
+.compare-table .compare-task-column {
+  position: sticky;
+  z-index: 2;
+  left: var(--compare-experiment-width);
+  width: var(--compare-task-width);
+  min-width: var(--compare-task-width);
+  background: var(--surface);
+}
+.compare-table .compare-status-column {
+  position: sticky;
+  z-index: 2;
+  left: calc(var(--compare-experiment-width) + var(--compare-task-width));
+  width: var(--compare-status-width);
+  min-width: var(--compare-status-width);
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--border);
 }
 .compare-table thead .compare-experiment-column,
 .compare-table thead .compare-task-column,
 .compare-table thead .compare-status-column {
   z-index: 4;
   background: var(--surface-subtle);
-}
-.compare-table .compare-experiment-column {
-  left: 0;
-  width: var(--compare-experiment-width);
-  min-width: var(--compare-experiment-width);
-}
-.compare-table .compare-task-column {
-  left: var(--compare-experiment-width);
-  width: var(--compare-task-width);
-  min-width: var(--compare-task-width);
-}
-.compare-table .compare-status-column {
-  left: calc(var(--compare-experiment-width) + var(--compare-task-width));
-  width: var(--compare-status-width);
-  min-width: var(--compare-status-width);
-  box-shadow: 1px 0 0 var(--border);
 }
 .compare-table .compare-experiment-column > * {
   display: block; margin-bottom: 3px;
@@ -1263,6 +1275,12 @@
   font-family: var(--mono);
   font-size: 11px;
 }
+.baseline-row > .compare-experiment-column a {
+  color: var(--accent-foreground);
+}
+.baseline-row > .neutral-delta {
+  color: var(--accent-foreground);
+}
 .baseline-row > th,
 .baseline-row > td {
   background: var(--accent-subtle);
@@ -1270,6 +1288,12 @@
 .baseline-row > .compare-experiment-column,
 .baseline-row > .compare-task-column,
 .baseline-row > .compare-status-column {
+  background: var(--accent-subtle);
+}
+.compare-table tbody tr:not(.baseline-row):hover > :is(.compare-experiment-column, .compare-task-column, .compare-status-column) {
+  background: var(--surface-hover);
+}
+.compare-table tbody .baseline-row:hover > :is(th, td) {
   background: var(--accent-subtle);
 }
 
@@ -1414,17 +1438,70 @@ input[type="checkbox"]:focus-visible {
   .conflict-banner { flex-direction: column; }
   .compare-picker { width: 100%; flex-wrap: wrap; }
   .compare-picker select { min-width: 0; flex: 1 1 210px; }
-  .field-groups { width: 100%; margin-left: 0; }
-  .field-groups > summary { width: fit-content; }
-  .field-groups-menu { right: auto; left: 0; }
+}
+
+@media (max-width: 767px) {
+  .compare-page .btn {
+    min-height: 44px;
+  }
+  .compare-controls select {
+    min-height: 44px;
+  }
+  .field-groups {
+    width: 100%;
+    margin-left: 0;
+  }
+  .field-groups > summary {
+    width: fit-content;
+    min-height: 44px;
+  }
+  .field-groups-menu {
+    right: auto;
+    left: 0;
+  }
+  .field-groups-menu label {
+    min-height: 44px;
+  }
+  .compare-controls .diff-toggle {
+    min-height: 44px;
+  }
   .compare-selection {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }
-  .compare-selection > .btn { justify-self: start; }
-}
-
-@media (max-width: 767px) {
+  .compare-selection > .btn {
+    justify-self: start;
+  }
+  .compare-selection .remove-compare {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+  .compare-table {
+    --compare-experiment-width: 180px;
+  }
+  .compare-table .compare-experiment-column {
+    position: sticky;
+    left: 0;
+  }
+  .compare-table .compare-task-column {
+    position: static;
+    left: auto;
+    box-shadow: none;
+  }
+  .compare-table .compare-status-column {
+    position: static;
+    left: auto;
+    box-shadow: none;
+  }
+  .compare-table .compare-experiment-column a {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
   .experiment-detail-page .btn {
     min-height: 44px;
   }

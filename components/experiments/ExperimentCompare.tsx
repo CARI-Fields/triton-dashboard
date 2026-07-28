@@ -114,6 +114,7 @@ export default function ExperimentCompare({
   const loadedRef = useRef(false);
   const selectionRef = useRef(initial);
   const reloadVersion = useRef(0);
+  const shareVersion = useRef(0);
   const loadingRef = useRef(false);
   const [rows, setRows] = useState<ExperimentListRow[]>([]);
   const [selection, setSelection] = useState(initial);
@@ -128,21 +129,28 @@ export default function ExperimentCompare({
   const [error, setError] = useState("");
   routerRef.current = router;
 
+  const invalidateShare = useCallback(() => {
+    shareVersion.current += 1;
+    setShareState("idle");
+  }, []);
+
   const commitSelection = useCallback((
     requested: CompareSelection,
     replaceUrl: boolean,
     missingIds: string[] = [],
   ) => {
     const next = canonicalSelection(requested);
+    if (!sameSelection(selectionRef.current, next)) invalidateShare();
     selectionRef.current = next;
     setSelection((current) => sameSelection(current, next) ? current : next);
     setUnavailableIds(missingIds);
     if (replaceUrl) routerRef.current.replace(compareHref(next));
-  }, []);
+  }, [invalidateShare]);
 
   useEffect(() => {
     const next = canonicalSelection(initialSelection);
     if (!loadedRef.current) {
+      if (!sameSelection(selectionRef.current, next)) invalidateShare();
       selectionRef.current = next;
       setSelection((current) => sameSelection(current, next) ? current : next);
       setUnavailableIds([]);
@@ -154,7 +162,7 @@ export default function ExperimentCompare({
       reconciled.unavailableIds.length > 0,
       reconciled.unavailableIds,
     );
-  }, [commitSelection, initialSelection]);
+  }, [commitSelection, initialSelection, invalidateShare]);
 
   const reload = useCallback(async () => {
     const requestVersion = ++reloadVersion.current;
@@ -195,6 +203,10 @@ export default function ExperimentCompare({
     };
   }, [reload]);
 
+  useEffect(() => () => {
+    shareVersion.current += 1;
+  }, []);
+
   function retry() {
     if (!loadingRef.current) void reload();
   }
@@ -231,17 +243,14 @@ export default function ExperimentCompare({
     if (candidateId && !candidateAvailable) setCandidateId("");
   }, [candidateAvailable, candidateId]);
 
-  useEffect(() => {
-    setShareState("idle");
-  }, [selection.baselineId, selection.ids]);
-
   async function copyShareUrl() {
+    const requestVersion = ++shareVersion.current;
     setShareState("copying");
     try {
       await navigator.clipboard.writeText(window.location.href);
-      setShareState("copied");
+      if (requestVersion === shareVersion.current) setShareState("copied");
     } catch {
-      setShareState("error");
+      if (requestVersion === shareVersion.current) setShareState("error");
     }
   }
 

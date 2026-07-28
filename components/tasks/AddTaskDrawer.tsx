@@ -399,7 +399,9 @@ export default function AddTaskDrawer({
                     initials={member.initials}
                     size={24}
                   />
-                  <span>{member.name}</span>
+                  <span className="owner-option-name" title={member.name}>
+                    {member.name}
+                  </span>
                 </label>
               );
             }) : (

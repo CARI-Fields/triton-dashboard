@@ -14,6 +14,7 @@
   --text-secondary: #6f748c;
   --text-tertiary: #929292;
   --accent: #1e96eb;
+  --accent-foreground: #075f9f;
   --accent-subtle: #eaf5fd;
   --status-todo: #abb3bf;
   --status-progress: #1e96eb;
@@ -70,6 +71,7 @@
   --text-secondary: #929292;
   --text-tertiary: #7a7a7a;
   --accent: #1e96eb;
+  --accent-foreground: #8dcef7;
   --accent-subtle: rgb(30 150 235 / 12%);
   --status-todo-foreground: #c7ccd4;
   --status-progress-foreground: #8dcef7;

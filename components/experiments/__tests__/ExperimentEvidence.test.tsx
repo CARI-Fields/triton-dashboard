@@ -519,9 +519,11 @@ describe("experiment evidence", () => {
       />,
     );
 
-    expect(screen.getByRole("link", {
+    const openLink = screen.getByRole("link", {
       name: "Open Latency plot",
-    }).getAttribute("href")).toBe(attachment.url);
+    });
+    expect(openLink.getAttribute("href")).toBe(attachment.url);
+    expect(openLink.querySelector("img")?.getAttribute("alt")).toBe("");
     fireEvent.change(screen.getByLabelText("Caption for Latency plot"), {
       target: { value: "Updated caption" },
     });
@@ -539,7 +541,7 @@ describe("experiment evidence", () => {
       1,
     ));
     expect((await screen.findByRole("alert")).textContent).toBe("Upload failed.");
-    expect(screen.getAllByRole("img")).toHaveLength(1);
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
   });
 
   it("resynchronizes once when a later file in an upload batch fails", async () => {

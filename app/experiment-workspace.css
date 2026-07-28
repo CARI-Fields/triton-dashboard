@@ -407,7 +407,12 @@
   box-shadow: 0 0 0 2px var(--accent-subtle);
 }
 .baseline-confirmation {
-  padding: 10px 12px; border-radius: 5px; background: #f7f6f3; font-weight: 600;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .record-page.experiment-detail-page {
@@ -580,7 +585,7 @@
 }
 .section-anchors a:focus-visible {
   border-bottom-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-foreground);
   outline: none;
 }
 .section-anchors:has(~ #data:target) a[href="#data"],
@@ -591,7 +596,7 @@
 .section-anchors:has(~ #decision:target) a[href="#decision"],
 .section-anchors:has(~ #note:target) a[href="#note"] {
   border-bottom-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .experiment-section {
@@ -602,7 +607,7 @@
 }
 .section-anchors + .experiment-section { border-top: 0; }
 .experiment-section:target .experiment-section-heading h2 {
-  color: var(--accent);
+  color: var(--accent-foreground);
 }
 .experiment-section-heading {
   max-width: 760px;
@@ -841,7 +846,7 @@
   font-size: 11px;
   text-decoration: none;
 }
-.attachment-preview:hover { color: var(--accent); }
+.attachment-preview:hover { color: var(--accent-foreground); }
 .attachment-preview:focus-visible {
   border-radius: 5px;
   outline: none;
@@ -1241,4 +1246,48 @@ input[type="checkbox"]:focus-visible {
   .compare-picker { width: 100%; flex-wrap: wrap; }
   .compare-picker select { min-width: 0; flex: 1 1 210px; }
   .compare-groups { width: 100%; margin-left: 0; }
+}
+
+@media (max-width: 767px) {
+  .experiment-detail-page .btn {
+    min-height: 44px;
+  }
+  .experiment-detail-page .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .experiment-detail-page .action-menu > summary {
+    width: 44px;
+    height: 44px;
+  }
+  .experiment-detail-page .action-menu-panel .danger-subtle {
+    min-height: 44px;
+  }
+  .experiment-detail-page .featured-toggle {
+    width: 44px;
+    height: 44px;
+  }
+  .experiment-detail-page .attachment-preview {
+    min-height: 44px;
+  }
+  .experiment-detail-page input:not([type="checkbox"]):not([type="file"]) {
+    min-height: 44px;
+  }
+  .experiment-detail-page select {
+    min-height: 44px;
+  }
+  .experiment-detail-page textarea {
+    min-height: 44px;
+  }
+  .experiment-detail-page .stacked-field textarea,
+  .experiment-detail-page .decision-editor textarea {
+    min-height: 110px;
+  }
+  .experiment-detail-page .timeline-note-form textarea {
+    min-height: 76px;
+  }
+  .metric-edit-row {
+    grid-template-columns:
+      minmax(100px, 1fr) minmax(62px, 78px) 44px 44px;
+  }
 }

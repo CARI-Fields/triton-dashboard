@@ -96,6 +96,45 @@ describe("workspace visual contracts", () => {
     expect(globals).not.toMatch(/gradient\s*\(/i);
   });
 
+  it("uses an AA accent foreground for Experiment Record active text", () => {
+    const lightTokens = ruleBody(globals, ":root");
+    const darkTokens = ruleBody(globals, '[data-theme="dark"]');
+    expect(lightTokens).toMatch(/--accent-foreground\s*:\s*#075f9f/i);
+    expect(darkTokens).toMatch(/--accent-foreground\s*:\s*#8dcef7/i);
+
+    for (const { name, tokens } of [
+      { name: "light", tokens: lightTokens },
+      { name: "dark", tokens: darkTokens },
+    ]) {
+      expect(
+        contrastRatio(
+          hexColor(tokens, "--accent-foreground"),
+          hexColor(tokens, "--canvas"),
+        ),
+        `${name} accent foreground contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+
+    const css = workspaceCss();
+    for (const selector of [
+      ".section-anchors a:focus-visible",
+      '.section-anchors:has(~ #note:target) a[href="#note"]',
+      ".experiment-section:target .experiment-section-heading h2",
+      ".attachment-preview:hover",
+    ]) {
+      expect(ruleBody(css, selector), selector).toMatch(
+        /color\s*:\s*var\(--accent-foreground\)/,
+      );
+    }
+    expect(ruleBody(css, ".section-anchors a:focus-visible")).toMatch(
+      /border-bottom-color\s*:\s*var\(--accent\)/,
+    );
+    expect(ruleBody(
+      css,
+      '.section-anchors:has(~ #note:target) a[href="#note"]',
+    )).toMatch(/border-bottom-color\s*:\s*var\(--accent\)/);
+  });
+
   it("uses theme-specific semantic foregrounds and status colors for every pill", () => {
     const lightTokens = ruleBody(globals, ":root");
     const darkTokens = ruleBody(globals, '[data-theme="dark"]');
@@ -308,6 +347,54 @@ describe("workspace visual contracts", () => {
     const delta = ruleBody(workspaceCss(), ".neutral-delta");
     expect(delta).toMatch(/color\s*:\s*(#5f5e5b|var\(--ink-soft\))/i);
     expect(delta).not.toMatch(/good|crit|success|danger/i);
+  });
+
+  it("keeps every narrow Experiment Record control at least 44px", () => {
+    const css = workspaceCss();
+    expect(css).toMatch(/@media\s*\(max-width:\s*767px\)/);
+    const narrow = mediaBody(css, 767);
+    for (const selector of [
+      ".experiment-detail-page .btn",
+      ".experiment-detail-page .icon-btn",
+      ".experiment-detail-page .action-menu > summary",
+      ".experiment-detail-page .action-menu-panel .danger-subtle",
+      ".experiment-detail-page .featured-toggle",
+      ".experiment-detail-page .attachment-preview",
+      '.experiment-detail-page input:not([type="checkbox"]):not([type="file"])',
+      ".experiment-detail-page select",
+      ".experiment-detail-page textarea",
+    ]) {
+      expect(ruleBody(narrow, selector), selector).toMatch(
+        /(?:min-)?height\s*:\s*44px/,
+      );
+    }
+    expect(ruleBody(narrow, ".experiment-detail-page .icon-btn")).toMatch(
+      /min-width\s*:\s*44px/,
+    );
+    expect(ruleBody(
+      narrow,
+      ".experiment-detail-page .action-menu > summary",
+    )).toMatch(/width\s*:\s*44px/);
+    expect(ruleBody(narrow, ".experiment-detail-page .featured-toggle"))
+      .toMatch(/width\s*:\s*44px/);
+    expect(ruleBody(narrow, ".metric-edit-row")).toMatch(
+      /grid-template-columns\s*:[^;]*44px\s+44px/,
+    );
+  });
+
+  it("keeps Duplicate baseline confirmation semantic in both themes", () => {
+    const confirmation = ruleBody(
+      workspaceCss(),
+      ".baseline-confirmation",
+    );
+    expect(confirmation).toMatch(
+      /border\s*:\s*1px\s+solid\s+var\(--border\)/,
+    );
+    expect(confirmation).toMatch(
+      /background\s*:\s*var\(--surface-subtle\)/,
+    );
+    expect(confirmation).toMatch(/color\s*:\s*var\(--text-primary\)/);
+    expect(confirmation).not.toMatch(/#[0-9a-f]{3,8}/i);
   });
 
   it("stacks editor forms and lets narrow save actions wrap", () => {

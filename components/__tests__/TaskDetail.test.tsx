@@ -373,9 +373,9 @@ describe("TaskDetail orchestration", () => {
 
     render(<TaskDetail id={taskA.id} />);
 
-    expect(
-      await screen.findByRole("img", { name: "Task attachment" }),
-    ).toBeDefined();
+    expect(await screen.findByRole("link", {
+      name: "Open Task attachment",
+    })).toBeDefined();
     expect(supabaseState.queryTraces).toContainEqual({
       table: "attachments",
       operation: "select",
@@ -1243,7 +1243,7 @@ describe("TaskDetail orchestration", () => {
   it("refreshes only Task-level attachment traffic and clears IDs on visits", async () => {
     enqueueLoad(taskA, [], [], [member], [taskAttachment]);
     const view = render(<TaskDetail id={taskA.id} />);
-    await screen.findByRole("img", { name: "Task attachment" });
+    await screen.findByRole("link", { name: "Open Task attachment" });
     const taskQueries = () => supabaseState.fromCalls.filter(
       (table) => table === "tasks",
     ).length;

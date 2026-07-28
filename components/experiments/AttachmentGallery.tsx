@@ -101,7 +101,7 @@ function AttachmentFigure({
       >
         <img
           src={attachment.url}
-          alt={attachmentName}
+          alt=""
           loading="lazy"
         />
         <span aria-hidden="true">Open</span>

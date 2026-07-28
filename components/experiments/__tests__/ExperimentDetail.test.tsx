@@ -243,11 +243,14 @@ describe("ExperimentDetail orchestration", () => {
   });
 
   it("renders the approved document record layout", async () => {
-    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(experiment()));
+    const current = experiment();
+    const saveRequest = deferred<ExperimentUpdateResult>();
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(current));
+    vi.mocked(updateExperiment).mockReturnValue(saveRequest.promise);
 
-    render(<ExperimentDetail id={experiment().id} />);
+    render(<ExperimentDetail id={current.id} />);
 
-    await screen.findByLabelText("Experiment Name");
+    const nameInput = await screen.findByLabelText("Experiment Name");
     expect(screen.getByRole("navigation", { name: "Experiment sections" }))
       .toBeDefined();
     for (const [name, id] of [
@@ -280,12 +283,52 @@ describe("ExperimentDetail orchestration", () => {
       name: "Delete experiment",
     });
     await waitFor(() => expect(document.activeElement).toBe(deleteAction));
+    for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) {
+      fireEvent.keyDown(deleteAction, { key });
+      expect(document.activeElement).toBe(deleteAction);
+    }
     fireEvent.keyDown(deleteAction, { key: "Escape" });
     expect(document.activeElement).toBe(moreActions);
     expect(moreActions.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("menuitem", {
       name: "Delete experiment",
     })).toBeNull();
+
+    fireEvent.change(nameInput, {
+      target: { value: "Pending save" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateExperiment).toHaveBeenCalledOnce());
+    const disabledMoreActions = screen.getByRole("button", {
+      name: "More experiment actions",
+    });
+    disabledMoreActions.focus();
+    fireEvent.click(disabledMoreActions);
+    const disabledDeleteAction = screen.getByRole("menuitem", {
+      name: "Delete experiment",
+    }) as HTMLButtonElement;
+    expect(disabledDeleteAction.disabled).toBe(true);
+    expect(document.activeElement).toBe(disabledMoreActions);
+    for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) {
+      fireEvent.keyDown(disabledMoreActions, { key });
+      expect(document.activeElement).toBe(disabledMoreActions);
+    }
+    fireEvent.keyDown(disabledMoreActions, { key: "Escape" });
+    expect(document.activeElement).toBe(disabledMoreActions);
+    expect(disabledMoreActions.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menuitem", {
+      name: "Delete experiment",
+    })).toBeNull();
+
+    await act(async () => {
+      saveRequest.resolve({
+        ok: true,
+        experiment: experiment({
+          name: "Pending save",
+          updated_at: "2026-07-24T02:00:00.000Z",
+        }),
+      });
+    });
   });
 
   it("shows a real load error and retries the bundle request", async () => {

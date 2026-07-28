@@ -1,7 +1,7 @@
 # Create Task Owner List Design
 
 **Date:** 2026-07-28
-**Status:** Approved concept; awaiting written-spec review
+**Status:** Approved and implemented
 
 ## Goal
 

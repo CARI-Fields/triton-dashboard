@@ -170,6 +170,22 @@ describe("AddTaskDrawer", () => {
     expect(screen.queryByText(/Module|Foundation|Pipeline|Assignee/i)).toBeNull();
   });
 
+  it("submits every selected Owner", async () => {
+    const create = vi.fn().mockResolvedValue(undefined);
+    renderDrawer({ onCreate: create });
+
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Pair owner coverage" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Maya" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Yubai" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ owners: ["Maya", "Yubai"] }),
+    ));
+  });
+
   it("preserves the full accessible name for a visually truncatable Owner", () => {
     const longName = "Alexandria Cassandra Montgomery-Wellington";
     render(
@@ -190,6 +206,7 @@ describe("AddTaskDrawer", () => {
     );
 
     const checkbox = screen.getByRole("checkbox", { name: longName });
+    expect(checkbox.getAttribute("aria-label")).toBe(longName);
     const name = checkbox.closest(".owner-option")
       ?.querySelector(".owner-option-name");
     expect(name?.textContent).toBe(longName);

@@ -47,13 +47,18 @@ export default function ExperimentTable({
         <tbody>
           {rows.map((row) => {
             const displayId = formatExperimentId(row.experiment_no);
+            const selected = selectedIds.has(row.id);
             return (
-              <tr key={row.id}>
+              <tr
+                key={row.id}
+                aria-selected={selectable ? selected : undefined}
+                className={selected ? "selected-row" : undefined}
+              >
                 {selectable && (
                   <td className="select-column">
                     <input
                       type="checkbox"
-                      checked={selectedIds.has(row.id)}
+                      checked={selected}
                       onChange={() => onToggle?.(row.id)}
                       aria-label={`Select ${displayId}`}
                     />

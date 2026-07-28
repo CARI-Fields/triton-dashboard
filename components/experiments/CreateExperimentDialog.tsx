@@ -90,7 +90,7 @@ export default function CreateExperimentDialog({
     >
       <section
         ref={dialogRef}
-        className="experiment-dialog"
+        className="experiment-dialog create-experiment-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-experiment-title"

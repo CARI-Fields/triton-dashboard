@@ -116,9 +116,68 @@ describe("ExperimentsDatabase", () => {
       tasks: [task],
       members: [member],
     });
+    vi.mocked(watchExperimentIndex).mockReturnValue(() => undefined);
   });
 
   afterEach(cleanup);
+
+  it("renders the database PageHeader, exact saved views, and existing table columns", async () => {
+    render(<ExperimentsDatabase />);
+
+    const heading = await screen.findByRole("heading", { name: "Experiments" });
+    expect(heading.closest(".page-header")).not.toBeNull();
+    expect(screen.getByText("Research database")).toBeDefined();
+
+    const savedViews = within(
+      screen.getByLabelText("Experiment saved views"),
+    ).getAllByRole("button");
+    expect(savedViews.map((view) => view.textContent)).toEqual([
+      "All",
+      "Running",
+      "Blocked",
+      "Needs Decision",
+      "Recently Completed",
+    ]);
+    expect(screen.getByRole("button", { name: "All" })
+      .getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Archived" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Featured metrics" }))
+      .toBeDefined();
+  });
+
+  it("shows the filtered result count in the compact toolbar", async () => {
+    render(<ExperimentsDatabase />);
+    await screen.findByRole("link", { name: "Guardrail run" });
+
+    expect(screen.getByText("2 experiments")).toBeDefined();
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search experiments" }),
+      { target: { value: "Guardrail" } },
+    );
+    expect(screen.getByText("1 experiments")).toBeDefined();
+  });
+
+  it("shows selected actions and clears the selected rows", async () => {
+    render(<ExperimentsDatabase />);
+    await screen.findByRole("link", { name: "Guardrail run" });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0001" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0002" }));
+
+    const selection = screen.getByRole("status");
+    expect(within(selection).getByText("2 selected")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Compare selected (2)" })).toBeDefined();
+    const clear = within(selection).getByRole("button", { name: "Clear selection" });
+    expect(clear).toBeDefined();
+
+    fireEvent.click(clear);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect((screen.getByRole("checkbox", {
+      name: "Select EXP-0001",
+    }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole("link", { name: "Compare selected (0)" })
+      .getAttribute("aria-disabled")).toBe("true");
+  });
 
   it("loads repository rows, refreshes from Realtime, and unsubscribes", async () => {
     let refresh: () => void = () => undefined;

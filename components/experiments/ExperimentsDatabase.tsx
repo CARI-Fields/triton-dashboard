@@ -18,6 +18,7 @@ import { serializeCompareSelection } from "@/lib/experiments/compare-url";
 import CreateExperimentDialog from "@/components/experiments/CreateExperimentDialog";
 import ExperimentFilters from "@/components/experiments/ExperimentFilters";
 import ExperimentTable from "@/components/experiments/ExperimentTable";
+import PageHeader from "@/components/ui/PageHeader";
 
 export default function ExperimentsDatabase() {
   const router = useRouter();
@@ -98,36 +99,49 @@ export default function ExperimentsDatabase() {
   });
 
   return (
-    <div className="workspace-page">
-      <header className="workspace-page-header">
-        <div>
-          <p className="eyebrow">Research database</p>
-          <h1>Experiments</h1>
-          <p>Manual run context, evidence, and decisions across every Task.</p>
-        </div>
-        <div className="workspace-actions">
-          <Link
-            className={`btn ${canCompare ? "" : "disabled"}`}
-            aria-disabled={!canCompare}
-            href={canCompare ? `/experiments/compare?${compareQuery}` : "/experiments"}
-            onClick={(event) => {
-              if (!canCompare) event.preventDefault();
-            }}
-          >
-            Compare selected ({selectedIds.size})
-          </Link>
-          <button type="button" className="btn primary" onClick={() => setCreateOpen(true)}>
-            New experiment
-          </button>
-        </div>
-      </header>
+    <div className="workspace-page experiments-database">
+      <PageHeader
+        eyebrow="Research database"
+        title="Experiments"
+        description="Manual run context, evidence, and decisions across every Task."
+        actions={(
+          <>
+            <Link
+              className={`btn ${canCompare ? "" : "disabled"}`}
+              aria-disabled={!canCompare}
+              href={canCompare ? `/experiments/compare?${compareQuery}` : "/experiments"}
+              onClick={(event) => {
+                if (!canCompare) event.preventDefault();
+              }}
+            >
+              Compare selected ({selectedIds.size})
+            </Link>
+            <button type="button" className="btn primary" onClick={() => setCreateOpen(true)}>
+              New experiment
+            </button>
+          </>
+        )}
+      />
 
-      <ExperimentFilters rows={rows} value={filters} onChange={setFilters} />
+      <ExperimentFilters
+        rows={rows}
+        value={filters}
+        resultCount={visibleRows.length}
+        onChange={setFilters}
+      />
       {error && (
         <div className="error-banner" role="alert">
           <span>{error}</span>
           <button type="button" className="btn" onClick={retry} disabled={loading}>
             {loading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
+      {selectedIds.size > 0 && (
+        <div className="selection-strip" role="status">
+          <strong>{selectedIds.size} selected</strong>
+          <button type="button" onClick={() => setSelectedIds(new Set())}>
+            Clear selection
           </button>
         </div>
       )}

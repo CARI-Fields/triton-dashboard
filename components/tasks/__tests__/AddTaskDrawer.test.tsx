@@ -306,6 +306,32 @@ describe("AddTaskDrawer", () => {
     expect(onCreateOwner).toHaveBeenCalledWith("Nova");
   });
 
+  it("creates a Team Owner with Enter without submitting the task", async () => {
+    const created: Member = {
+      id: "member-nova",
+      name: "Nova",
+      initials: "N",
+      position: 2,
+      created_at: "2026-07-28T00:00:00.000Z",
+    };
+    const onCreateOwner = vi.fn().mockResolvedValue(created);
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    renderDrawer({ onCreate, onCreateOwner });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("New owner name"), {
+      key: "Enter",
+    });
+
+    expect(await screen.findByRole("button", { name: "Remove Nova" }))
+      .toBeDefined();
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Create task" })).toBeDefined();
+  });
+
   it("creates and automatically selects a Type without leaving the task draft", async () => {
     const create = vi.fn().mockResolvedValue(undefined);
     const createType = vi.fn().mockResolvedValue("type-documentation");

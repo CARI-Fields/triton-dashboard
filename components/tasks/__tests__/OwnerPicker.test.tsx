@@ -70,6 +70,43 @@ describe("member identity helpers", () => {
 });
 
 describe("OwnerPicker", () => {
+  it("creates with Enter inside an ancestor form without submitting it", async () => {
+    const nova: Member = {
+      ...theo,
+      id: "member-nova",
+      name: "Nova",
+      initials: "N",
+    };
+    const onCreateOwner = vi.fn().mockResolvedValue(nova);
+    const onSubmit = vi.fn();
+    const { container } = render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <Harness
+          initialOwners={[]}
+          onCreateOwner={onCreateOwner}
+        />
+      </form>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    expect(container.querySelectorAll("form")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("New owner name"), {
+      key: "Enter",
+    });
+
+    await waitFor(() => expect(onCreateOwner).toHaveBeenCalledOnce());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Remove Nova" })).toBeDefined();
+  });
+
   it("shows selected Owners only until Add owner opens", () => {
     render(<Harness />);
     expect(screen.getByText("Maya")).toBeDefined();

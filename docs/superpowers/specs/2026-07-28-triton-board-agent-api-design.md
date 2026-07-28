@@ -187,7 +187,7 @@ api_key.member_id
 Task 协作范围意味着：
 
 - 可以修改该 Task 的可写字段。
-- 可以创建该 Task 下的 Experiment。
+- 可以创建该 Task 下的 Experiment；服务端把 Owner 固定为 Key 的 `member_id`。
 - 可以修改该 Task 下的所有 Experiment，不受 Experiment Owner 限制。
 - 可以管理该 Task 下的 Attachment 和 Activity。
 
@@ -350,7 +350,7 @@ Experiment 查询支持 `task_id`、`owner_id`、`status` 和 `updated_after`。
 | 方法 | 路径 | 行为 |
 |---|---|---|
 | `PATCH` | `/tasks/{id}` | 修改 Task 可写字段 |
-| `POST` | `/tasks/{id}/experiments` | 创建 Experiment |
+| `POST` | `/tasks/{id}/experiments` | 创建 Experiment，Owner 固定为 Key 对应 Member |
 | `PATCH` | `/experiments/{id}` | 修改 Experiment 可写字段 |
 | `POST` | `/tasks/{id}/activity` | 追加 Activity |
 | `POST` | `/experiments/{id}/attachments` | 上传附件 |
@@ -452,6 +452,10 @@ body 结构：
 - `updated_at`
 
 `started_at` 和 `completed_at` 继续由 Experiment 状态触发器维护。
+
+创建 Experiment 时，请求 body 不接受 `owner_id` 或 `task_id`。`task_id` 来自 URL，
+`owner_id` 由服务端设置为当前 Key 的 `member_id`。创建后这两个字段都不能通过
+Agent API 修改。
 
 ## 11. 并发控制
 
@@ -700,6 +704,7 @@ Skill 明确要求：
 - Bruce Key 可以修改 Bruce-only Task。
 - Bruce Key 不能修改 Alice-only Task。
 - Bruce Key 可以修改共同 Task 下 Alice Owner 的 Experiment。
+- Bruce Key 创建的 Experiment 自动以 Bruce 为 Owner。
 - 从共同 Task 移除 Bruce 后，Bruce Key 立即失去写权限。
 - 缺少相应 scope 时，即使参与 Task 也不能写。
 

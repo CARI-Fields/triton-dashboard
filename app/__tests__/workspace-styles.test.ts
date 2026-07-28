@@ -246,6 +246,7 @@ describe("workspace visual contracts", () => {
       && /(?:input|select|textarea)/.test(selector)
       && /box-shadow\s*:/.test(body)
       && !selector.includes(".featured-toggle input")
+      && !selector.includes(".experiment-select-control input")
     ));
 
     expect(fieldFocusRules.length).toBeGreaterThanOrEqual(9);
@@ -580,6 +581,38 @@ describe("workspace visual contracts", () => {
     const identity = ruleBody(css, ".compare-table .compare-identity");
     expect(identity).toMatch(/position\s*:\s*sticky/);
     expect(identity).toMatch(/left\s*:\s*0/);
+  });
+
+  it("keeps a compact Experiment checkbox inside a 44px hit area with a focus ring", () => {
+    const css = workspaceCss();
+    const column = ruleBody(css, ".experiment-table .select-column");
+    expect(column).toMatch(/width\s*:\s*44px/);
+    expect(column).toMatch(/min-width\s*:\s*44px/);
+    expect(column).toMatch(/padding\s*:\s*0/);
+
+    const target = ruleBody(css, ".experiment-select-control");
+    expect(target).toMatch(/display\s*:\s*inline-grid/);
+    expect(target).toMatch(/width\s*:\s*44px/);
+    expect(target).toMatch(/height\s*:\s*44px/);
+
+    const glyph = ruleBody(css, ".experiment-select-control input");
+    expect(glyph).toMatch(/width\s*:\s*15px/);
+    expect(glyph).toMatch(/height\s*:\s*15px/);
+    expect(glyph).toMatch(/min-width\s*:\s*15px/);
+    expect(glyph).toMatch(/min-height\s*:\s*15px/);
+
+    expect(
+      ruleBody(
+        css,
+        ".experiment-select-control:has(input:focus-visible)",
+      ),
+    ).toMatch(/box-shadow\s*:\s*var\(--focus-ring\)/);
+    const glyphFocus = ruleBody(
+      css,
+      ".experiment-table .experiment-select-control input:focus-visible",
+    );
+    expect(glyphFocus).toMatch(/outline\s*:\s*0/);
+    expect(glyphFocus).toMatch(/box-shadow\s*:\s*none/);
   });
 
   it("contains visually hidden filter labels inside the horizontal toolbar", () => {

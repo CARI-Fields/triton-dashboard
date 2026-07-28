@@ -117,6 +117,29 @@ describe("ExperimentTable", () => {
     expect(onToggle).toHaveBeenCalledWith(row.id);
   });
 
+  it("toggles selection from the checkbox's semantic hit-area wrapper", () => {
+    const onToggle = vi.fn();
+    render(
+      <ExperimentTable
+        rows={[row]}
+        showTask={false}
+        selectable
+        onToggle={onToggle}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Select EXP-0007",
+    });
+    const hitArea = checkbox.parentElement;
+    expect(hitArea?.tagName).toBe("LABEL");
+    expect(hitArea?.classList.contains("experiment-select-control")).toBe(true);
+
+    fireEvent.click(hitArea as HTMLElement);
+    expect(onToggle).toHaveBeenCalledOnce();
+    expect(onToggle).toHaveBeenCalledWith(row.id);
+  });
+
   it("omits the task column in task-scoped mode and uses empty states for missing relations", () => {
     render(<ExperimentTable rows={[{ ...row, task: null }]} showTask={false} selectable={false} />);
     expect(screen.queryByRole("columnheader", { name: "Task" })).toBeNull();

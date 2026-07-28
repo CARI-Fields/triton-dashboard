@@ -321,12 +321,36 @@
 .experiment-table tbody tr.selected-row:hover {
   background: var(--accent-subtle);
 }
-.select-column { width: 36px; text-align: center; }
-.select-column input {
+.experiment-table .select-column {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  text-align: center;
+}
+.experiment-select-control {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.experiment-select-control input {
   width: 15px;
   height: 15px;
+  min-width: 15px;
+  min-height: 15px;
   margin: 0;
   accent-color: var(--accent);
+  cursor: pointer;
+}
+.experiment-select-control:has(input:focus-visible) {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.experiment-table .experiment-select-control input:focus-visible {
+  outline: 0;
+  box-shadow: none;
 }
 .experiment-id-cell,
 .experiment-display-id,

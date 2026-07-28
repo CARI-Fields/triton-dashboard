@@ -69,12 +69,14 @@ export default function ExperimentTable({
               >
                 {selectable && (
                   <td className="select-column">
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => onToggle?.(row.id)}
-                      aria-label={`Select ${displayId}`}
-                    />
+                    <label className="experiment-select-control">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => onToggle?.(row.id)}
+                        aria-label={`Select ${displayId}`}
+                      />
+                    </label>
                   </td>
                 )}
                 <td className="experiment-id-cell">{displayId}</td>

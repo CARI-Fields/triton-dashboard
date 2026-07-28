@@ -10,7 +10,11 @@ export default function ExperimentSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="experiment-section" aria-labelledby={`${id}-title`}>
+    <section
+      id={id}
+      className="experiment-section"
+      aria-labelledby={`${id}-title`}
+    >
       <div className="experiment-section-heading">
         <h2 id={`${id}-title`}>{title}</h2>
         <p>{description}</p>

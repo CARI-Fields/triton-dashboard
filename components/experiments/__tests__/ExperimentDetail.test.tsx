@@ -40,6 +40,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/experiments/repository", () => ({
+  addExperimentTimelineNote: vi.fn(),
   deleteExperiment: vi.fn(),
   loadExperimentBundle: vi.fn(),
   updateExperiment: vi.fn(),
@@ -107,18 +108,8 @@ vi.mock("@/components/experiments/DuplicateExperimentDialog", () => ({
 vi.mock("@/components/experiments/EnvironmentEditor", () => ({
   default: () => null,
 }));
-vi.mock("@/components/experiments/ExperimentSection", () => ({
-  default: ({ children, title }: { children: React.ReactNode; title: string }) => (
-    <section aria-label={title}>{children}</section>
-  ),
-}));
 vi.mock("@/components/experiments/ExperimentStatusBadge", () => ({
   default: ({ status }: { status: string }) => <span>{status}</span>,
-}));
-vi.mock("@/components/experiments/ExperimentTimeline", () => ({
-  default: ({ onChanged }: { onChanged: () => void }) => (
-    <button type="button" onClick={onChanged}>Refresh timeline</button>
-  ),
 }));
 vi.mock("@/components/experiments/ObjectEditor", () => ({
   default: () => null,
@@ -229,6 +220,15 @@ function DetailLinkNavigationHarness({ current }: { current: Experiment }) {
   );
 }
 
+function getDeleteExperimentAction(): HTMLButtonElement {
+  fireEvent.click(screen.getByRole("button", {
+    name: "More experiment actions",
+  }));
+  return screen.getByRole("menuitem", {
+    name: "Delete experiment",
+  }) as HTMLButtonElement;
+}
+
 describe("ExperimentDetail orchestration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -240,6 +240,52 @@ describe("ExperimentDetail orchestration", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("renders the approved document record layout", async () => {
+    vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(experiment()));
+
+    render(<ExperimentDetail id={experiment().id} />);
+
+    await screen.findByLabelText("Experiment Name");
+    expect(screen.getByRole("navigation", { name: "Experiment sections" }))
+      .toBeDefined();
+    for (const [name, id] of [
+      ["Data", "data"],
+      ["Object", "object"],
+      ["Environment", "environment"],
+      ["Config", "config"],
+      ["Result", "result"],
+      ["Decision", "decision"],
+      ["Note", "note"],
+    ]) {
+      expect(screen.getByRole("link", { name }).getAttribute("href"))
+        .toBe(`#${id}`);
+      expect(document.getElementById(id)?.getAttribute("aria-labelledby"))
+        .toBe(`${id}-title`);
+    }
+    expect(screen.getByRole("complementary", {
+      name: "Experiment activity",
+    })).toBeDefined();
+    expect(screen.getByText(/Saved|Unsaved changes/)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    const moreActions = screen.getByRole("button", {
+      name: "More experiment actions",
+    });
+    expect(moreActions.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(moreActions);
+    expect(screen.getByRole("menu")).toBeDefined();
+    expect(moreActions.getAttribute("aria-expanded")).toBe("true");
+    const deleteAction = screen.getByRole("menuitem", {
+      name: "Delete experiment",
+    });
+    await waitFor(() => expect(document.activeElement).toBe(deleteAction));
+    fireEvent.keyDown(deleteAction, { key: "Escape" });
+    expect(document.activeElement).toBe(moreActions);
+    expect(moreActions.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menuitem", {
+      name: "Delete experiment",
+    })).toBeNull();
   });
 
   it("shows a real load error and retries the bundle request", async () => {
@@ -391,7 +437,7 @@ describe("ExperimentDetail orchestration", () => {
     expect(sessionStorage.getItem(draftStorageKey(current.id))).toBeNull();
 
     fireEvent.change(name, { target: { value: "Delete me" } });
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(getDeleteExperimentAction());
     await waitFor(() => expect(deleteExperiment).toHaveBeenCalledOnce());
     expect(sessionStorage.getItem(draftStorageKey(current.id))).toBeNull();
   });
@@ -1126,7 +1172,7 @@ describe("ExperimentDetail orchestration", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(updateExperiment).toHaveBeenCalledTimes(1));
-    const deleteButton = screen.getByRole("button", { name: "Delete" });
+    const deleteButton = getDeleteExperimentAction();
     expect((deleteButton as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(deleteButton);
     expect(deleteExperiment).not.toHaveBeenCalled();
@@ -1152,7 +1198,7 @@ describe("ExperimentDetail orchestration", () => {
     fireEvent.change(await screen.findByLabelText("Experiment Name"), {
       target: { value: "Dirty before delete" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(getDeleteExperimentAction());
     await waitFor(() => expect(deleteExperiment).toHaveBeenCalledTimes(1));
     const saveButton = screen.getByRole("button", { name: "Save changes" });
     expect((saveButton as HTMLButtonElement).disabled).toBe(true);
@@ -1172,7 +1218,7 @@ describe("ExperimentDetail orchestration", () => {
     render(<ExperimentDetail id={experiment().id} />);
 
     await screen.findByLabelText("Experiment Name");
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(getDeleteExperimentAction());
     act(() => testState.experimentChanged?.());
     expect(await screen.findByText("Experiment not found. It may have been deleted."))
       .toBeDefined();

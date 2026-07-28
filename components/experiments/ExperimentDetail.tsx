@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import type { Experiment } from "@/lib/types";
 import { fmtDate } from "@/lib/time";
 import MarkdownField from "@/components/MarkdownField";
+import PageHeader from "@/components/ui/PageHeader";
 import {
   clearSessionExperimentDraft,
   editableExperimentPatch,
@@ -72,6 +73,111 @@ function isSameExperimentRevision(
   right: Experiment,
 ): boolean {
   return left.id === right.id && left.updated_at === right.updated_at;
+}
+
+const EXPERIMENT_SECTION_LINKS = [
+  { id: "data", label: "Data" },
+  { id: "object", label: "Object" },
+  { id: "environment", label: "Environment" },
+  { id: "config", label: "Config" },
+  { id: "result", label: "Result" },
+  { id: "decision", label: "Decision" },
+  { id: "note", label: "Note" },
+] as const;
+
+function ExperimentActionMenu({
+  deleting,
+  disabled,
+  onDelete,
+}: {
+  deleting: boolean;
+  disabled: boolean;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <details
+      className="action-menu"
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+        if (!event.currentTarget.open) return;
+        event.currentTarget
+          .querySelector<HTMLButtonElement>(
+            '[role="menuitem"]:not(:disabled)',
+          )
+          ?.focus();
+      }}
+      onKeyDown={(event) => {
+        const menu = event.currentTarget;
+        if (event.key === "Escape" && menu.open) {
+          event.preventDefault();
+          event.stopPropagation();
+          menu.open = false;
+          setOpen(false);
+          menu.querySelector<HTMLElement>("summary")?.focus();
+          return;
+        }
+        if (
+          !menu.open ||
+          !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
+        ) {
+          return;
+        }
+        const items = [
+          ...menu.querySelectorAll<HTMLButtonElement>(
+            '[role="menuitem"]:not(:disabled)',
+          ),
+        ];
+        if (items.length === 0) return;
+        event.preventDefault();
+        const currentIndex = items.indexOf(
+          document.activeElement as HTMLButtonElement,
+        );
+        const nextIndex = event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? items.length - 1
+            : event.key === "ArrowDown"
+              ? currentIndex < 0
+                ? 0
+                : (currentIndex + 1) % items.length
+              : currentIndex < 0
+                ? items.length - 1
+                : (currentIndex - 1 + items.length) % items.length;
+        items[nextIndex]?.focus();
+      }}
+    >
+      <summary
+        role="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More experiment actions"
+        onClick={(event) => {
+          const menu = event.currentTarget.parentElement as HTMLDetailsElement;
+          setOpen(!menu.open);
+        }}
+      >
+        •••
+      </summary>
+      <div
+        className="action-menu-panel"
+        role="menu"
+        aria-hidden={!open}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          className="danger-subtle"
+          disabled={disabled}
+          onClick={onDelete}
+        >
+          {deleting ? "Deleting…" : "Delete experiment"}
+        </button>
+      </div>
+    </details>
+  );
 }
 
 export default function ExperimentDetail({ id }: { id: string }) {
@@ -743,8 +849,8 @@ export default function ExperimentDetail({ id }: { id: string }) {
   const taskHref = bundle.task ? `/task/${bundle.task.id}` : "/experiments";
 
   return (
-    <div className="workspace-page experiment-detail-page">
-      <div className="experiment-main-column">
+    <div className="record-page experiment-detail-page">
+      <div className="record-main experiment-main-column">
         <Link href={taskHref} className="back-link">
           ← {bundle.task?.title ?? "Experiments"}
         </Link>
@@ -797,64 +903,62 @@ export default function ExperimentDetail({ id }: { id: string }) {
           </div>
         )}
 
-        <header className="experiment-detail-header">
-          <div className="experiment-title-line">
-            <span className="experiment-display-id">
-              {formatExperimentId(draft.experiment_no)}
-            </span>
+        <PageHeader
+          eyebrow={formatExperimentId(draft.experiment_no)}
+          title={
             <input
               className="experiment-title-input"
               aria-label="Experiment Name"
               value={draft.name}
               onChange={(event) => patchDraft({ name: event.target.value })}
             />
-          </div>
-          <div className="workspace-actions">
-            <Link
-              className={`btn ${compareBlocked ? "disabled" : ""}`}
-              aria-disabled={compareBlocked}
-              title={reloadingLatest
-                ? "Wait for the latest saved data before comparing."
-                : hasLocalChanges
-                  ? "Finish and save changes before comparing."
-                  : "Compare saved data."}
-              href={compareBlocked
-                ? `/experiments/${draft.id}`
-                : `/experiments/compare?${compareQuery}`}
-              onClick={(event) => {
-                if (compareBlocked) event.preventDefault();
-              }}
-            >
-              Compare
-            </Link>
-            <button
-              type="button"
-              className="btn"
-              disabled={
-                hasLocalChanges ||
-                saving ||
-                deleting ||
-                reloadingLatest ||
-                Boolean(remoteConflict) ||
-                remoteDeleted
-              }
-              title={hasLocalChanges
-                ? "Finish and save changes before duplicating."
-                : "Duplicate saved context."}
-              onClick={() => setDuplicateOpen(true)}
-            >
-              Duplicate
-            </button>
-            <button
-              type="button"
-              className="btn danger-subtle"
-              disabled={saving || deleting || reloadingLatest}
-              onClick={() => void removeExperiment()}
-            >
-              {deleting ? "Deleting…" : "Delete"}
-            </button>
-          </div>
-        </header>
+          }
+          actions={
+            <>
+              <Link
+                className={`btn ${compareBlocked ? "disabled" : ""}`}
+                aria-disabled={compareBlocked}
+                title={reloadingLatest
+                  ? "Wait for the latest saved data before comparing."
+                  : hasLocalChanges
+                    ? "Finish and save changes before comparing."
+                    : "Compare saved data."}
+                href={compareBlocked
+                  ? `/experiments/${draft.id}`
+                  : `/experiments/compare?${compareQuery}`}
+                onClick={(event) => {
+                  if (compareBlocked) event.preventDefault();
+                }}
+              >
+                Compare
+              </Link>
+              <button
+                type="button"
+                className="btn"
+                disabled={
+                  hasLocalChanges
+                  || saving
+                  || deleting
+                  || reloadingLatest
+                  || Boolean(remoteConflict)
+                  || remoteDeleted
+                }
+                title={hasLocalChanges
+                  ? "Finish and save changes before duplicating."
+                  : "Duplicate saved context."}
+                onClick={() => setDuplicateOpen(true)}
+              >
+                Duplicate
+              </button>
+              <ExperimentActionMenu
+                key={draft.id}
+                deleting={deleting}
+                disabled={saving || deleting || reloadingLatest}
+                onDelete={() => void removeExperiment()}
+              />
+            </>
+          }
+        />
 
         <section className="experiment-properties" aria-label="Experiment properties">
           <label>
@@ -908,6 +1012,14 @@ export default function ExperimentDetail({ id }: { id: string }) {
             })}
           />
         </section>
+
+        <nav className="section-anchors" aria-label="Experiment sections">
+          {EXPERIMENT_SECTION_LINKS.map((section) => (
+            <a key={section.id} href={`#${section.id}`}>
+              {section.label}
+            </a>
+          ))}
+        </nav>
 
         <ExperimentSection
           id="data"

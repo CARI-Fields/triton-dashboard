@@ -519,6 +519,9 @@ describe("experiment evidence", () => {
       />,
     );
 
+    expect(screen.getByRole("link", {
+      name: "Open Latency plot",
+    }).getAttribute("href")).toBe(attachment.url);
     fireEvent.change(screen.getByLabelText("Caption for Latency plot"), {
       target: { value: "Updated caption" },
     });

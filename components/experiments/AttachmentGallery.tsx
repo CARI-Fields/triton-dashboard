@@ -86,16 +86,25 @@ function AttachmentFigure({
     }
   }
 
+  const attachmentName = attachment.caption || altFallback;
+
   return (
-    <figure>
+    <figure className="attachment-row">
       {/* Arbitrary Storage URLs have no known dimensions or fixed remote host. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <a href={attachment.url} target="_blank" rel="noreferrer">
+      <a
+        className="attachment-preview"
+        href={attachment.url}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open ${attachmentName}`}
+      >
         <img
           src={attachment.url}
-          alt={attachment.caption || altFallback}
+          alt={attachmentName}
           loading="lazy"
         />
+        <span aria-hidden="true">Open</span>
       </a>
       <figcaption>
         <input

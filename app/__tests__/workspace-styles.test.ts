@@ -295,14 +295,19 @@ describe("workspace visual contracts", () => {
     expect(ruleBody(mobile, ".nav-backdrop")).toMatch(/display\s*:\s*block/);
   });
 
-  it("stacks legacy board and analytics layouts before the sidebar leaves them 820px", () => {
+  it("stacks the pipeline and current Analytics hierarchy before the sidebar leaves them 820px", () => {
     expect(globals).not.toMatch(/@media\s*\(max-width:\s*820px\)/);
     const sidebarAware = mediaBody(globals, 1052);
     expect(sidebarAware).toMatch(/\.pipeline\s*\{\s*flex-direction\s*:\s*column/);
     expect(sidebarAware).toMatch(
       /\.foundation-grid\s*\{\s*grid-template-columns\s*:\s*1fr/,
     );
-    expect(sidebarAware).toMatch(/\.panel-grid\s*\{\s*grid-template-columns\s*:\s*1fr/);
+    expect(sidebarAware).toMatch(
+      /\.analytics-split\s*\{\s*grid-template-columns\s*:\s*1fr/,
+    );
+    expect(sidebarAware).toMatch(
+      /\.kpi-strip\s*\{\s*grid-template-columns\s*:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+    );
   });
 
   it("keeps experiment and compare tables scrollable and pins Compare identity", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Experiment, Member, Task } from "@/lib/types";
+import type { Experiment, Member } from "@/lib/types";
 import { createExperiment } from "@/lib/experiments/repository";
 import { useModalFocus } from "@/components/ui/useModalFocus";
 
@@ -14,7 +14,7 @@ export default function CreateExperimentDialog({
   onCreated,
 }: {
   open: boolean;
-  tasks: Task[];
+  tasks: Array<{ id: string; title: string }>;
   members: Member[];
   fixedTaskId?: string;
   onClose: () => void;

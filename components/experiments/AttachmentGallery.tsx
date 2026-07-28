@@ -8,11 +8,12 @@ import {
   type MutableRefObject,
 } from "react";
 import {
-  deleteExperimentAttachment,
-  updateExperimentAttachment,
-  uploadExperimentAttachment,
-} from "@/lib/experiments/repository";
-import type { Attachment, Experiment } from "@/lib/types";
+  deleteAttachment,
+  updateAttachmentCaption,
+  uploadAttachment,
+  type AttachmentScope,
+} from "@/lib/attachments/repository";
+import type { Attachment } from "@/lib/types";
 
 interface CommittedVisit {
   id: string;
@@ -23,18 +24,20 @@ function AttachmentFigure({
   attachment,
   committedVisit,
   deleting,
+  altFallback,
   onCaptionError,
   onChanged,
   onDelete,
-  visitId,
+  visitKey,
 }: {
   attachment: Attachment;
   committedVisit: MutableRefObject<CommittedVisit>;
   deleting: boolean;
+  altFallback: string;
   onCaptionError: (message: string) => void;
   onChanged: () => void;
   onDelete: () => void;
-  visitId: string;
+  visitKey: string;
 }) {
   const mounted = useRef(false);
   const pendingVisit = useRef<CommittedVisit | null>(null);
@@ -52,9 +55,9 @@ function AttachmentFigure({
     pendingVisit.current = null;
     setCaption(attachment.caption);
     setSavingCaption(false);
-    // Reset only when a different Experiment visit commits.
+    // Reset only when a different attachment visit commits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visitId]);
+  }, [visitKey]);
 
   async function saveCaption() {
     if (caption === attachment.caption || pendingVisit.current) return;
@@ -63,7 +66,7 @@ function AttachmentFigure({
     setSavingCaption(true);
     onCaptionError("");
     try {
-      await updateExperimentAttachment(attachment.id, caption);
+      await updateAttachmentCaption(attachment.id, caption);
       if (mounted.current && committedVisit.current === operationVisit) {
         onChanged();
       }
@@ -90,7 +93,7 @@ function AttachmentFigure({
       <a href={attachment.url} target="_blank" rel="noreferrer">
         <img
           src={attachment.url}
-          alt={attachment.caption || "Experiment plot"}
+          alt={attachment.caption || altFallback}
           loading="lazy"
         />
       </a>
@@ -117,17 +120,27 @@ function AttachmentFigure({
   );
 }
 
-export default function AttachmentGallery({
-  experiment,
-  attachments,
-  onChanged,
-}: {
-  experiment: Experiment;
+export interface AttachmentGalleryProps {
+  scope: AttachmentScope;
+  visitKey: string;
   attachments: Attachment[];
+  title: string;
+  emptyMessage: string;
+  altFallback: string;
   onChanged: () => void;
-}) {
+}
+
+export default function AttachmentGallery({
+  scope,
+  visitKey,
+  attachments,
+  title,
+  emptyMessage,
+  altFallback,
+  onChanged,
+}: AttachmentGalleryProps) {
   const mounted = useRef(false);
-  const committedIdentity = useRef({ id: experiment.id, generation: 0 });
+  const committedIdentity = useRef({ id: visitKey, generation: 0 });
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadPending = useRef(false);
   const deletingIdsRef = useRef<Set<string>>(new Set());
@@ -143,9 +156,9 @@ export default function AttachmentGallery({
   }, []);
 
   useLayoutEffect(() => {
-    if (committedIdentity.current.id !== experiment.id) {
+    if (committedIdentity.current.id !== visitKey) {
       committedIdentity.current = {
-        id: experiment.id,
+        id: visitKey,
         generation: committedIdentity.current.generation + 1,
       };
     }
@@ -154,11 +167,12 @@ export default function AttachmentGallery({
     setUploading(false);
     setDeletingIds(new Set());
     setError("");
-  }, [experiment.id]);
+  }, [visitKey]);
 
   async function upload(files: FileList) {
     if (uploadPending.current) return;
     const operationIdentity = committedIdentity.current;
+    const operationScope = { ...scope };
     uploadPending.current = true;
     setUploading(true);
     setError("");
@@ -167,7 +181,7 @@ export default function AttachmentGallery({
         ? Math.max(...attachments.map((attachment) => attachment.position)) + 1
         : 0;
       for (const file of Array.from(files)) {
-        await uploadExperimentAttachment(experiment, file, position);
+        await uploadAttachment(operationScope, file, position);
         position += 1;
       }
     } catch (caught) {
@@ -204,7 +218,7 @@ export default function AttachmentGallery({
     setDeletingIds((current) => new Set(current).add(attachment.id));
     setError("");
     try {
-      await deleteExperimentAttachment(attachment);
+      await deleteAttachment(attachment);
     } catch (caught) {
       if (
         mounted.current &&
@@ -231,7 +245,7 @@ export default function AttachmentGallery({
   return (
     <div className="attachment-gallery" aria-busy={uploading}>
       <div className="attachment-actions">
-        <strong>Plots &amp; images</strong>
+        <strong>{title}</strong>
         <button
           type="button"
           className="btn"
@@ -246,7 +260,7 @@ export default function AttachmentGallery({
           multiple
           type="file"
           accept="image/*"
-          aria-label="Choose plot images"
+          aria-label={`Choose images for ${title}`}
           disabled={uploading}
           onChange={(event) => {
             if (event.target.files?.length) void upload(event.target.files);
@@ -256,7 +270,7 @@ export default function AttachmentGallery({
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
       {attachments.length === 0
-        ? <p className="muted">No plots or images attached.</p>
+        ? <p className="muted">{emptyMessage}</p>
         : (
           <div className="experiment-image-grid">
             {attachments.map((attachment) => (
@@ -265,10 +279,11 @@ export default function AttachmentGallery({
                 attachment={attachment}
                 committedVisit={committedIdentity}
                 deleting={deletingIds.has(attachment.id)}
+                altFallback={altFallback}
                 onCaptionError={setError}
                 onChanged={onChanged}
                 onDelete={() => void remove(attachment)}
-                visitId={experiment.id}
+                visitKey={visitKey}
               />
             ))}
           </div>

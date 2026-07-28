@@ -965,8 +965,15 @@ export default function ExperimentDetail({ id }: { id: string }) {
             })}
           />
           <AttachmentGallery
-            experiment={server}
+            scope={{
+              taskId: server.task_id,
+              experimentId: server.id,
+            }}
+            visitKey={`experiment:${server.id}`}
             attachments={bundle.attachments}
+            title="Plots & images"
+            emptyMessage="No plots or images attached."
+            altFallback="Experiment plot"
             onChanged={() => void loadRelated(visitRef.current)}
           />
         </ExperimentSection>

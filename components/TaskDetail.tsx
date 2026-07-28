@@ -2,19 +2,32 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import MarkdownField from "@/components/MarkdownField";
+import PageHeader from "@/components/ui/PageHeader";
+import TaskProperties from "@/components/tasks/TaskProperties";
+import AttachmentGallery from "@/components/experiments/AttachmentGallery";
 import TaskExperimentsPanel from "@/components/experiments/TaskExperimentsPanel";
 import { supabase } from "@/lib/supabase";
 import { KIND_COLOR, logActivity } from "@/lib/activity";
-import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
+import { statusLabel } from "@/lib/status";
+import {
+  taskFromStorage,
+  taskPatchToStorage,
+  taskTypeFromStorage,
+} from "@/lib/tasks/model";
 import { fmtDate, relTime } from "@/lib/time";
 import type {
   Activity,
   ActivityKind,
+  Attachment,
   Experiment,
   Member,
   Module,
   Task,
+  TaskModel,
+  TaskPatch,
+  TaskType,
 } from "@/lib/types";
 
 interface Visit {
@@ -34,7 +47,16 @@ interface RetryToken {
   requestVersion: number;
 }
 
-type MutationField = "title" | "status" | "notes" | "assignees";
+type MutationField =
+  | "title"
+  | "status"
+  | "notes"
+  | "owners"
+  | "typeId"
+  | "tags"
+  | "priority"
+  | "dueDate"
+  | "delete";
 type MutationErrorKey = MutationField | "timeline";
 
 interface TimelineSubmission {
@@ -42,51 +64,63 @@ interface TimelineSubmission {
   value: string;
 }
 
+interface DeleteSubmission {
+  visit: Visit;
+}
+
 interface RealtimePayload {
   new?: Record<string, unknown>;
   old?: Record<string, unknown>;
 }
 
-interface AssigneeChange {
+interface OwnerChange {
   name: string;
   assigned: boolean;
 }
 
-interface AssigneeCoordinator {
+interface OwnerCoordinator {
   visit: Visit;
   confirmed: string[];
-  pending: AssigneeChange[];
+  pending: OwnerChange[];
 }
 
-interface AssignActivityEvent {
+interface OwnerActivityEvent {
   text: string;
   kind: "assign";
-  change: AssigneeChange;
-  coordinator: AssigneeCoordinator;
+  change: OwnerChange;
+  coordinator: OwnerCoordinator;
 }
 
-function applyAssigneeChange(
-  assignees: string[],
-  change: AssigneeChange,
+interface TagChange {
+  tags: string[];
+}
+
+interface TagCoordinator {
+  visit: Visit;
+  confirmed: string[];
+  pending: TagChange[];
+}
+
+interface TagMutationEvent {
+  change: TagChange;
+  coordinator: TagCoordinator;
+}
+
+function applyOwnerChange(
+  owners: string[],
+  change: OwnerChange,
 ): string[] {
   if (change.assigned) {
-    return assignees.includes(change.name)
-      ? assignees
-      : [...assignees, change.name];
+    return owners.includes(change.name)
+      ? owners
+      : [...owners, change.name];
   }
-  return assignees.filter((assignee) => assignee !== change.name);
+  return owners.filter((owner) => owner !== change.name);
 }
 
-function initialsFromName(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-function avatarText(name: string, members: Member[]): string {
-  return members.find((member) => member.name === name)?.initials
-    || initialsFromName(name);
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function errorMessage(caught: unknown): string {
@@ -104,21 +138,6 @@ async function logActivityChecked(
 ): Promise<void> {
   const activityError = await logActivity(taskId, text, kind);
   if (activityError) throw new Error(activityError);
-}
-
-/** Close a popover when clicking outside of it. */
-function useClickOutside(onOutside: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function handle(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        onOutside();
-      }
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [onOutside]);
-  return ref;
 }
 
 function EditableText({
@@ -210,21 +229,26 @@ function EditableText({
 }
 
 export default function TaskDetail({ id }: { id: string }) {
+  const router = useRouter();
   const [visit, setVisit] = useState<Visit>({ id, generation: 0 });
   const visitRef = useRef<Visit | null>(null);
   const requestVersionRef = useRef(0);
   const retryTokenRef = useRef<RetryToken | null>(null);
   const mutationQueuesRef = useRef(new Map<string, Promise<void>>());
-  const assigneeCoordinatorRef = useRef<AssigneeCoordinator | null>(null);
+  const ownerCoordinatorRef = useRef<OwnerCoordinator | null>(null);
+  const tagCoordinatorRef = useRef<TagCoordinator | null>(null);
   const experimentIdsRef = useRef(new Set<string>());
+  const attachmentIdsRef = useRef(new Set<string>());
   const activityIdsRef = useRef(new Set<string>());
   const timelineSubmissionRef = useRef<TimelineSubmission | null>(null);
+  const deleteSubmissionRef = useRef<DeleteSubmission | null>(null);
 
   const [loadedGeneration, setLoadedGeneration] = useState<number | null>(null);
-  const [task, setTask] = useState<Task | null>(null);
-  const [module, setModule] = useState<Module | null>(null);
+  const [task, setTask] = useState<TaskModel | null>(null);
+  const [types, setTypes] = useState<TaskType[]>([]);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [draftNote, setDraftNote] = useState("");
   const [loading, setLoading] = useState(true);
@@ -235,8 +259,7 @@ export default function TaskDetail({ id }: { id: string }) {
   >({});
   const [retrying, setRetrying] = useState(false);
   const [notePending, setNotePending] = useState(false);
-  const [assignOpen, setAssignOpen] = useState(false);
-  const assignRef = useClickOutside(() => setAssignOpen(false));
+  const [deleting, setDeleting] = useState(false);
 
   if (visit.id !== id) {
     setVisit({ id, generation: visit.generation + 1 });
@@ -286,10 +309,12 @@ export default function TaskDetail({ id }: { id: string }) {
         finishSupersededRetry(requestedVisit, requestVersion);
         setLoadedGeneration(requestedVisit.generation);
         setTask(null);
-        setModule(null);
+        setTypes([]);
         setExperiments([]);
         experimentIdsRef.current = new Set();
         setMembers([]);
+        setAttachments([]);
+        attachmentIdsRef.current = new Set();
         setActivity([]);
         activityIdsRef.current = new Set();
         setLoading(false);
@@ -298,14 +323,19 @@ export default function TaskDetail({ id }: { id: string }) {
         return;
       }
 
-      const nextTask = taskResult.data as Task;
-      const [moduleResult, experimentsResult, membersResult, activityResult] =
+      const nextTask = taskFromStorage(taskResult.data as Task);
+      const [
+        typesResult,
+        experimentsResult,
+        membersResult,
+        attachmentsResult,
+        activityResult,
+      ] =
         await Promise.all([
           supabase
             .from("modules")
             .select("*")
-            .eq("id", nextTask.module_id)
-            .maybeSingle(),
+            .order("position"),
           supabase
             .from("experiments")
             .select("*")
@@ -314,38 +344,62 @@ export default function TaskDetail({ id }: { id: string }) {
             .order("experiment_no", { ascending: true }),
           supabase.from("members").select("*").order("position"),
           supabase
+            .from("attachments")
+            .select("*")
+            .eq("task_id", requestedVisit.id)
+            .is("experiment_id", null)
+            .order("position"),
+          supabase
             .from("activity")
             .select("*")
             .eq("task_id", requestedVisit.id)
             .order("created_at", { ascending: false }),
         ]);
       if (!isCurrentRequest(requestedVisit, requestVersion)) return;
-      throwIfError(moduleResult.error);
+      throwIfError(typesResult.error);
       throwIfError(experimentsResult.error);
       throwIfError(membersResult.error);
+      throwIfError(attachmentsResult.error);
       throwIfError(activityResult.error);
 
       finishSupersededRetry(requestedVisit, requestVersion);
+      const nextTypes = (typesResult.data ?? [])
+        .map((row) => taskTypeFromStorage(row as Module));
       const nextExperiments = (experimentsResult.data ?? []) as Experiment[];
+      const nextAttachments = (attachmentsResult.data ?? []) as Attachment[];
       const nextActivity = (activityResult.data ?? []) as Activity[];
       setLoadedGeneration(requestedVisit.generation);
       setTask(nextTask);
       if (
-        assigneeCoordinatorRef.current?.visit !== requestedVisit
-        || assigneeCoordinatorRef.current.pending.length === 0
+        ownerCoordinatorRef.current?.visit !== requestedVisit
+        || ownerCoordinatorRef.current.pending.length === 0
       ) {
-        assigneeCoordinatorRef.current = {
+        ownerCoordinatorRef.current = {
           visit: requestedVisit,
-          confirmed: nextTask.assignees,
+          confirmed: nextTask.owners,
           pending: [],
         };
       }
-      setModule((moduleResult.data as Module | null) ?? null);
+      if (
+        tagCoordinatorRef.current?.visit !== requestedVisit
+        || tagCoordinatorRef.current.pending.length === 0
+      ) {
+        tagCoordinatorRef.current = {
+          visit: requestedVisit,
+          confirmed: nextTask.tags,
+          pending: [],
+        };
+      }
+      setTypes(nextTypes);
       setExperiments(nextExperiments);
       experimentIdsRef.current = new Set(
         nextExperiments.map((experiment) => experiment.id),
       );
       setMembers((membersResult.data ?? []) as Member[]);
+      setAttachments(nextAttachments);
+      attachmentIdsRef.current = new Set(
+        nextAttachments.map((attachment) => attachment.id),
+      );
       setActivity(nextActivity);
       activityIdsRef.current = new Set(
         nextActivity.map((event) => event.id),
@@ -371,15 +425,19 @@ export default function TaskDetail({ id }: { id: string }) {
     visitRef.current = visit;
     requestVersionRef.current += 1;
     retryTokenRef.current = null;
-    assigneeCoordinatorRef.current = null;
+    ownerCoordinatorRef.current = null;
+    tagCoordinatorRef.current = null;
     experimentIdsRef.current = new Set();
+    attachmentIdsRef.current = new Set();
     activityIdsRef.current = new Set();
     timelineSubmissionRef.current = null;
+    deleteSubmissionRef.current = null;
     setLoadedGeneration(null);
     setTask(null);
-    setModule(null);
+    setTypes([]);
     setExperiments([]);
     setMembers([]);
+    setAttachments([]);
     setActivity([]);
     setDraftNote("");
     setLoading(true);
@@ -388,7 +446,7 @@ export default function TaskDetail({ id }: { id: string }) {
     setMutationErrors({});
     setRetrying(false);
     setNotePending(false);
-    setAssignOpen(false);
+    setDeleting(false);
 
     if (!id) {
       setLoadedGeneration(visit.generation);
@@ -430,6 +488,22 @@ export default function TaskDetail({ id }: { id: string }) {
       }
       refresh();
     };
+    const refreshTaskAttachment = (payload: RealtimePayload) => {
+      const changedId = payload.new?.id;
+      if (
+        payload.new?.experiment_id !== null
+        && !(
+          typeof changedId === "string"
+          && attachmentIdsRef.current.has(changedId)
+        )
+      ) {
+        return;
+      }
+      if (typeof changedId === "string") {
+        attachmentIdsRef.current.add(changedId);
+      }
+      refresh();
+    };
     const refreshDeletedTask = (payload: RealtimePayload) => {
       if (payload.old?.id === visit.id) refresh();
     };
@@ -459,6 +533,27 @@ export default function TaskDetail({ id }: { id: string }) {
       ) {
         if (typeof deletedId === "string") {
           activityIdsRef.current.delete(deletedId);
+        }
+        refresh();
+      }
+    };
+    const refreshDeletedAttachment = (payload: RealtimePayload) => {
+      const deletedId = payload.old?.id ?? payload.new?.id;
+      const row = Object.keys(payload.old ?? {}).length > 0
+        ? payload.old
+        : payload.new;
+      if (
+        (
+          row?.task_id === visit.id
+          && row.experiment_id === null
+        )
+        || (
+          typeof deletedId === "string"
+          && attachmentIdsRef.current.has(deletedId)
+        )
+      ) {
+        if (typeof deletedId === "string") {
+          attachmentIdsRef.current.delete(deletedId);
         }
         refresh();
       }
@@ -520,6 +615,31 @@ export default function TaskDetail({ id }: { id: string }) {
         {
           event: "INSERT",
           schema: "public",
+          table: "attachments",
+          filter: `task_id=eq.${visit.id}`,
+        },
+        refreshTaskAttachment,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "attachments",
+          filter: `task_id=eq.${visit.id}`,
+        },
+        refreshTaskAttachment,
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "attachments" },
+        refreshDeletedAttachment,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
           table: "activity",
           filter: `task_id=eq.${visit.id}`,
         },
@@ -547,6 +667,7 @@ export default function TaskDetail({ id }: { id: string }) {
       requestVersionRef.current += 1;
       retryTokenRef.current = null;
       timelineSubmissionRef.current = null;
+      deleteSubmissionRef.current = null;
       client.removeChannel(channel);
     };
   }, [id, loadTask, visit]);
@@ -573,20 +694,29 @@ export default function TaskDetail({ id }: { id: string }) {
   }
 
   const updateTask = useCallback(async (
-    patch: Partial<Task>,
-    activityEvent?: AssignActivityEvent,
+    patch: TaskPatch,
+    activityEvent?: OwnerActivityEvent,
+    tagEvent?: TagMutationEvent,
   ) => {
     if (!supabase) return;
     const client = supabase;
     const requestedVisit = visitRef.current;
     if (!requestedVisit) return;
-    const field: MutationField = Object.hasOwn(patch, "assignees")
-      ? "assignees"
+    const field: MutationField = Object.hasOwn(patch, "owners")
+      ? "owners"
       : Object.hasOwn(patch, "status")
         ? "status"
         : Object.hasOwn(patch, "title")
           ? "title"
-          : "notes";
+          : Object.hasOwn(patch, "notes")
+            ? "notes"
+            : Object.hasOwn(patch, "typeId")
+              ? "typeId"
+              : Object.hasOwn(patch, "tags")
+                ? "tags"
+                : Object.hasOwn(patch, "priority")
+                  ? "priority"
+                  : "dueDate";
     const queueKey =
       `${requestedVisit.generation}:${requestedVisit.id}:${field}`;
     const previous = mutationQueuesRef.current.get(queueKey);
@@ -600,45 +730,67 @@ export default function TaskDetail({ id }: { id: string }) {
         });
       }
       let effectivePatch = patch;
-      let nextConfirmedAssignees: string[] | null = null;
-      let assigneeChangeIsNoOp = false;
+      let nextConfirmedOwners: string[] | null = null;
+      let ownerChangeIsNoOp = false;
+      let tagChangeIsNoOp = false;
       if (activityEvent) {
-        assigneeChangeIsNoOp =
+        ownerChangeIsNoOp =
           activityEvent.coordinator.confirmed.includes(
             activityEvent.change.name,
           ) === activityEvent.change.assigned;
-        nextConfirmedAssignees = applyAssigneeChange(
+        nextConfirmedOwners = applyOwnerChange(
           activityEvent.coordinator.confirmed,
           activityEvent.change,
         );
         effectivePatch = {
           ...patch,
-          assignees: nextConfirmedAssignees,
+          owners: nextConfirmedOwners,
         };
       }
-      const settleAssigneeChange = (succeeded: boolean) => {
+      if (tagEvent) {
+        tagChangeIsNoOp = sameStrings(
+          tagEvent.coordinator.confirmed,
+          tagEvent.change.tags,
+        );
+        effectivePatch = {
+          ...patch,
+          tags: tagEvent.change.tags,
+        };
+      }
+      const settleOwnerChange = (succeeded: boolean) => {
         if (!activityEvent) return;
-        if (succeeded && nextConfirmedAssignees) {
-          activityEvent.coordinator.confirmed = nextConfirmedAssignees;
+        if (succeeded && nextConfirmedOwners) {
+          activityEvent.coordinator.confirmed = nextConfirmedOwners;
         }
         activityEvent.coordinator.pending =
           activityEvent.coordinator.pending.filter(
             (change) => change !== activityEvent.change,
           );
       };
-      if (assigneeChangeIsNoOp) {
-        settleAssigneeChange(false);
+      const settleTagChange = (succeeded: boolean) => {
+        if (!tagEvent) return;
+        if (succeeded) {
+          tagEvent.coordinator.confirmed = tagEvent.change.tags;
+        }
+        tagEvent.coordinator.pending = tagEvent.coordinator.pending.filter(
+          (change) => change !== tagEvent.change,
+        );
+      };
+      if (ownerChangeIsNoOp || tagChangeIsNoOp) {
+        settleOwnerChange(false);
+        settleTagChange(false);
         return;
       }
       let result;
       try {
         result = await client
           .from("tasks")
-          .update(effectivePatch)
+          .update(taskPatchToStorage(effectivePatch))
           .eq("id", requestedVisit.id);
         throwIfError(result.error);
       } catch (caught) {
-        settleAssigneeChange(false);
+        settleOwnerChange(false);
+        settleTagChange(false);
         if (visitRef.current === requestedVisit) {
           setMutationErrors((current) => ({
             ...current,
@@ -647,7 +799,8 @@ export default function TaskDetail({ id }: { id: string }) {
         }
         return;
       }
-      settleAssigneeChange(true);
+      settleOwnerChange(true);
+      settleTagChange(true);
 
       let activityFailure: unknown = null;
       try {
@@ -706,38 +859,64 @@ export default function TaskDetail({ id }: { id: string }) {
     }
   }, [loadTask]);
 
-  function toggleAssignee(name: string) {
+  function patchTask(patch: TaskPatch) {
     if (!task) return;
     const requestedVisit = visitRef.current;
     if (!requestedVisit) return;
-    let coordinator = assigneeCoordinatorRef.current;
+    if (Object.hasOwn(patch, "tags") && patch.tags) {
+      let coordinator = tagCoordinatorRef.current;
+      if (coordinator?.visit !== requestedVisit) {
+        coordinator = {
+          visit: requestedVisit,
+          confirmed: task.tags,
+          pending: [],
+        };
+        tagCoordinatorRef.current = coordinator;
+      }
+      const change = { tags: [...patch.tags] };
+      coordinator.pending.push(change);
+      void updateTask(patch, undefined, { change, coordinator });
+      return;
+    }
+    if (!Object.hasOwn(patch, "owners") || !patch.owners) {
+      void updateTask(patch);
+      return;
+    }
+    let coordinator = ownerCoordinatorRef.current;
     if (coordinator?.visit !== requestedVisit) {
       coordinator = {
         visit: requestedVisit,
-        confirmed: task.assignees,
+        confirmed: task.owners,
         pending: [],
       };
-      assigneeCoordinatorRef.current = coordinator;
+      ownerCoordinatorRef.current = coordinator;
     }
-    const currentAssignees = coordinator.pending.reduce(
-      applyAssigneeChange,
+    const currentOwners = coordinator.pending.reduce(
+      applyOwnerChange,
       coordinator.confirmed,
     );
-    const hadAssignee = currentAssignees.includes(name);
-    const change: AssigneeChange = {
-      name,
-      assigned: !hadAssignee,
-    };
-    coordinator.pending.push(change);
-    void updateTask(
-      { assignees: [] },
-      {
-        text: `${hadAssignee ? "Unassigned" : "Assigned"} ${name}`,
-        kind: "assign",
-        change,
-        coordinator,
-      },
+    const removals = currentOwners.filter(
+      (owner) => !patch.owners!.includes(owner),
     );
+    const additions = patch.owners.filter(
+      (owner) => !currentOwners.includes(owner),
+    );
+    for (const [name, assigned] of [
+      ...removals.map((owner) => [owner, false] as const),
+      ...additions.map((owner) => [owner, true] as const),
+    ]) {
+      const change: OwnerChange = { name, assigned };
+      coordinator.pending.push(change);
+      void updateTask(
+        { owners: [] },
+        {
+          text: `${assigned ? "Assigned" : "Unassigned"} ${name}`,
+          kind: "assign",
+          change,
+          coordinator,
+        },
+      );
+    }
   }
 
   async function addTimelineNote() {
@@ -785,6 +964,66 @@ export default function TaskDetail({ id }: { id: string }) {
     }
   }
 
+  async function removeTask() {
+    if (
+      !task
+      || deleteSubmissionRef.current
+      || !window.confirm(`Delete task “${task.title}”? This cannot be undone.`)
+    ) {
+      return;
+    }
+    const requestedVisit = visitRef.current;
+    if (!requestedVisit || !supabase) return;
+    const submission = { visit: requestedVisit };
+    deleteSubmissionRef.current = submission;
+    setDeleting(true);
+    setMutationErrors((current) => {
+      if (!current.delete) return current;
+      const next = { ...current };
+      delete next.delete;
+      return next;
+    });
+
+    try {
+      const { error } = await supabase
+        .from("tasks")
+        .delete()
+        .eq("id", requestedVisit.id);
+      if (
+        visitRef.current !== requestedVisit
+        || deleteSubmissionRef.current !== submission
+      ) {
+        return;
+      }
+      if (error) {
+        setMutationErrors((current) => ({
+          ...current,
+          delete: `Could not delete task. ${error.message}`,
+        }));
+        return;
+      }
+      router.push("/");
+    } catch (caught) {
+      if (
+        visitRef.current === requestedVisit
+        && deleteSubmissionRef.current === submission
+      ) {
+        setMutationErrors((current) => ({
+          ...current,
+          delete: `Could not delete task. ${errorMessage(caught)}`,
+        }));
+      }
+    } finally {
+      if (
+        visitRef.current === requestedVisit
+        && deleteSubmissionRef.current === submission
+      ) {
+        deleteSubmissionRef.current = null;
+        setDeleting(false);
+      }
+    }
+  }
+
   const visitLoading =
     visit.id !== id
     || loadedGeneration !== visit.generation
@@ -805,7 +1044,7 @@ export default function TaskDetail({ id }: { id: string }) {
   if (!task) {
     return (
       <div className="wrap">
-        <Link href="/" className="back-link">← Back to board</Link>
+        <Link href="/" className="back-link">← Task Board</Link>
         {notFound && (
           <p className="state-note">
             Task not found. It may have been deleted.
@@ -830,158 +1069,136 @@ export default function TaskDetail({ id }: { id: string }) {
     );
   }
 
+  const currentOwnerCoordinator = ownerCoordinatorRef.current;
+  const currentTagCoordinator = tagCoordinatorRef.current;
+  const propertyTask: TaskModel = {
+    ...task,
+    owners:
+      currentOwnerCoordinator?.visit === visitRef.current
+      && currentOwnerCoordinator.pending.length > 0
+        ? currentOwnerCoordinator.pending.reduce(
+          applyOwnerChange,
+          currentOwnerCoordinator.confirmed,
+        )
+        : task.owners,
+    tags:
+      currentTagCoordinator?.visit === visitRef.current
+      && currentTagCoordinator.pending.length > 0
+        ? currentTagCoordinator.pending[
+          currentTagCoordinator.pending.length - 1
+        ].tags
+        : task.tags,
+  };
+
   return (
-    <div className="wrap detail">
-      <Link href="/" className="back-link">← Back to board</Link>
+    <div className="record-page task-detail-page">
+      <main className="record-main">
+        <Link href="/" className="back-link">← Task Board</Link>
 
-      {mutationError && (
-        <div className="error-banner" role="alert">
-          <span>{mutationError.message}</span>
-        </div>
-      )}
-
-      {detailError && (
-        <div className="error-banner" role="alert">
-          <span>{detailError.message}</span>
-          {detailError.phase && (
-            <button
-              type="button"
-              className="btn"
-              onClick={retry}
-              disabled={retrying}
-            >
-              {retrying ? "Retrying…" : "Retry"}
-            </button>
-          )}
-        </div>
-      )}
-
-      <header className="detail-head">
-        {module && (
-          <span
-            className={`mod-chip ${
-              module.kind === "foundation" ? "found" : ""
-            }`}
-          >
-            {module.name}
-          </span>
-        )}
-        <h1 className="detail-title">
-          <EditableText
-            value={task.title}
-            ariaLabel="Task title"
-            onSave={(value) => void updateTask({ title: value })}
-          />
-        </h1>
-        <div className="detail-meta">
-          <select
-            className={`pill ${task.status}`}
-            value={task.status}
-            aria-label="Status"
-            onChange={(event) => {
-              void updateTask({
-                status: event.target.value as Task["status"],
-              });
-            }}
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <div className="assignees-inline">
-            <div className="owners">
-              {task.assignees.map((name) => (
-                <span className="owner-chip" key={name} title={name}>
-                  <span className="av">{avatarText(name, members)}</span>
-                  <button
-                    className="owner-x"
-                    onClick={() => toggleAssignee(name)}
-                    aria-label={`Unassign ${name}`}
-                    title={`Unassign ${name}`}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-              <div className="picker" ref={assignRef}>
-                <button
-                  className="add-owner"
-                  onClick={() => setAssignOpen((open) => !open)}
-                  aria-label="Assign people"
-                  title="Assign people"
-                >
-                  +
-                </button>
-                {assignOpen && (
-                  <div className="menu" role="menu">
-                    {members
-                      .filter(
-                        (member) => !task.assignees.includes(member.name),
-                      )
-                      .map((member) => (
-                        <button
-                          key={member.id}
-                          className="menu-item"
-                          onClick={() => toggleAssignee(member.name)}
-                        >
-                          <span className="av">
-                            {member.initials || initialsFromName(member.name)}
-                          </span>
-                          {member.name}
-                        </button>
-                      ))}
-                    {members.length === 0 && (
-                      <div className="menu-empty">
-                        Add teammates on the board first.
-                      </div>
-                    )}
-                    {members.length > 0
-                      && members.every(
-                        (member) => task.assignees.includes(member.name),
-                      )
-                      && (
-                        <div className="menu-empty">
-                          Everyone is assigned.
-                        </div>
-                      )}
-                  </div>
-                )}
-              </div>
-            </div>
+        {mutationError && (
+          <div className="error-banner" role="alert">
+            <span>{mutationError.message}</span>
           </div>
+        )}
 
-          <span className="detail-dates">
-            Created {fmtDate(task.created_at)} · Updated{" "}
-            {relTime(task.updated_at)}
-          </span>
-        </div>
-      </header>
+        {detailError && (
+          <div className="error-banner" role="alert">
+            <span>{detailError.message}</span>
+            {detailError.phase && (
+              <button
+                type="button"
+                className="btn"
+                onClick={retry}
+                disabled={retrying}
+              >
+                {retrying ? "Retrying…" : "Retry"}
+              </button>
+            )}
+          </div>
+        )}
 
-      <section className="detail-section">
-        <div className="detail-section-head">
-          <h2>Progress &amp; notes</h2>
-        </div>
-        <MarkdownField
-          value={task.notes}
-          minHeight={160}
-          placeholder="Click to add progress, findings, and decisions… (Markdown supported: headings, lists, **bold**, tables)"
-          onSave={(value) => void updateTask({ notes: value })}
+        <PageHeader
+          eyebrow="Task"
+          title={(
+            <EditableText
+              value={task.title}
+              ariaLabel="Task title"
+              onSave={(title) => void updateTask({ title })}
+            />
+          )}
+          description={(
+            <span className="record-dates">
+              Created {fmtDate(task.created_at)} · Updated{" "}
+              {relTime(task.updated_at)}
+            </span>
+          )}
+          actions={(
+            <details className="action-menu">
+              <summary aria-label="More task actions">•••</summary>
+              <div className="action-menu-panel">
+                <button
+                  type="button"
+                  className="danger-subtle"
+                  disabled={deleting}
+                  onClick={() => void removeTask()}
+                >
+                  {deleting ? "Deleting…" : "Delete task"}
+                </button>
+              </div>
+            </details>
+          )}
         />
-      </section>
 
-      <TaskExperimentsPanel
-        task={task}
-        experiments={experiments}
-        members={members}
-      />
+        <TaskProperties
+          task={propertyTask}
+          types={types}
+          members={members}
+          onPatch={patchTask}
+        />
 
-      <section className="detail-section">
-        <div className="detail-section-head">
-          <h2>Activity timeline</h2>
-        </div>
+        <section
+          id="description"
+          className="record-section"
+          aria-labelledby="task-description-title"
+        >
+          <h2 id="task-description-title">Description</h2>
+          <MarkdownField
+            value={task.notes}
+            minHeight={160}
+            placeholder="Add context, acceptance criteria, or links"
+            onSave={(notes) => void updateTask({ notes })}
+          />
+        </section>
+
+        <TaskExperimentsPanel
+          task={task}
+          experiments={experiments}
+          members={members}
+        />
+
+        <section
+          id="attachments"
+          className="record-section"
+          aria-labelledby="task-attachments-title"
+        >
+          <h2 id="task-attachments-title">Attachments</h2>
+          <AttachmentGallery
+            scope={{ taskId: task.id, experimentId: null }}
+            visitKey={`task:${task.id}`}
+            attachments={attachments}
+            title="Task files & images"
+            emptyMessage="No task attachments yet."
+            altFallback="Task attachment"
+            onChanged={() => {
+              const currentVisit = visitRef.current;
+              if (currentVisit) void loadTask(currentVisit, "refresh");
+            }}
+          />
+        </section>
+      </main>
+
+      <aside className="activity-rail" aria-label="Task activity">
+        <h2>Activity</h2>
         <div className="timeline-add">
           <input
             value={draftNote}
@@ -993,6 +1210,7 @@ export default function TaskDetail({ id }: { id: string }) {
             aria-label="Add a note to the timeline"
           />
           <button
+            type="button"
             className="btn primary"
             onClick={() => void addTimelineNote()}
             disabled={notePending}
@@ -1010,7 +1228,8 @@ export default function TaskDetail({ id }: { id: string }) {
                   <span
                     className="tl-dot"
                     style={{
-                      background: KIND_COLOR[event.kind] ?? "var(--todo)",
+                      background:
+                        KIND_COLOR[event.kind] ?? "var(--status-todo)",
                     }}
                   />
                   {index < activity.length - 1 && (
@@ -1027,7 +1246,7 @@ export default function TaskDetail({ id }: { id: string }) {
             ))}
           </div>
         )}
-      </section>
+      </aside>
     </div>
   );
 }

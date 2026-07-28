@@ -1910,7 +1910,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   border: 0;
 }
 .add-task-field > label,
-.add-task-field > legend {
+.add-task-field > legend,
+.add-task-field > .field-label {
   padding: 0;
   color: var(--text-secondary);
   font-size: 12px;
@@ -2001,6 +2002,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .owner-field .owner-picker {
   width: 100%;
 }
+.owner-field > .field-label {
+  padding-top: 8px;
+}
 .owner-picker-selected {
   display: flex;
   flex-wrap: wrap;
@@ -2037,14 +2041,18 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   color: var(--text-secondary);
   cursor: pointer;
 }
-.owner-picker-trigger {
+.owner-picker-anchor {
+  position: relative;
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
   margin-top: 8px;
 }
 .owner-picker-panel {
   position: absolute;
   z-index: 35;
   top: calc(100% + 6px);
-  right: 0;
+  left: 0;
   width: min(360px, calc(100vw - 32px));
   max-height: min(360px, calc(100dvh - 120px));
   overflow-y: auto;
@@ -2219,7 +2227,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   border-bottom: 0;
 }
 .task-property > label,
-.task-property > legend {
+.task-property > legend,
+.task-property > .field-label {
   padding: 0;
   color: var(--text-secondary);
   font-size: 12px;
@@ -2286,7 +2295,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .task-property-owner {
   align-items: start;
 }
-.task-property-owner > legend {
+.task-property-owner > .field-label {
   padding-top: 8px;
 }
 .task-property-owner > .owner-picker {

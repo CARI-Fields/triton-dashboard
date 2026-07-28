@@ -64,12 +64,13 @@ export default function OwnerPicker({
 
     const boundary = root.closest<HTMLElement>(".drawer-body");
     const boundaryRect = boundary?.getBoundingClientRect();
-    const rootRect = root.getBoundingClientRect();
+    const triggerRect = triggerRef.current?.getBoundingClientRect();
+    if (!triggerRect) return;
     const panelHeight = panel.getBoundingClientRect().height;
     const boundaryTop = boundaryRect?.top ?? 0;
     const boundaryBottom = boundaryRect?.bottom ?? window.innerHeight;
-    const spaceBelow = boundaryBottom - rootRect.bottom - PANEL_GAP_PX;
-    const spaceAbove = rootRect.top - boundaryTop - PANEL_GAP_PX;
+    const spaceBelow = boundaryBottom - triggerRect.bottom - PANEL_GAP_PX;
+    const spaceAbove = triggerRect.top - boundaryTop - PANEL_GAP_PX;
     const nextPlacement = panelHeight > spaceBelow && spaceAbove > spaceBelow
       ? "above"
       : "below";
@@ -175,70 +176,72 @@ export default function OwnerPicker({
           );
         })}
       </div>
-      <button
-        type="button"
-        className="text-action owner-picker-trigger"
-        ref={triggerRef}
-        disabled={disabled}
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        Add owner
-      </button>
-      {open ? (
-        <div
-          className="owner-picker-panel"
-          ref={panelRef}
-          role="dialog"
-          aria-label="Add owner"
-          data-placement={panelPlacement}
+      <div className="owner-picker-anchor">
+        <button
+          type="button"
+          className="text-action owner-picker-trigger"
+          ref={triggerRef}
+          disabled={disabled}
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
         >
-          <div className="owner-picker-options">
-            {availableMembers.length === 0 ? (
-              <span className="field-help">Everyone is already added.</span>
-            ) : availableMembers.map((member) => (
+          Add owner
+        </button>
+        {open ? (
+          <div
+            className="owner-picker-panel"
+            ref={panelRef}
+            role="dialog"
+            aria-label="Add owner"
+            data-placement={panelPlacement}
+          >
+            <div className="owner-picker-options">
+              {availableMembers.length === 0 ? (
+                <span className="field-help">Everyone is already added.</span>
+              ) : availableMembers.map((member) => (
+                <button
+                  type="button"
+                  key={member.id}
+                  aria-label={`Add ${member.name}`}
+                  disabled={disabled || pending}
+                  onClick={() => selectOwner(member.name)}
+                >
+                  <OwnerAvatar
+                    name={member.name}
+                    initials={member.initials}
+                    size={24}
+                  />
+                  <span title={member.name}>{member.name}</span>
+                </button>
+              ))}
+            </div>
+            <div className="owner-picker-create">
+              <label htmlFor={inputId}>New owner name</label>
+              <input
+                id={inputId}
+                ref={inputRef}
+                value={newOwnerName}
+                disabled={pending || disabled}
+                onChange={(event) => setNewOwnerName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void createOwner();
+                }}
+              />
               <button
                 type="button"
-                key={member.id}
-                aria-label={`Add ${member.name}`}
-                disabled={disabled || pending}
-                onClick={() => selectOwner(member.name)}
+                className="btn"
+                disabled={!newOwnerName.trim() || pending || disabled}
+                onClick={() => void createOwner()}
               >
-                <OwnerAvatar
-                  name={member.name}
-                  initials={member.initials}
-                  size={24}
-                />
-                <span title={member.name}>{member.name}</span>
+                {pending ? "Creating…" : "Create owner"}
               </button>
-            ))}
+            </div>
           </div>
-          <div className="owner-picker-create">
-            <label htmlFor={inputId}>New owner name</label>
-            <input
-              id={inputId}
-              ref={inputRef}
-              value={newOwnerName}
-              disabled={pending || disabled}
-              onChange={(event) => setNewOwnerName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                event.stopPropagation();
-                void createOwner();
-              }}
-            />
-            <button
-              type="button"
-              className="btn"
-              disabled={!newOwnerName.trim() || pending || disabled}
-              onClick={() => void createOwner()}
-            >
-              {pending ? "Creating…" : "Create owner"}
-            </button>
-          </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }

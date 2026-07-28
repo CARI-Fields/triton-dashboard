@@ -163,6 +163,7 @@ describe("AddTaskDrawer", () => {
     const create = vi.fn().mockResolvedValue(undefined);
     renderDrawer({ onCreate: create });
 
+    expect(screen.getByRole("group", { name: "Owner" })).toBeDefined();
     fireEvent.change(screen.getByLabelText("Task title"), {
       target: { value: "Validate NPU kernels" },
     });

@@ -71,7 +71,7 @@ describe("TaskProperties", () => {
     expect(screen.getByLabelText("Task status")).toBeDefined();
     expect(screen.getByLabelText("Task type")).toBeDefined();
     expect(screen.getByLabelText("Task tags")).toBeDefined();
-    expect(screen.getByText("Owner")).toBeDefined();
+    expect(screen.getByRole("group", { name: "Owner" })).toBeDefined();
     expect(screen.getByLabelText("Task priority")).toBeDefined();
     expect(screen.getByLabelText("Task due date")).toBeDefined();
     expect(screen.queryByText(/Module|Assignee/i)).toBeNull();

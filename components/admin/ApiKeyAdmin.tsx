@@ -43,6 +43,13 @@ const EMPTY_DRAFT: KeyDraft = {
   expires_at: "",
 };
 
+const ROTATION_UNCERTAIN_MESSAGE =
+  "Rotation may have reached the server: the old credential may already be "
+  + "invalid, and the new secret cannot be recovered. Refresh the list, then "
+  + "rotate again if needed.";
+
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 function errorMessage(reason: unknown, fallback: string): string {
   return reason instanceof Error && reason.message.trim()
     ? reason.message
@@ -52,6 +59,7 @@ function errorMessage(reason: unknown, fallback: string): string {
 export class AdminApiClientError extends Error {
   constructor(
     readonly status: number,
+    readonly statusText: string,
     readonly code: string,
     message: string,
   ) {
@@ -64,18 +72,31 @@ async function readEnvelope<T>(
   response: Response,
   fallback: string,
 ): Promise<T> {
-  let body: ApiEnvelope<T>;
+  const { ok, status, statusText } = response;
+  let parsed: unknown;
   try {
-    body = await response.json() as ApiEnvelope<T>;
+    parsed = await response.json();
   } catch {
+    if (!ok) {
+      throw new AdminApiClientError(
+        status,
+        statusText,
+        `HTTP_${status}`,
+        fallback,
+      );
+    }
     throw new Error(fallback);
   }
-  if (!response.ok) {
+  const body: ApiEnvelope<T> = (
+    parsed !== null && typeof parsed === "object"
+  ) ? parsed as ApiEnvelope<T> : {};
+  if (!ok) {
     throw new AdminApiClientError(
-      response.status,
+      status,
+      statusText,
       typeof body.error?.code === "string"
         ? body.error.code
-        : `HTTP_${response.status}`,
+        : `HTTP_${status}`,
       typeof body.error?.message === "string" ? body.error.message : fallback,
     );
   }
@@ -121,12 +142,28 @@ function withoutSecret(result: ManagedKeyWithSecret): ManagedKeyView {
   return view;
 }
 
+function isUncertainRotationFailure(reason: unknown): boolean {
+  return !(
+    reason instanceof AdminApiClientError
+    && reason.status >= 400
+    && reason.status < 500
+  );
+}
+
+interface RequestOperation {
+  finish: () => void;
+  isCurrent: () => boolean;
+  token?: string;
+}
+
 export default function ApiKeyAdmin() {
   const [keys, setKeys] = useState<ManagedKeyView[]>([]);
   const [members, setMembers] = useState<MemberOption[]>([]);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [rotationUncertain, setRotationUncertain] = useState(false);
   const [createDraft, setCreateDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -140,13 +177,26 @@ export default function ApiKeyAdmin() {
   const mounted = useRef(false);
   const loadGeneration = useRef(0);
   const loadAbort = useRef<AbortController | null>(null);
+  const loadInFlight = useRef(false);
+  const mutationGeneration = useRef(0);
+  const mutationInFlight = useRef(false);
   const sessionInvalid = useRef(false);
 
   const handleRequestFailure = useCallback(async (
     reason: unknown,
     fallback: string,
+    operation: RequestOperation,
   ) => {
     if (reason instanceof AdminApiClientError && reason.status === 401) {
+      if (!operation.token || !operation.isCurrent() || !supabase) return;
+      const sessionResult = await supabase.auth.getSession();
+      if (
+        !operation.isCurrent()
+        || sessionResult.error
+        || sessionResult.data.session?.access_token !== operation.token
+      ) {
+        return;
+      }
       if (!sessionInvalid.current) {
         sessionInvalid.current = true;
         try {
@@ -155,21 +205,38 @@ export default function ApiKeyAdmin() {
           // AuthGate still needs the local session-expired state below.
         }
       }
-      if (mounted.current) {
+      if (operation.isCurrent()) {
         setSessionExpired(true);
         setError("Your session has expired. Sign in again.");
       }
       return;
     }
-    if (mounted.current) setError(errorMessage(reason, fallback));
+    if (operation.isCurrent()) setError(errorMessage(reason, fallback));
   }, []);
 
   const load = useCallback(async () => {
-    if (sessionInvalid.current) return;
+    if (
+      sessionInvalid.current
+      || loadInFlight.current
+      || mutationInFlight.current
+    ) {
+      return;
+    }
+    loadInFlight.current = true;
     const generation = ++loadGeneration.current;
     loadAbort.current?.abort();
     const controller = new AbortController();
     loadAbort.current = controller;
+    const operation: RequestOperation = {
+      finish: () => {
+        if (generation === loadGeneration.current) {
+          loadInFlight.current = false;
+        }
+      },
+      isCurrent: () => (
+        mounted.current && generation === loadGeneration.current
+      ),
+    };
     setLoading(true);
     setError(null);
 
@@ -178,6 +245,7 @@ export default function ApiKeyAdmin() {
         setLoading(false);
         setError("Connect Supabase before managing API keys.");
       }
+      operation.finish();
       return;
     }
 
@@ -193,6 +261,7 @@ export default function ApiKeyAdmin() {
       if (sessionResult.error || !token) {
         throw new Error("Your session has expired. Sign in again.");
       }
+      operation.token = token;
       const responsePromise = fetch("/api/admin/v1/api-keys", {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
@@ -212,6 +281,7 @@ export default function ApiKeyAdmin() {
       if (!mounted.current || generation !== loadGeneration.current) return;
       setMembers((membersResult.data ?? []) as MemberOption[]);
       setKeys(loaded);
+      setRotationUncertain(false);
     } catch (reason) {
       if (
         !mounted.current
@@ -220,8 +290,13 @@ export default function ApiKeyAdmin() {
       ) {
         return;
       }
-      await handleRequestFailure(reason, "Could not load API keys.");
+      await handleRequestFailure(
+        reason,
+        "Could not load API keys.",
+        operation,
+      );
     } finally {
+      operation.finish();
       if (mounted.current && generation === loadGeneration.current) {
         setLoading(false);
       }
@@ -234,19 +309,50 @@ export default function ApiKeyAdmin() {
     return () => {
       mounted.current = false;
       loadGeneration.current += 1;
+      mutationGeneration.current += 1;
+      loadInFlight.current = false;
+      mutationInFlight.current = false;
       loadAbort.current?.abort();
     };
   }, [load]);
+
+  useEffect(() => {
+    let nextExpiry = Number.POSITIVE_INFINITY;
+    for (const key of keys) {
+      if (key.revoked_at !== null || key.expires_at === null) continue;
+      const expiresAt = Date.parse(key.expires_at);
+      if (
+        Number.isFinite(expiresAt)
+        && expiresAt > clockNow
+        && expiresAt < nextExpiry
+      ) {
+        nextExpiry = expiresAt;
+      }
+    }
+    if (!Number.isFinite(nextExpiry)) return;
+
+    const actualNow = Date.now();
+    if (nextExpiry <= actualNow) {
+      setClockNow(actualNow);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setClockNow(Date.now());
+    }, Math.min(nextExpiry - actualNow, MAX_TIMER_DELAY_MS));
+    return () => window.clearTimeout(timer);
+  }, [clockNow, keys]);
 
   async function adminRequest<T>(
     path: string,
     init: RequestInit,
     fallback: string,
+    operation: RequestOperation,
   ): Promise<T> {
     if (!supabase) throw new Error("Connect Supabase first.");
     if (sessionInvalid.current) {
       throw new AdminApiClientError(
         401,
+        "Unauthorized",
         "INVALID_ADMIN_SESSION",
         "Your session has expired. Sign in again.",
       );
@@ -256,6 +362,7 @@ export default function ApiKeyAdmin() {
     if (sessionError || !token) {
       throw new Error("Your session has expired. Sign in again.");
     }
+    operation.token = token;
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
     if (init.body !== undefined) headers.set("Content-Type", "application/json");
@@ -265,6 +372,22 @@ export default function ApiKeyAdmin() {
       cache: "no-store",
     });
     return readEnvelope<T>(response, fallback);
+  }
+
+  function beginMutationOperation(): RequestOperation | null {
+    if (loadInFlight.current || mutationInFlight.current) return null;
+    mutationInFlight.current = true;
+    const generation = ++mutationGeneration.current;
+    return {
+      finish: () => {
+        if (generation === mutationGeneration.current) {
+          mutationInFlight.current = false;
+        }
+      },
+      isCurrent: () => (
+        mounted.current && generation === mutationGeneration.current
+      ),
+    };
   }
 
   function toggleScope(
@@ -285,12 +408,15 @@ export default function ApiKeyAdmin() {
     if (
       loading
       || sessionInvalid.current
+      || rotationUncertain
       || creating
       || !createDraft.name.trim()
       || !createDraft.member_id
     ) {
       return;
     }
+    const operation = beginMutationOperation();
+    if (!operation) return;
     setCreating(true);
     setError(null);
     setOneTimeSecret(null);
@@ -306,8 +432,9 @@ export default function ApiKeyAdmin() {
         "/api/admin/v1/api-keys",
         { method: "POST", body: JSON.stringify(input) },
         "Could not create the API key.",
+        operation,
       );
-      if (!mounted.current) return;
+      if (!operation.isCurrent()) return;
       const view = withoutSecret(created);
       setKeys((current) => [
         view,
@@ -316,9 +443,14 @@ export default function ApiKeyAdmin() {
       setCreateDraft(EMPTY_DRAFT);
       setOneTimeSecret({ value: created.secret, source: "created" });
     } catch (reason) {
-      await handleRequestFailure(reason, "Could not create the API key.");
+      await handleRequestFailure(
+        reason,
+        "Could not create the API key.",
+        operation,
+      );
     } finally {
-      if (mounted.current) setCreating(false);
+      operation.finish();
+      if (operation.isCurrent()) setCreating(false);
     }
   }
 
@@ -338,12 +470,15 @@ export default function ApiKeyAdmin() {
       creating
       || loading
       || sessionInvalid.current
+      || rotationUncertain
       || pendingId !== null
       || !editDraft.name.trim()
       || !editDraft.member_id
     ) {
       return;
     }
+    const operation = beginMutationOperation();
+    if (!operation) return;
     setPendingId(key.id);
     setError(null);
     try {
@@ -357,16 +492,22 @@ export default function ApiKeyAdmin() {
         `/api/admin/v1/api-keys/${key.id}`,
         { method: "PATCH", body: JSON.stringify(changes) },
         "Could not update the API key.",
+        operation,
       );
-      if (!mounted.current) return;
+      if (!operation.isCurrent()) return;
       setKeys((current) => current.map(
         (candidate) => candidate.id === updated.id ? updated : candidate,
       ));
       setEditingId(null);
     } catch (reason) {
-      await handleRequestFailure(reason, "Could not update the API key.");
+      await handleRequestFailure(
+        reason,
+        "Could not update the API key.",
+        operation,
+      );
     } finally {
-      if (mounted.current) setPendingId(null);
+      operation.finish();
+      if (operation.isCurrent()) setPendingId(null);
     }
   }
 
@@ -375,15 +516,19 @@ export default function ApiKeyAdmin() {
       creating
       || loading
       || sessionInvalid.current
+      || rotationUncertain
       || pendingId !== null
       || managedKeyStatus(key, Date.now()) !== "active"
     ) {
       return;
     }
+    const operation = beginMutationOperation();
+    if (!operation) return;
     if (!window.confirm(
       "Rotate this API key? This will immediately invalidate the old "
       + "credential, and the new secret is shown only once.",
     )) {
+      operation.finish();
       return;
     }
     setPendingId(key.id);
@@ -395,17 +540,28 @@ export default function ApiKeyAdmin() {
         `/api/admin/v1/api-keys/${key.id}/rotate`,
         { method: "POST" },
         "Could not rotate the API key.",
+        operation,
       );
-      if (!mounted.current) return;
+      if (!operation.isCurrent()) return;
       const view = withoutSecret(rotated);
       setKeys((current) => current.map(
         (candidate) => candidate.id === view.id ? view : candidate,
       ));
       setOneTimeSecret({ value: rotated.secret, source: "rotated" });
     } catch (reason) {
-      await handleRequestFailure(reason, "Could not rotate the API key.");
+      if (operation.isCurrent() && isUncertainRotationFailure(reason)) {
+        setRotationUncertain(true);
+        setError(ROTATION_UNCERTAIN_MESSAGE);
+      } else {
+        await handleRequestFailure(
+          reason,
+          "Could not rotate the API key.",
+          operation,
+        );
+      }
     } finally {
-      if (mounted.current) setPendingId(null);
+      operation.finish();
+      if (operation.isCurrent()) setPendingId(null);
     }
   }
 
@@ -414,14 +570,18 @@ export default function ApiKeyAdmin() {
       creating
       || loading
       || sessionInvalid.current
+      || rotationUncertain
       || pendingId !== null
       || key.revoked_at !== null
     ) {
       return;
     }
+    const operation = beginMutationOperation();
+    if (!operation) return;
     if (!window.confirm(
       "Revoke this API key? Revocation is immediate and cannot be undone.",
     )) {
+      operation.finish();
       return;
     }
     setPendingId(key.id);
@@ -431,15 +591,21 @@ export default function ApiKeyAdmin() {
         `/api/admin/v1/api-keys/${key.id}/revoke`,
         { method: "POST" },
         "Could not revoke the API key.",
+        operation,
       );
-      if (!mounted.current) return;
+      if (!operation.isCurrent()) return;
       setKeys((current) => current.map(
         (candidate) => candidate.id === revoked.id ? revoked : candidate,
       ));
     } catch (reason) {
-      await handleRequestFailure(reason, "Could not revoke the API key.");
+      await handleRequestFailure(
+        reason,
+        "Could not revoke the API key.",
+        operation,
+      );
     } finally {
-      if (mounted.current) setPendingId(null);
+      operation.finish();
+      if (operation.isCurrent()) setPendingId(null);
     }
   }
 
@@ -562,6 +728,7 @@ export default function ApiKeyAdmin() {
               creating
               || loading
               || sessionExpired
+              || rotationUncertain
               || pendingId !== null
               || !createDraft.name.trim()
               || !createDraft.member_id
@@ -617,9 +784,10 @@ export default function ApiKeyAdmin() {
             const busy = pendingId === key.id;
             const controlsBusy = loading
               || sessionExpired
+              || rotationUncertain
               || creating
               || pendingId !== null;
-            const status = managedKeyStatus(key, Date.now());
+            const status = managedKeyStatus(key, clockNow);
             return (
               <article
                 className="panel api-key-card"

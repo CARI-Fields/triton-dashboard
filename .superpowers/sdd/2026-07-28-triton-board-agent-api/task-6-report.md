@@ -163,3 +163,72 @@
 - Production secret, browser persistence, and Authorization logging scans:
   clean.
 - `progress.md` remains unchanged.
+
+## Fix Round 2
+
+### Review fixes
+
+- Bound every load and mutation request to its captured bearer token and an
+  operation-generation predicate. A 401 can invalidate the local session only
+  while that operation is still current and mounted and a fresh Supabase
+  session lookup still returns the same token. Late unmount responses and
+  refreshed-token responses have no sign-out or invalid-session side effects.
+- Preserved HTTP status and status text before parsing an Admin response body.
+  Empty, non-JSON, truncated, and otherwise invalid error bodies still produce
+  a typed `AdminApiClientError`, so a current 401 follows the authentication
+  path while non-401 failures remain ordinary errors. Invalid successful
+  envelopes use the operation's safe fallback rather than exposing parser or
+  property-access errors.
+- Added an uncertain-rotation recovery state for network rejection, 5xx, and
+  malformed successful responses. It explains that the old credential may
+  already be invalid and the unseen replacement secret cannot be recovered,
+  blocks all mutations, and requires a successful list refresh before another
+  rotate. Structured 4xx responses such as 409 remain known failures.
+- Added synchronous load/mutation in-flight refs in addition to rendered busy
+  state. Every handler atomically acquires the appropriate operation slot, so
+  programmatic duplicate submits and stale DOM events cannot bypass React's
+  batched state updates. Generation-aware `finally` and unmount cleanup release
+  only the matching operation and cannot leave a permanent lock.
+- Added a live clock driven by the nearest active expiry. The timer is
+  rescheduled when keys change, split at the platform maximum timeout, and
+  cleaned up by the effect. Cards become Expired and lose Rotate at the exact
+  deadline without another interaction; the rotate handler still checks a
+  fresh `Date.now()` before confirmation or POST.
+
+### TDD evidence
+
+1. Stale/session parsing RED: 3/19 UI tests failed because an unmounted
+   mutation 401 and an old-token mutation 401 both signed out, while an empty
+   401 became a retryable generic error. Token-bound operation predicates and
+   status-first parsing made 19/19 pass.
+2. Rotation recovery RED: 3/23 failed because network response loss, a 500,
+   and malformed 2xx rotation results all displayed ordinary errors. The
+   recovery latch and successful-reload reset made 23/23 pass; a structured
+   409 remained retryable without reload.
+3. Handler mutex RED: 3/26 failed because duplicate programmatic submit and
+   both Retry/mutation event orders emitted an extra request. Synchronous
+   bidirectional guards made 26/26 pass and the reload-unlock assertion proved
+   the lock is released.
+4. Live expiry RED: 2/28 failed because exact-deadline and edited-expiry cards
+   stayed Active. Nearest-expiry scheduling made 28/28 pass with fake timers
+   and no extra POST.
+5. Invalid-but-parseable 2xx RED: a `null` envelope exposed a JavaScript
+   property-access error. Runtime envelope normalization made the safe
+   fallback assertion pass.
+6. Handler-entry self-review RED: two same-batch rotate events displayed two
+   confirmations before the second request was rejected. Acquiring the
+   synchronous mutation slot before destructive confirmation made the focused
+   UI suite pass 32/32; cancellation releases the slot immediately.
+
+### Fresh verification
+
+- Focused Fix Round 2 tests: 5 files, 56/56 passed.
+- Full Vitest suite: 33 files, 464/464 passed.
+- `npx tsc --noEmit`: exit 0.
+- Next.js 16.2.10 production build: exit 0; the Admin page and four Admin API
+  routes were generated.
+- Supabase rollback-only schema regression: 20/20 passed.
+- `git diff --check`: exit 0.
+- Production secret, browser persistence, Authorization logging, and debug
+  scans: clean.
+- `progress.md` remains unchanged.

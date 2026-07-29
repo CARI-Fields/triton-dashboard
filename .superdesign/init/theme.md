@@ -1,3 +1,19 @@
+# Compact theme summary
+
+- **Colors — light `:root`:** canvas/surface `#ffffff`; surface-subtle `#f8faff`; hover `#f3f3f3`; border/strong `#e6e6e6`/`#d8dde8`; text primary/secondary/tertiary `#141414`/`#6f748c`/`#929292`; accent/hover/on-accent/foreground/subtle `#1e96eb`/`#1887d4`/`#050b10`/`#075f9f`/`#eaf5fd`; todo/progress/done/blocked/warning `#abb3bf`/`#1e96eb`/`#248569`/`#d45d62`/`#c88719`.
+- **Colors — `[data-theme="dark"]`:** canvas/surface/subtle/hover `#141414`/`#252525`/`#1b1b1b`/`#303030`; border/strong `#414141`/`#525252`; text `#e6e6e6`/`#929292`/`#7a7a7a`; accent remains `#1e96eb`, hover `#1887d4`, foreground `#8dcef7`, subtle `rgb(30 150 235 / 12%)`; status foreground overrides: `#c7ccd4`, `#8dcef7`, `#8bd7bb`, `#f0a6aa`.
+- **Type:** `--sans` = `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`; `--mono` = `"Cascadia Code", "Consolas", ui-monospace, "SFMono-Regular", monospace`; global line-height `1.55`; observed UI font sizes include 13/14/15/16/18px.
+- **Spacing:** no named scale; observed rhythm includes 4/8/10/12/16/18/20/22/24/28/32/36/**40**/44/46/56/64/80/88px plus responsive `clamp()` values. The approved Task Detail section gap is exactly 40px.
+- **Radius:** 6px, 7px, 8px; pill/avatars/scroll thumb `999px`.
+- **Shadows:** `--shadow-1: 0px 0px 0px 1px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.1), 0px 1px 2px -1px rgba(0, 0, 0, 0.1)`; `--shadow-3: 0px 0px 0px 1px rgba(0, 0, 0, 0.1), 0px 4px 6px -4px rgba(0, 0, 0, 0.1), 0px 10px 15px -3px rgba(0, 0, 0, 0.1)`.
+- **Breakpoints:** reduced motion; max-width 1279px, 1023px, 767px, 479px; local max-width 720px; board/detail desktop contracts min-width 768px.
+- **Theme mechanism:** `ThemeProvider` sets root `data-theme` and `color-scheme`; persisted key `triton-theme`; initial fallback is OS preference.
+
+## Raw theme source
+
+### `app/globals.css`
+
+```css
 *,
 *::before,
 *::after { box-sizing: border-box; }
@@ -1713,17 +1729,13 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   background: var(--surface-hover);
 }
 .task-card-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
+  display: flex;
   align-items: flex-start;
-  column-gap: 8px;
-  row-gap: 4px;
+  gap: 8px;
 }
 .task-card-title {
-  grid-column: 1 / -1;
-  grid-row: 2;
   min-width: 0;
+  flex: 1;
   color: var(--text-primary);
   font-size: 13.5px;
   font-weight: 625;
@@ -1735,8 +1747,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .task-card-menu {
   position: relative;
-  grid-column: 2;
-  grid-row: 1;
   margin: -3px -5px 0 0;
 }
 .task-actions-trigger {
@@ -1784,27 +1794,15 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   color: var(--status-blocked-foreground);
 }
 .task-card-type {
-  grid-column: 1;
-  grid-row: 1;
-  justify-self: start;
-  max-width: min(112px, 40%);
+  margin-top: 5px;
   overflow: hidden;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--accent-subtle);
-  color: var(--accent-foreground);
-  font-family: var(--sans);
-  font-size: 11px;
-  font-variant-caps: all-small-caps;
-  font-weight: 650;
-  letter-spacing: 0.065em;
-  line-height: 1.5;
+  color: var(--text-tertiary);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.035em;
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
-}
-.task-card-type.is-empty {
-  background: var(--surface-hover);
-  color: var(--status-todo-foreground);
 }
 .task-card-tags {
   display: flex;
@@ -1821,10 +1819,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .task-card-owners {
   display: flex;
-  flex: 1 1 auto;
   align-items: center;
   min-width: 0;
-  overflow: hidden;
 }
 .task-card-owners .owner-avatar + .owner-avatar {
   margin-left: -6px;
@@ -1847,22 +1843,39 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   flex: 0 0 auto;
   font-size: 10.5px;
 }
-.task-card-meta {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-left: auto;
-}
 .task-card-updated {
   display: block;
-  margin: 0;
-  color: var(--status-todo-foreground);
+  margin-top: 9px;
+  color: var(--text-tertiary);
   font-family: var(--mono);
   font-size: 10px;
-  white-space: nowrap;
 }
+.column-add-task {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 34px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+.column-add-task:hover {
+  border-color: var(--border);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.column-add-task > span {
+  font-size: 17px;
+  line-height: 1;
+}
+
 .task-quick-edit {
   display: grid;
   gap: 10px;
@@ -1916,6 +1929,13 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   color: var(--status-blocked-foreground);
 }
 
+.board-sync-note {
+  margin: 14px 2px 0;
+  color: var(--text-tertiary);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
 @media (min-width: 768px) {
   .app-content:has(.board-page[data-view="board"]) {
     overflow: hidden;
@@ -1940,7 +1960,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
     flex-direction: column;
   }
   .board-page[data-view="board"] .board-toolbar,
-  .board-page[data-view="board"] .board-error-banner {
+  .board-page[data-view="board"] .board-error-banner,
+  .board-page[data-view="board"] .board-sync-note {
     flex: 0 0 auto;
   }
   .board-page[data-view="board"] .task-board-scroll {
@@ -1953,7 +1974,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   }
   .board-page[data-view="board"] .task-column {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
     height: 100%;
     min-height: 0;
     overflow: hidden;
@@ -1972,6 +1993,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
     outline: 2px solid var(--accent);
     outline-offset: -2px;
     border-radius: 6px;
+  }
+  .board-page[data-view="board"] .board-sync-note {
+    margin-bottom: 14px;
   }
 }
 
@@ -2511,9 +2535,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .task-properties {
   width: min(880px, 100%);
   max-width: none;
-  margin: 18px auto 0;
+  margin: 18px auto 22px;
   padding: 0;
-  border: 0;
+  border-block: 1px solid var(--border);
 }
 .task-property {
   display: grid;
@@ -2521,10 +2545,14 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   align-items: center;
   gap: 18px;
   min-width: 0;
-  min-height: 48px;
+  min-height: 50px;
   margin: 0;
-  padding: 7px 2px;
+  padding: 8px 2px;
   border: 0;
+  border-bottom: 1px solid var(--border);
+}
+.task-property:last-child {
+  border-bottom: 0;
 }
 .task-property > label,
 .task-property > legend,
@@ -2604,9 +2632,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .task-detail-page .record-section,
 .task-detail-page .task-experiments-section {
-  margin: 40px 0 0;
-  padding: 0;
-  border: 0;
+  padding: 28px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
 }
 .task-detail-page .record-section > h2,
 .task-detail-page .detail-section-head h2 {
@@ -3108,3 +3136,97 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
     padding-bottom: 20px;
   }
 }
+```
+
+### `components/theme/ThemeProvider.tsx`
+
+```tsx
+"use client";
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+export type Theme = "light" | "dark";
+
+interface ThemeContextValue {
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+}
+
+const THEME_STORAGE_KEY = "triton-theme";
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+function isTheme(value: string | null | undefined): value is Theme {
+  return value === "light" || value === "dark";
+}
+
+function resolveAppliedTheme(): Theme {
+  const applied = document.documentElement.dataset.theme;
+  if (isTheme(applied)) return applied;
+
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (isTheme(saved)) return saved;
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+  }
+
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+function applyTheme(theme: Theme, persist: boolean) {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+
+  if (!persist) return;
+
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // The root theme remains usable when storage is unavailable.
+  }
+}
+
+export function useTheme(): ThemeContextValue {
+  const context = useContext(ThemeContext);
+  if (!context) {
+    throw new Error("useTheme must be used within ThemeProvider");
+  }
+  return context;
+}
+
+export default function ThemeProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [theme, setThemeState] = useState<Theme>("light");
+
+  useEffect(() => {
+    const appliedTheme = resolveAppliedTheme();
+    applyTheme(appliedTheme, false);
+    setThemeState(appliedTheme);
+  }, []);
+
+  const setTheme = useCallback((nextTheme: Theme) => {
+    setThemeState(nextTheme);
+    applyTheme(nextTheme, true);
+  }, []);
+
+  const value = useMemo(() => ({ theme, setTheme }), [setTheme, theme]);
+
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
+}
+```
+
+No Tailwind configuration or separate token file is present in this repository.

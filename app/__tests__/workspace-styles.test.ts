@@ -65,6 +65,98 @@ function contrastRatio(first: Rgb, second: Rgb): number {
 }
 
 describe("workspace visual contracts", () => {
+  it("uses whitespace instead of decorative Task Detail dividers", () => {
+    const properties = ruleBody(globals, ".task-properties");
+    expect(properties).toMatch(/border\s*:\s*0/);
+    expect(properties).not.toMatch(/border-block\s*:\s*1px/);
+
+    const property = ruleBody(globals, ".task-property");
+    expect(property).toMatch(/border\s*:\s*0/);
+    expect(property).not.toMatch(/border-bottom\s*:\s*1px/);
+
+    const sections = ruleBody(
+      globals,
+      ".task-detail-page .record-section,\n"
+        + ".task-detail-page .task-experiments-section",
+    );
+    expect(sections).toMatch(/margin\s*:\s*40px\s+0\s+0/);
+    expect(sections).toMatch(/padding\s*:\s*0/);
+    expect(sections).toMatch(/border\s*:\s*0/);
+
+    expect(ruleBody(globals, ".task-detail-page .attachment-gallery"))
+      .toMatch(/border-top\s*:\s*0/);
+  });
+
+  it("uses a two-column card-head grid with a full-width title row", () => {
+    const heading = ruleBody(globals, ".task-card-head");
+    expect(heading).toMatch(/display\s*:\s*grid/);
+    expect(heading).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s+auto/,
+    );
+    expect(heading).toMatch(/grid-template-rows\s*:\s*auto\s+auto/);
+
+    const type = ruleBody(globals, ".task-card-type");
+    expect(type).toMatch(/grid-column\s*:\s*1/);
+    expect(type).toMatch(/grid-row\s*:\s*1/);
+    expect(type).toMatch(/justify-self\s*:\s*start/);
+    expect(type).toMatch(
+      /max-width\s*:\s*min\(112px,\s*40%\)/,
+    );
+    expect(type).toMatch(/font-variant-caps\s*:\s*all-small-caps/);
+    expect(type).toMatch(/background\s*:\s*var\(--accent-subtle\)/);
+    expect(type).toMatch(/text-overflow\s*:\s*ellipsis/);
+
+    const title = ruleBody(globals, ".task-card-title");
+    expect(title).toMatch(/grid-column\s*:\s*1\s*\/\s*-1/);
+    expect(title).toMatch(/grid-row\s*:\s*2/);
+
+    const menu = ruleBody(globals, ".task-card-menu");
+    expect(menu).toMatch(/grid-column\s*:\s*2/);
+    expect(menu).toMatch(/grid-row\s*:\s*1/);
+  });
+
+  it("bounds Owner overflow away from non-shrinking card metadata", () => {
+    const owners = ruleBody(globals, ".task-card-owners");
+    expect(owners).toMatch(/flex\s*:\s*1\s+1\s+auto/);
+    expect(owners).toMatch(/min-width\s*:\s*0/);
+    expect(owners).toMatch(/overflow\s*:\s*hidden/);
+
+    const metadata = ruleBody(globals, ".task-card-meta");
+    expect(metadata).toMatch(/display\s*:\s*flex/);
+    expect(metadata).toMatch(/margin-left\s*:\s*auto/);
+    expect(metadata).toMatch(/flex\s*:\s*0\s+0\s+auto/);
+
+    const updated = ruleBody(globals, ".task-card-updated");
+    expect(updated).toMatch(/margin\s*:\s*0/);
+    expect(updated).toMatch(/white-space\s*:\s*nowrap/);
+  });
+
+  it("uses AA neutral text for small Task Card metadata in both themes", () => {
+    const emptyType = ruleBody(globals, ".task-card-type.is-empty");
+    expect(emptyType).toMatch(/background\s*:\s*var\(--surface-hover\)/);
+    expect(emptyType).toMatch(
+      /color\s*:\s*var\(--status-todo-foreground\)/,
+    );
+    expect(ruleBody(globals, ".task-card-updated")).toMatch(
+      /color\s*:\s*var\(--status-todo-foreground\)/,
+    );
+
+    for (const { name, tokens } of [
+      { name: "light", tokens: ruleBody(globals, ":root") },
+      { name: "dark", tokens: ruleBody(globals, '[data-theme="dark"]') },
+    ]) {
+      const foreground = hexColor(tokens, "--status-todo-foreground");
+      expect(
+        contrastRatio(foreground, hexColor(tokens, "--surface-hover")),
+        `${name} No type contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(foreground, hexColor(tokens, "--surface")),
+        `${name} updated-time contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("gives owner names and the add-owner panel the available field width", () => {
     const picker = ruleBody(globals, ".owner-picker");
     expect(picker).toMatch(/position\s*:\s*relative/);
@@ -600,8 +692,13 @@ describe("workspace visual contracts", () => {
       '.board-page[data-view="board"] .task-column',
     );
     expect(column).toMatch(
+      /grid-template-rows\s*:\s*auto\s+minmax\(0,\s*1fr\)/,
+    );
+    expect(column).not.toMatch(
       /grid-template-rows\s*:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/,
     );
+    expect(globals).not.toMatch(/\.column-add-task\s*\{/);
+    expect(globals).not.toMatch(/\.board-sync-note\s*\{/);
     expect(column).toMatch(/overflow\s*:\s*hidden/);
 
     const cards = ruleBody(

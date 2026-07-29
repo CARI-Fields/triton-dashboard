@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import TaskCard from "@/components/tasks/TaskCard";
@@ -99,6 +100,90 @@ function openQuickEdit() {
 afterEach(cleanup);
 
 describe("TaskCard", () => {
+  it("keeps Type, title, and menu in accessible grid order", () => {
+    render(
+      <TaskCard
+        task={task}
+        type={taskType}
+        types={[taskType]}
+        members={members}
+        showStatus
+        onPatch={vi.fn().mockResolvedValue(undefined)}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const card = screen.getByRole("article");
+    const heading = card.querySelector(".task-card-head");
+    const typeLabel = within(card).getByText("Kernel");
+    const title = within(card).getByRole("link", {
+      name: "Validate NPU kernels",
+    });
+    const menu = card.querySelector(".task-card-menu");
+    expect(Array.from(heading?.children ?? [])).toEqual([
+      typeLabel,
+      title,
+      menu,
+    ]);
+    expect(
+      title.compareDocumentPosition(
+        within(card).getByRole("button", {
+          name: "Actions for Validate NPU kernels",
+        }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const footer = card.querySelector(".task-card-foot");
+    const metadata = card.querySelector(".task-card-meta");
+    const updated = within(card).getByText(/^Updated /);
+    expect(footer?.contains(metadata)).toBe(true);
+    expect(metadata?.contains(updated)).toBe(true);
+    expect(within(metadata as HTMLElement).getByText("To do")).toBeDefined();
+  });
+
+  it("keeps every Owner in the DOM beside non-shrinking metadata", () => {
+    const owners = ["Maya", "Yubai", "Ada", "Grace", "Linus"];
+    render(
+      <TaskCard
+        task={{ ...task, owners }}
+        type={taskType}
+        types={[taskType]}
+        members={members}
+        showStatus
+        onPatch={vi.fn().mockResolvedValue(undefined)}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const card = screen.getByRole("article");
+    const ownerRegion = card.querySelector(".task-card-owners");
+    const metadata = card.querySelector(".task-card-meta");
+    expect(ownerRegion?.querySelectorAll(".owner-avatar")).toHaveLength(5);
+    for (const owner of owners) {
+      expect(
+        within(ownerRegion as HTMLElement).getByRole("img", { name: owner }),
+      ).toBeDefined();
+    }
+    expect(within(metadata as HTMLElement).getByText("To do")).toBeDefined();
+    expect(within(metadata as HTMLElement).getByText(/^Updated /)).toBeDefined();
+  });
+
+  it("renders an unassigned Type with the neutral treatment hook", () => {
+    render(
+      <TaskCard
+        task={{ ...task, typeId: null }}
+        type={null}
+        types={[taskType]}
+        members={members}
+        showStatus={false}
+        onPatch={vi.fn().mockResolvedValue(undefined)}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText("No type").classList.contains("is-empty")).toBe(true);
+  });
+
   it("moves focus into Quick edit and restores the disclosure trigger on Escape", async () => {
     renderCard();
     const trigger = screen.getByRole("button", {

@@ -187,6 +187,16 @@ describe("updated cursor", () => {
     expect(decodeUpdatedCursor(encoded)).toEqual(cursor);
   });
 
+  it("preserves a valid fractional timestamp with a numeric offset", () => {
+    const cursor = {
+      updated_at: "2026-07-28T15:31:22.123456+05:30",
+      id: TASK_ID,
+    };
+    const encoded = encodeUpdatedCursor(cursor);
+
+    expect(decodeUpdatedCursor(encoded)).toEqual(cursor);
+  });
+
   it.each([
     "",
     "not+base64url",
@@ -259,6 +269,19 @@ describe("read filter parsing", () => {
       ownerId: MEMBER_ID,
       status: "completed",
       updatedAfter: OLDER_UPDATED_AT,
+      limit: 50,
+    });
+  });
+
+  it("preserves a valid numeric-offset updated_after filter", () => {
+    const updatedAfter = "2026-07-28T15:31:22.123456-04:00";
+    const request = new Request(
+      "https://board.test/api/agent/v1/tasks"
+      + `?updated_after=${encodeURIComponent(updatedAfter)}`,
+    );
+
+    expect(parseTaskListFilters(request)).toEqual({
+      updatedAfter,
       limit: 50,
     });
   });

@@ -257,3 +257,104 @@ or test failure. The scans were split into simple commands and passed.
   warning.
 - The Supabase CLI initially hit its known sandbox telemetry `EROFS`; the same
   local-only commands passed when rerun with approved filesystem access.
+
+## Fix Round 1 — Validate If-Match Timestamps Before RPC
+
+### Root Cause
+
+`parseIfMatch` enforced one nonempty quoted value but did not validate the
+inner value as a timestamp. A value such as `"not-a-timestamp"` therefore
+reached a `timestamptz` RPC argument, where Postgres/PostgREST returned
+`22007`; the generic unknown-RPC path then produced a public 500.
+
+Task 7 already had the required strict RFC 3339 validator, but it was private
+to `read-repository.ts`. The fix extracts that implementation into the tiny
+pure `lib/agent-api/timestamps.ts` module and uses the same function for:
+
+- read cursors;
+- `updated_after` filters;
+- quoted If-Match values.
+
+There is no second timestamp regex or divergent calendar implementation.
+
+### RED
+
+Response-level and Task/Experiment route regressions were added before
+production changes:
+
+```bash
+npm test -- \
+  lib/agent-api/__tests__/responses.test.ts \
+  lib/agent-api/__tests__/read-repository.test.ts \
+  app/api/agent/v1/__tests__/write-routes.test.ts
+```
+
+The run failed exactly at the missing boundary validation:
+
+```text
+Test Files 2 failed | 1 passed (3)
+Tests 14 failed | 130 passed (144)
+```
+
+Ten response cases accepted quoted non-timestamps, impossible dates/times, or
+invalid offsets. Both Task and Experiment handlers returned 200 and called
+their mutation adapters for `"not-a-timestamp"` and
+`"2026-02-30T12:00:00.000Z"`.
+
+### GREEN
+
+After extracting and applying the shared validator:
+
+```text
+Test Files 3 passed (3)
+Tests 144 passed (144)
+```
+
+The focused coverage proves:
+
+- valid `Z`, numeric-offset, and 1/6/9-digit fractional values are forwarded
+  byte-for-byte unchanged;
+- Task and Experiment reject quoted non-timestamps and impossible dates with
+  stable `400 MISSING_IF_MATCH` before reading JSON or calling an RPC;
+- missing, empty, multiple, weak, wildcard, date-only, space-separated,
+  timezone-free, impossible clock, and impossible offset values are rejected;
+- a valid stale timestamp still reaches the RPC and remains a 412
+  `VERSION_CONFLICT`;
+- read cursor/query behavior still accepts fractional numeric-offset
+  timestamps and keeps canonical cursor round-trips.
+
+### Verification
+
+Fresh full application gates:
+
+```text
+npm test
+Test Files 39 passed (39)
+Tests 676 passed (676)
+
+npx tsc --noEmit
+exit 0
+
+npm run build
+exit 0
+Next.js 16.2.10 compiled successfully
+
+git diff --check
+exit 0
+```
+
+The proportionate local mutation RPC suite also remained green:
+
+```bash
+npx supabase test db --local supabase/tests/0008_agent_api_mutations.sql
+```
+
+```text
+Files=1, Tests=16
+Result: PASS
+```
+
+Security scans found no new CORS, secret/debug logging, direct resource write,
+or DELETE surface. Only the existing Admin-key validators retain separate
+date-time parsing because Fix Round 1 intentionally changes the Task 7 read
+and Task 8 If-Match boundary only.

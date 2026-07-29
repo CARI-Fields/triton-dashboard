@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AgentApiError } from "@/lib/agent-api/errors";
 import { getServerSupabase } from "@/lib/agent-api/server";
+import { isRfc3339Timestamp } from "@/lib/agent-api/timestamps";
 import type { AgentContext } from "@/lib/agent-api/types";
 import {
   isConfig,
@@ -34,8 +35,6 @@ const WRITES_PER_MINUTE = 30;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const RFC3339_PATTERN =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 const TASK_STATUSES = new Set<Status>([
@@ -190,36 +189,6 @@ function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
-function isTimestamp(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const match = value.match(RFC3339_PATTERN);
-  if (!match) return false;
-  const [
-    year,
-    month,
-    day,
-    hour,
-    minute,
-    second,
-    offsetHour = 0,
-    offsetMinute = 0,
-  ] = match.slice(1).map(Number);
-  if (
-    hour > 23
-    || minute > 59
-    || second > 59
-    || offsetHour > 23
-    || offsetMinute > 59
-  ) {
-    return false;
-  }
-  const calendarDate = new Date(Date.UTC(year, month - 1, day));
-  return calendarDate.getUTCFullYear() === year
-    && calendarDate.getUTCMonth() === month - 1
-    && calendarDate.getUTCDate() === day
-    && Number.isFinite(Date.parse(value));
-}
-
 export function parseResourceId(value: string, field: string): string {
   if (!isUuid(value)) invalidQuery(field);
   return value;
@@ -261,7 +230,7 @@ export function decodeUpdatedCursor(value: string): UpdatedCursor {
       Object.keys(record).length !== 2
       || !Object.hasOwn(record, "updated_at")
       || !Object.hasOwn(record, "id")
-      || !isTimestamp(record.updated_at)
+      || !isRfc3339Timestamp(record.updated_at)
       || !isUuid(record.id)
     ) {
       return invalidQuery("cursor");
@@ -303,7 +272,7 @@ function parseTimestampParameter(
 ): string | undefined {
   const value = oneValue(params, field);
   if (value === undefined) return undefined;
-  if (!isTimestamp(value)) invalidQuery(field);
+  if (!isRfc3339Timestamp(value)) invalidQuery(field);
   return value;
 }
 

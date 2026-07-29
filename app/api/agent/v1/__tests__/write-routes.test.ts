@@ -283,6 +283,8 @@ describe("Task PATCH route", () => {
     ["unquoted", "MISSING_IF_MATCH"],
     ['""', "MISSING_IF_MATCH"],
     [`"${OLD_ETAG}", "${UPDATED_AT}"`, "MISSING_IF_MATCH"],
+    ['"not-a-timestamp"', "MISSING_IF_MATCH"],
+    ['"2026-02-30T12:00:00.000Z"', "MISSING_IF_MATCH"],
   ])("rejects invalid If-Match %s before reading JSON", async (value, code) => {
     const headers: Record<string, string> = value === undefined
       ? {}
@@ -301,6 +303,27 @@ describe("Task PATCH route", () => {
     expect(await responseBody(response)).toMatchObject({ error: { code } });
     expect(text).not.toHaveBeenCalled();
     expect(patchTask).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "2026-07-29T11:00:00Z",
+    "2026-07-29T11:00:00.123456Z",
+    "2026-07-29T11:00:00.123456-04:00",
+  ])("forwards valid If-Match %s unchanged to Task RPC", async (ifMatch) => {
+    const response = await taskRoute.PATCH(
+      jsonRequest(
+        "PATCH",
+        `/tasks/${TASK_ID}`,
+        { changes: { notes: "Valid revision" } },
+        patchHeaders(ifMatch),
+      ),
+      taskParams(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(patchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedUpdatedAt: ifMatch }),
+    );
   });
 
   it("reads JSON exactly once and returns the new quoted ETag", async () => {
@@ -989,6 +1012,83 @@ describe("Experiment PATCH route", () => {
     expect(response.status).toBe(400);
     expect(text).not.toHaveBeenCalled();
     expect(patchExperiment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '"not-a-timestamp"',
+    '"2026-02-30T12:00:00.000Z"',
+  ])(
+    "rejects invalid Experiment If-Match %s without RPC",
+    async (ifMatch) => {
+      const request = jsonRequest(
+        "PATCH",
+        `/experiments/${EXPERIMENT_ID}`,
+        { changes: { notes: "No write" } },
+        { "If-Match": ifMatch },
+      );
+      const text = vi.spyOn(request, "text");
+
+      const response = await experimentRoute.PATCH(
+        request,
+        experimentParams(),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await responseBody(response)).toMatchObject({
+        error: { code: "MISSING_IF_MATCH" },
+      });
+      expect(text).not.toHaveBeenCalled();
+      expect(patchExperiment).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "2026-07-29T11:00:00Z",
+    "2026-07-29T11:00:00.123456Z",
+    "2026-07-29T11:00:00.123456+05:30",
+  ])(
+    "forwards valid If-Match %s unchanged to Experiment RPC",
+    async (ifMatch) => {
+      const response = await experimentRoute.PATCH(
+        jsonRequest(
+          "PATCH",
+          `/experiments/${EXPERIMENT_ID}`,
+          { changes: { notes: "Valid revision" } },
+          patchHeaders(ifMatch),
+        ),
+        experimentParams(),
+      );
+
+      expect(response.status).toBe(200);
+      expect(patchExperiment).toHaveBeenCalledWith(
+        expect.objectContaining({ expectedUpdatedAt: ifMatch }),
+      );
+    },
+  );
+
+  it("keeps a valid stale Experiment timestamp mapped to 412", async () => {
+    vi.mocked(patchExperiment).mockRejectedValue(
+      new AgentApiError(
+        412,
+        "VERSION_CONFLICT",
+        "The resource changed since it was read.",
+      ),
+    );
+
+    const response = await experimentRoute.PATCH(
+      jsonRequest(
+        "PATCH",
+        `/experiments/${EXPERIMENT_ID}`,
+        { changes: { notes: "Stale" } },
+        patchHeaders("2026-07-29T10:00:00.123456+00:00"),
+      ),
+      experimentParams(),
+    );
+
+    expect(response.status).toBe(412);
+    expect(await responseBody(response)).toMatchObject({
+      error: { code: "VERSION_CONFLICT" },
+    });
   });
 
   it("reads Experiment PATCH JSON exactly once", async () => {

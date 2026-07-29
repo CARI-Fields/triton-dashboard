@@ -1,4 +1,5 @@
 import { AgentApiError } from "@/lib/agent-api/errors";
+import { isRfc3339Timestamp } from "@/lib/agent-api/timestamps";
 import type { ApiFailure, ApiSuccess } from "@/lib/agent-api/types";
 
 export interface SuccessResponseInit extends ResponseInit {
@@ -68,7 +69,7 @@ export function etagFor(updatedAt: string): string {
 export function parseIfMatch(request: Request): string {
   const value = request.headers.get("if-match");
   const match = value?.match(/^"([^",]+)"$/);
-  if (!match) {
+  if (!match || !isRfc3339Timestamp(match[1])) {
     throw new AgentApiError(
       400,
       "MISSING_IF_MATCH",

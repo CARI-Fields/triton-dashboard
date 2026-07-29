@@ -56,16 +56,42 @@ describe("Agent API response primitives", () => {
       .toBe('"2026-07-28T15:31:22.123456Z"');
   });
 
-  it("parses a quoted If-Match value", () => {
+  it.each([
+    "2026-07-28T15:31:22Z",
+    "2026-07-28T15:31:22.1Z",
+    "2026-07-28T15:31:22.123456Z",
+    "2026-07-28T15:31:22.123456789+05:30",
+    "2026-07-28T15:31:22-04:00",
+  ])("forwards a quoted RFC 3339 If-Match value unchanged: %s", (value) => {
     const request = new Request("https://example.test", {
-      headers: { "If-Match": '"2026-07-28T15:31:22.123456Z"' },
+      headers: { "If-Match": `"${value}"` },
     });
 
-    expect(parseIfMatch(request)).toBe("2026-07-28T15:31:22.123456Z");
+    expect(parseIfMatch(request)).toBe(value);
   });
 
-  it.each([undefined, "unquoted", '"missing-end', 'missing-start"'])(
-    "rejects missing or malformed If-Match %s",
+  it.each([
+    undefined,
+    "",
+    "unquoted",
+    '"missing-end',
+    'missing-start"',
+    '""',
+    "*",
+    'W/"2026-07-28T15:31:22Z"',
+    '"2026-07-28T15:31:22Z", "2026-07-28T15:31:23Z"',
+    '"not-a-timestamp"',
+    '"2026-02-30T12:00:00.000Z"',
+    '"2026-07-28"',
+    '"2026-07-28 15:31:22Z"',
+    '"2026-07-28T15:31:22"',
+    '"2026-07-28T24:00:00Z"',
+    '"2026-07-28T15:60:00Z"',
+    '"2026-07-28T15:31:60Z"',
+    '"2026-07-28T15:31:22+24:00"',
+    '"2026-07-28T15:31:22+05:60"',
+  ])(
+    "rejects non-RFC3339 or non-singleton If-Match %s",
     (value) => {
       const headers = value === undefined ? undefined : { "If-Match": value };
       const request = new Request("https://example.test", { headers });

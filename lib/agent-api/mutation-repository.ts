@@ -15,6 +15,8 @@ import {
   isObjectSpec,
 } from "@/lib/experiments/schema";
 import type {
+  Activity,
+  Attachment,
   DecisionOutcome,
   Experiment,
   ExperimentStatus,
@@ -47,10 +49,18 @@ const DECISION_OUTCOMES = new Set<DecisionOutcome>([
 
 export type TaskMutationDto = Omit<Task, "assignees">;
 export type ExperimentMutationDto = Experiment;
+export type ActivityMutationDto = Activity;
+export type AttachmentMutationDto = Attachment;
 
 export interface MutationResult<T> {
   data: T;
   idempotencyReplayed: boolean;
+}
+
+export class MutationRpcRejectedError extends Error {
+  constructor() {
+    super("Agent API mutation RPC failed.");
+  }
 }
 
 interface PatchTaskInput {
@@ -78,6 +88,34 @@ interface PatchExperimentInput {
   requestId: string;
 }
 
+interface CreateActivityInput {
+  context: AgentContext;
+  taskId: string;
+  text: string;
+  idempotencyKey: string;
+  requestHash: string;
+  requestId: string;
+}
+
+interface CreateAttachmentInput {
+  context: AgentContext;
+  experimentId: string;
+  path: string;
+  url: string;
+  caption: string;
+  idempotencyKey: string;
+  requestHash: string;
+  requestId: string;
+}
+
+interface PatchAttachmentInput {
+  context: AgentContext;
+  attachmentId: string;
+  expectedUpdatedAt: string;
+  caption: string;
+  requestId: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -100,6 +138,23 @@ export function requestHash(
   return createHash("sha256")
     .update(JSON.stringify([method, path, canonicalize(body)]))
     .digest("hex");
+}
+
+export function attachmentRequestHash(
+  method: string,
+  path: string,
+  input: {
+    caption: string;
+    mime: string;
+    fileDigest: string;
+    [key: string]: unknown;
+  },
+): string {
+  return requestHash(method, path, {
+    caption: input.caption,
+    file_digest: input.fileDigest,
+    mime: input.mime,
+  });
 }
 
 function invalidRpcData(): never {
@@ -272,6 +327,34 @@ function experimentDto(value: unknown): ExperimentMutationDto {
   };
 }
 
+function activityDto(value: unknown): ActivityMutationDto {
+  if (!isRecord(value) || value.kind !== "comment") return invalidRpcData();
+  const experimentId = nullableUuid(value, "experiment_id");
+  return {
+    id: requiredUuid(value, "id"),
+    task_id: requiredUuid(value, "task_id"),
+    experiment_id: experimentId,
+    text: requiredString(value, "text"),
+    kind: "comment",
+    created_at: requiredString(value, "created_at"),
+  };
+}
+
+function attachmentDto(value: unknown): AttachmentMutationDto {
+  if (!isRecord(value)) return invalidRpcData();
+  return {
+    id: requiredUuid(value, "id"),
+    task_id: requiredUuid(value, "task_id"),
+    experiment_id: nullableUuid(value, "experiment_id"),
+    url: requiredString(value, "url"),
+    path: requiredString(value, "path"),
+    caption: requiredString(value, "caption"),
+    position: requiredNumber(value, "position"),
+    created_at: requiredString(value, "created_at"),
+    updated_at: requiredString(value, "updated_at"),
+  };
+}
+
 const DOMAIN_ERRORS: Record<
   string,
   () => AgentApiError
@@ -318,7 +401,7 @@ function throwRpcError(error: unknown): void {
     : "";
   const domainError = DOMAIN_ERRORS[message];
   if (domainError) throw domainError();
-  throw new Error("Agent API mutation RPC failed.");
+  throw new MutationRpcRejectedError();
 }
 
 function mutationResult<T>(
@@ -391,6 +474,64 @@ export function createMutationRepository(client: SupabaseClient) {
       throwRpcError(error);
       return mutationResult(data, experimentDto);
     },
+
+    async createActivity(input: CreateActivityInput): Promise<
+      MutationResult<ActivityMutationDto>
+    > {
+      const { data, error } = await client.rpc(
+        "agent_api_create_activity",
+        {
+          p_api_key_id: input.context.apiKeyId,
+          p_member_id: input.context.memberId,
+          p_task_id: input.taskId,
+          p_text: input.text,
+          p_idempotency_key: input.idempotencyKey,
+          p_request_hash: input.requestHash,
+          p_request_id: input.requestId,
+        },
+      );
+      throwRpcError(error);
+      return mutationResult(data, activityDto);
+    },
+
+    async createAttachment(input: CreateAttachmentInput): Promise<
+      MutationResult<AttachmentMutationDto>
+    > {
+      const { data, error } = await client.rpc(
+        "agent_api_create_attachment",
+        {
+          p_api_key_id: input.context.apiKeyId,
+          p_member_id: input.context.memberId,
+          p_experiment_id: input.experimentId,
+          p_path: input.path,
+          p_url: input.url,
+          p_caption: input.caption,
+          p_idempotency_key: input.idempotencyKey,
+          p_request_hash: input.requestHash,
+          p_request_id: input.requestId,
+        },
+      );
+      throwRpcError(error);
+      return mutationResult(data, attachmentDto);
+    },
+
+    async patchAttachment(input: PatchAttachmentInput): Promise<
+      MutationResult<AttachmentMutationDto>
+    > {
+      const { data, error } = await client.rpc(
+        "agent_api_patch_attachment",
+        {
+          p_api_key_id: input.context.apiKeyId,
+          p_member_id: input.context.memberId,
+          p_attachment_id: input.attachmentId,
+          p_expected_updated_at: input.expectedUpdatedAt,
+          p_caption: input.caption,
+          p_request_id: input.requestId,
+        },
+      );
+      throwRpcError(error);
+      return mutationResult(data, attachmentDto);
+    },
   };
 }
 
@@ -414,4 +555,22 @@ export function patchExperiment(
   input: PatchExperimentInput,
 ): Promise<MutationResult<ExperimentMutationDto>> {
   return repository().patchExperiment(input);
+}
+
+export function createActivity(
+  input: CreateActivityInput,
+): Promise<MutationResult<ActivityMutationDto>> {
+  return repository().createActivity(input);
+}
+
+export function createAttachment(
+  input: CreateAttachmentInput,
+): Promise<MutationResult<AttachmentMutationDto>> {
+  return repository().createAttachment(input);
+}
+
+export function patchAttachment(
+  input: PatchAttachmentInput,
+): Promise<MutationResult<AttachmentMutationDto>> {
+  return repository().patchAttachment(input);
 }

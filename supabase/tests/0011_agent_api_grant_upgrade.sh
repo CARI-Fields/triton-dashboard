@@ -11,7 +11,7 @@ PROJECT_ID="$(
 DB_CONTAINER="supabase_db_${PROJECT_ID}"
 SETUP_SQL="${TEST_DIR}/0011_agent_api_grant_upgrade_setup.psql"
 PRIOR_TEST_SQL="${TEST_DIR}/0011_agent_api_grant_upgrade_prior.sql"
-MIGRATION_SQL="${PROJECT_DIR}/supabase/migrations/20260729030703_harden_agent_api_service_role_grants.sql"
+MIGRATION_SQL="${PROJECT_DIR}/supabase/migrations/20260729100913_support_direct_attachment_patch.sql"
 FINAL_TEST_SQL="${TEST_DIR}/0011_agent_api_grant_upgrade.sql"
 
 run_sql_file() {

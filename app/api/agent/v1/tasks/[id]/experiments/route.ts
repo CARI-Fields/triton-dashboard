@@ -1,5 +1,5 @@
-import { AgentApiError } from "@/lib/agent-api/errors";
 import { withAgent } from "@/lib/agent-api/handler";
+import { parseCanonicalIdempotencyKey } from "@/lib/agent-api/headers";
 import {
   createExperiment,
   requestHash,
@@ -18,22 +18,7 @@ import {
   readJsonObject,
 } from "@/lib/agent-api/schemas";
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 export const runtime = "nodejs";
-
-function parseIdempotencyKey(request: Request): string {
-  const value = request.headers.get("idempotency-key");
-  if (!value || !UUID_PATTERN.test(value)) {
-    throw new AgentApiError(
-      400,
-      "MISSING_IDEMPOTENCY_KEY",
-      "POST requires one canonical UUID Idempotency-Key header.",
-    );
-  }
-  return value;
-}
 
 export async function POST(
   request: Request,
@@ -47,7 +32,7 @@ export async function POST(
       const taskId = parseResourceId(rawId, "id");
       assertNoQueryParameters(request);
       await requireTaskCollaboration(context, taskId);
-      const idempotencyKey = parseIdempotencyKey(request);
+      const idempotencyKey = parseCanonicalIdempotencyKey(request);
       const input = parseExperimentCreate(await readJsonObject(request));
       const result = await createExperiment({
         context,

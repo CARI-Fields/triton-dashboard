@@ -1,5 +1,5 @@
 begin;
-select plan(9);
+select plan(10);
 
 insert into public.modules (id, name)
 values ('10000000-0000-4000-8000-000000000011', 'Agent API Upgrade');
@@ -214,6 +214,30 @@ select lives_ok(
     'upgrade_attachment_patch'
   )$$,
   'Attachment PATCH executes after corrective ACL migration'
+);
+reset role;
+insert into public.attachments (
+  task_id, experiment_id, path, url, caption, updated_at
+) values (
+  '30000000-0000-4000-8000-000000000011',
+  null,
+  'upgrade/direct-path',
+  'https://example.test/upgrade-direct',
+  'Direct before',
+  '2026-07-29T10:00:00Z'
+);
+set local role service_role;
+select lives_ok(
+  $$select public.agent_api_patch_attachment(
+    '40000000-0000-4000-8000-000000000011',
+    '20000000-0000-4000-8000-000000000011',
+    (select id from public.attachments where path = 'upgrade/direct-path'),
+    (select updated_at from public.attachments
+      where path = 'upgrade/direct-path'),
+    'Direct after',
+    'upgrade_direct_attachment_patch'
+  )$$,
+  'direct Attachment PATCH executes after the upgrade migration'
 );
 
 select * from finish();

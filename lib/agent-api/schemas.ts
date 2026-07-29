@@ -108,6 +108,33 @@ const EXPERIMENT_DECLARED_FIELDS = new Set([
   ...EXPERIMENT_WRITABLE_FIELDS,
   ...EXPERIMENT_PROTECTED_FIELDS,
 ]);
+const ACTIVITY_PROTECTED_FIELDS = new Set([
+  "id",
+  "task_id",
+  "experiment_id",
+  "member_id",
+  "kind",
+  "created_at",
+  "updated_at",
+]);
+const ATTACHMENT_PROTECTED_FIELDS = new Set([
+  "id",
+  "task_id",
+  "experiment_id",
+  "owner_id",
+  "path",
+  "url",
+  "position",
+  "created_at",
+  "updated_at",
+]);
+const ATTACHMENT_MIME_EXTENSIONS = new Map([
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/webp", "webp"],
+  ["image/gif", "gif"],
+] as const);
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 export type TaskPatch = Partial<
   Pick<Task, "title" | "status" | "notes" | "position">
@@ -137,6 +164,21 @@ export interface ExperimentCreate {
   name: string;
 }
 
+export interface ActivityCreate {
+  text: string;
+}
+
+export interface AttachmentPatch {
+  caption: string;
+}
+
+export interface AttachmentFormInput {
+  file: File;
+  caption: string;
+  mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  extension: "png" | "jpg" | "webp" | "gif";
+}
+
 type JsonDomainIssue = "invalid_shape" | "non_finite_number" | null;
 type JsonInspectionFrame =
   | { kind: "enter"; value: unknown }
@@ -154,6 +196,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isFileValue(value: unknown): value is File {
+  return typeof value === "object"
+    && value !== null
+    && "name" in value
+    && typeof value.name === "string"
+    && "size" in value
+    && typeof value.size === "number"
+    && "type" in value
+    && typeof value.type === "string"
+    && "arrayBuffer" in value
+    && typeof value.arrayBuffer === "function";
 }
 
 function inspectJsonDomain(value: unknown): JsonDomainIssue {
@@ -542,4 +597,94 @@ export function parseExperimentCreate(body: unknown): ExperimentCreate {
     );
   }
   return { name };
+}
+
+export function parseActivityCreate(body: unknown): ActivityCreate {
+  const jsonDomainIssue = inspectJsonDomain(body);
+  if (jsonDomainIssue !== null || !isRecord(body)) {
+    return invalidBody("Activity create body must be a JSON object.");
+  }
+  for (const field of Object.keys(body)) {
+    if (field === "text") continue;
+    validateFieldName(field, new Set(["text"]), ACTIVITY_PROTECTED_FIELDS);
+  }
+  if (Object.keys(body).length !== 1 || typeof body.text !== "string") {
+    return invalidField("text");
+  }
+  const text = body.text.trim();
+  if (text.length < 1 || text.length > 10_000) {
+    return invalidField("text");
+  }
+  return { text };
+}
+
+export function parseAttachmentPatch(body: unknown): AttachmentPatch {
+  const jsonDomainIssue = inspectJsonDomain(body);
+  if (jsonDomainIssue !== null) {
+    return invalidBody("Attachment PATCH body must contain only JSON values.");
+  }
+  const changes = parsePatchEnvelope(body);
+  for (const field of Object.keys(changes)) {
+    validateFieldName(
+      field,
+      new Set(["caption"]),
+      ATTACHMENT_PROTECTED_FIELDS,
+    );
+  }
+  if (
+    Object.keys(changes).length !== 1
+    || typeof changes.caption !== "string"
+  ) {
+    return invalidField("caption");
+  }
+  return { caption: changes.caption.trim() };
+}
+
+export function parseAttachmentFormData(
+  form: FormData,
+): AttachmentFormInput {
+  const values = new Map<string, FormDataEntryValue[]>();
+  for (const [field, value] of form.entries()) {
+    if (field !== "file" && field !== "caption") {
+      validateFieldName(
+        field,
+        new Set(["file", "caption"]),
+        ATTACHMENT_PROTECTED_FIELDS,
+      );
+    }
+    const entries = values.get(field) ?? [];
+    entries.push(value);
+    values.set(field, entries);
+  }
+
+  const files = values.get("file") ?? [];
+  const captions = values.get("caption") ?? [];
+  if (
+    files.length !== 1
+    || !isFileValue(files[0])
+    || captions.length > 1
+    || (captions.length === 1 && typeof captions[0] !== "string")
+  ) {
+    return invalidField(files.length !== 1 ? "file" : "caption");
+  }
+
+  const attachmentFile = files[0];
+  const extension = ATTACHMENT_MIME_EXTENSIONS.get(
+    attachmentFile.type as AttachmentFormInput["mime"],
+  );
+  if (
+    extension === undefined
+    || attachmentFile.size < 1
+    || attachmentFile.size > MAX_ATTACHMENT_BYTES
+  ) {
+    return invalidField("file");
+  }
+  return {
+    file: attachmentFile,
+    caption: captions.length === 0
+      ? ""
+      : (captions[0] as string).trim(),
+    mime: attachmentFile.type as AttachmentFormInput["mime"],
+    extension,
+  };
 }

@@ -194,6 +194,12 @@ begin
     'experiments:write'
   );
 
+  if p_idempotency_key is null or p_request_hash is null then
+    raise exception using
+      errcode = 'P0001',
+      message = 'IDEMPOTENCY_INPUT_REQUIRED';
+  end if;
+
   perform pg_advisory_xact_lock(
     hashtextextended(
       'agent-api-idempotency:' ||
@@ -409,6 +415,12 @@ begin
     'activity:append'
   );
 
+  if p_idempotency_key is null or p_request_hash is null then
+    raise exception using
+      errcode = 'P0001',
+      message = 'IDEMPOTENCY_INPUT_REQUIRED';
+  end if;
+
   perform pg_advisory_xact_lock(
     hashtextextended(
       'agent-api-idempotency:' ||
@@ -507,6 +519,12 @@ begin
     v_task_id,
     'attachments:write'
   );
+
+  if p_idempotency_key is null or p_request_hash is null then
+    raise exception using
+      errcode = 'P0001',
+      message = 'IDEMPOTENCY_INPUT_REQUIRED';
+  end if;
 
   perform pg_advisory_xact_lock(
     hashtextextended(
@@ -658,11 +676,41 @@ begin
 end
 $function$;
 
-grant select, update on public.tasks to service_role;
-grant select, insert, update on public.experiments to service_role;
-grant select, insert on public.activity to service_role;
-grant select, insert, update on public.attachments to service_role;
-grant usage, select on sequence public.experiments_experiment_no_seq
+grant select on public.tasks to service_role;
+grant update (title, status, notes, position)
+  on public.tasks to service_role;
+
+grant select on public.experiments to service_role;
+grant insert (task_id, owner_id, name, status)
+  on public.experiments to service_role;
+grant update (
+  name,
+  status,
+  baseline_experiment_id,
+  data_spec,
+  object_spec,
+  environment_spec,
+  config,
+  notes,
+  metrics,
+  featured_metric_keys,
+  result_summary,
+  decision_outcome,
+  decision_notes,
+  position
+) on public.experiments to service_role;
+
+grant select on public.activity to service_role;
+grant insert (task_id, text, kind)
+  on public.activity to service_role;
+
+grant select on public.attachments to service_role;
+grant insert (task_id, experiment_id, path, url, caption)
+  on public.attachments to service_role;
+grant update (caption)
+  on public.attachments to service_role;
+
+grant usage on sequence public.experiments_experiment_no_seq
   to service_role;
 
 revoke execute on function public.agent_api_require_task_access(

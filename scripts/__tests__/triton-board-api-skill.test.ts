@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { isRfc3339Timestamp } from "../../lib/agent-api/timestamps";
 
 const root = resolve(import.meta.dirname, "../..");
 const skillRoot = join(root, ".agents/skills/triton-board-api");
@@ -10,10 +11,6 @@ const clientPath = join(skillRoot, "scripts/triton_board_api.py");
 const skillPath = join(skillRoot, "SKILL.md");
 const openapiPath = join(skillRoot, "references/openapi.yaml");
 const openaiPath = join(skillRoot, "agents/openai.yaml");
-const quickValidatePath = join(
-  homedir(),
-  ".codex/skills/.system/skill-creator/scripts/quick_validate.py",
-);
 const TEST_API_KEY =
   "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
@@ -257,6 +254,48 @@ function operationResponseSchema(
     .match(/\$ref: "#\/components\/schemas\/([^"]+)"/)?.[1];
 }
 
+function schemaPattern(source: string, name: string): RegExp {
+  const block = componentBlock(source, "schemas", name);
+  const pattern = block.match(/^      pattern: '(.+)'$/m)?.[1];
+  if (pattern === undefined) {
+    throw new Error(`${name} must define a single-quoted pattern.`);
+  }
+  return new RegExp(pattern);
+}
+
+function directSchemaProperties(block: string): string[] {
+  return [...block.matchAll(/^        ([a-z][a-z0-9_]*):$/gm)]
+    .map((match) => match[1])
+    .sort();
+}
+
+function directRequiredFields(block: string): string[] {
+  const inline = block.match(/^      required: \[([^\]]+)\]$/m)?.[1];
+  if (inline !== undefined) {
+    return inline.split(",").map((field) => field.trim()).sort();
+  }
+  const lines = block.split("\n");
+  const start = lines.indexOf("      required:");
+  expect(start).toBeGreaterThan(-1);
+  const required: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const match = lines[index].match(/^        - ([a-z][a-z0-9_]*)$/);
+    if (!match) break;
+    required.push(match[1]);
+  }
+  return required.sort();
+}
+
+function componentSchemaRefs(block: string): string[] {
+  return [...block.matchAll(
+    /\$ref: "#\/components\/schemas\/([A-Za-z][A-Za-z0-9]+)"/g,
+  )].map((match) => match[1]);
+}
+
+function auditActionBranches(block: string): string[] {
+  return block.split(/^            - type: object$/m).slice(1);
+}
+
 describe("Triton Board API skill artifacts", () => {
   it("keeps the skill concise, imperative, and explicit about safe recovery", () => {
     const skill = readFileSync(skillPath, "utf8");
@@ -273,21 +312,64 @@ describe("Triton Board API skill artifacts", () => {
     expect(skill).not.toContain("README");
   });
 
-  it("separates PATCH preflight from POST prerequisites and verification", () => {
+  it("uses a trusted Attachment version without requiring a preflight GET", () => {
     const skill = readFileSync(skillPath, "utf8");
     expect(skill).toContain("matching operation recipe");
     expect(skill).toContain("For GET/read:");
-    expect(skill).toContain("For PATCH:");
+    expect(skill).toContain("For Task or Experiment PATCH:");
+    expect(skill).toContain("For Attachment PATCH:");
     expect(skill).toContain("For POST:");
+    const attachmentPatch = skill.slice(
+      skill.indexOf("For Attachment PATCH:"),
+      skill.indexOf("For POST:"),
+    );
+    expect(attachmentPatch).toContain(
+      "trusted current target `attachment.updated_at` supplied in context",
+    );
+    expect(attachmentPatch).toContain(
+      "Do not GET when that trusted target version is available",
+    );
+    expect(attachmentPatch).toContain(
+      "Attachment PATCH does not require `board:read`",
+    );
+    expect(attachmentPatch).toContain("quote");
+    expect(attachmentPatch).toContain("never the parent Experiment ETag");
+    expect(attachmentPatch).not.toMatch(
+      /^.*For Attachment PATCH: GET the parent Experiment/m,
+    );
+  });
+
+  it("uses the only available Attachment fallback or stops", () => {
+    const skill = readFileSync(skillPath, "utf8");
+    const attachmentPatch = skill.slice(
+      skill.indexOf("For Attachment PATCH:"),
+      skill.indexOf("For POST:"),
+    );
+    expect(attachmentPatch).toContain(
+      "Experiment-linked and `board:read` is available",
+    );
+    expect(attachmentPatch).toContain(
+      "GET the parent Experiment and select the target Attachment",
+    );
+    expect(attachmentPatch).toContain(
+      "Direct Task Attachments have no Agent GET",
+    );
+    expect(attachmentPatch).toContain(
+      "stop if no trusted current target `attachment.updated_at` is available",
+    );
+    expect(skill).toContain("matching PATCH version-source rule");
+    expect(skill).not.toContain("On `412`, GET the latest resource");
+    expect(skill).not.toContain("On a PATCH transport failure, GET the resource");
+  });
+
+  it("separates PATCH and POST prerequisites and verification", () => {
+    const skill = readFileSync(skillPath, "utf8");
     expect(skill).toContain(
       "POST does not require `board:read` or a preflight GET",
     );
     expect(skill).toContain(
       "Optional GET verification requires `board:read`",
     );
-    expect(skill).toContain("target Attachment");
-    expect(skill).toContain("attachment.updated_at");
-    expect(skill).toContain("never the parent Experiment ETag");
     expect(skill).toContain("transport or `5xx`");
     expect(skill).toContain("On `409`, stop");
   });
@@ -414,15 +496,8 @@ describe("Triton Board API skill artifacts", () => {
       }
     }
 
-    const timestamp = componentBlock(openapi, "schemas", "Timestamp");
-    expect(timestamp).toContain("format: date-time");
-    expect(timestamp).toContain(
-      "pattern: '^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?(?:Z|[+-](?:0\\d|1[0-5]):[0-5]\\d)$'",
-    );
-    const quotedEtag = componentBlock(openapi, "schemas", "QuotedETag");
-    expect(quotedEtag).toContain(
-      "pattern: '^\"\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?(?:Z|[+-](?:0\\d|1[0-5]):[0-5]\\d)\"$'",
-    );
+    expect(componentBlock(openapi, "schemas", "Timestamp"))
+      .toContain("format: date-time");
     expect(componentBlock(openapi, "parameters", "IfMatch"))
       .toContain('$ref: "#/components/schemas/QuotedETag"');
     expect(componentBlock(openapi, "parameters", "UpdatedAfter"))
@@ -430,56 +505,175 @@ describe("Triton Board API skill artifacts", () => {
     expect(componentBlock(openapi, "headers", "ETag"))
       .toContain('$ref: "#/components/schemas/QuotedETag"');
 
-    const auditSnapshot = componentBlock(
-      openapi,
-      "schemas",
-      "AuditSnapshot",
-    );
-    expect(auditSnapshot).toContain("additionalProperties: false");
-    expect(
-      [...auditSnapshot.matchAll(/^        ([a-z][a-z0-9_]*):$/gm)]
-        .map((match) => match[1])
-        .sort(),
-    ).toEqual([
-      "baseline_experiment_id",
-      "caption",
-      "completed_at",
-      "config",
-      "created_at",
-      "data_spec",
-      "decision_notes",
-      "decision_outcome",
-      "environment_spec",
-      "experiment_id",
-      "experiment_no",
-      "featured_metric_keys",
-      "id",
-      "kind",
-      "metrics",
-      "module_id",
-      "name",
-      "notes",
-      "object_spec",
-      "owner_id",
-      "path",
-      "position",
-      "result_summary",
-      "started_at",
-      "status",
-      "task_id",
-      "text",
-      "title",
-      "updated_at",
-      "url",
-    ]);
-    const auditEntry = componentBlock(openapi, "schemas", "AuditEntry");
-    expect(auditEntry).toContain(
-      '$ref: "#/components/schemas/NullableAuditSnapshot"',
-    );
-    expect(auditEntry).not.toContain("additionalProperties: true");
   });
 
-  it("keeps generated UI metadata exact and passes the official validator", () => {
+  it("models the server's Gregorian timestamp contract for values and ETags", () => {
+    const openapi = readFileSync(openapiPath, "utf8");
+    const timestamp = schemaPattern(openapi, "Timestamp");
+    const quotedEtag = schemaPattern(openapi, "QuotedETag");
+    const cases: Array<[string, boolean]> = [
+      ["0100-01-01T00:00:00Z", true],
+      ["1900-02-28T23:59:59Z", true],
+      ["2000-02-29T12:34:56.123456789+15:59", true],
+      ["2004-02-29T00:00:00-15:59", true],
+      ["9999-12-31T23:59:59Z", true],
+      ["0000-01-01T00:00:00Z", false],
+      ["0099-12-31T23:59:59Z", false],
+      ["10000-01-01T00:00:00Z", false],
+      ["1900-02-29T00:00:00Z", false],
+      ["2001-02-29T00:00:00Z", false],
+      ["2100-02-29T00:00:00Z", false],
+      ["2000-02-30T00:00:00Z", false],
+      ["2000-04-31T00:00:00Z", false],
+      ["2000-00-01T00:00:00Z", false],
+      ["2000-13-01T00:00:00Z", false],
+      ["2000-01-00T00:00:00Z", false],
+      ["2000-01-01T24:00:00Z", false],
+      ["2000-01-01T23:60:00Z", false],
+      ["2000-01-01T23:59:60Z", false],
+      ["2000-01-01T00:00:00.1234567890Z", false],
+      ["2000-01-01T00:00:00+16:00", false],
+      ["2000-01-01T00:00:00+15:60", false],
+    ];
+    for (const [value, expected] of cases) {
+      expect(isRfc3339Timestamp(value), value).toBe(expected);
+      expect(timestamp.test(value), value).toBe(expected);
+      expect(quotedEtag.test(`"${value}"`), `"${value}"`).toBe(expected);
+    }
+    expect(timestamp.test('"2000-02-29T00:00:00Z"')).toBe(false);
+    expect(quotedEtag.test("2000-02-29T00:00:00Z")).toBe(false);
+  });
+
+  it("uses exact resource snapshots and discriminated audit variants", () => {
+    const openapi = readFileSync(openapiPath, "utf8");
+    const snapshotFields: Record<string, string[]> = {
+      TaskAuditSnapshot: [
+        "id",
+        "module_id",
+        "title",
+        "status",
+        "notes",
+        "position",
+        "created_at",
+        "updated_at",
+      ],
+      ExperimentAuditSnapshot: [
+        "id",
+        "experiment_no",
+        "task_id",
+        "owner_id",
+        "name",
+        "status",
+        "baseline_experiment_id",
+        "data_spec",
+        "object_spec",
+        "environment_spec",
+        "config",
+        "notes",
+        "metrics",
+        "featured_metric_keys",
+        "result_summary",
+        "decision_outcome",
+        "decision_notes",
+        "position",
+        "started_at",
+        "completed_at",
+        "created_at",
+        "updated_at",
+      ],
+      AttachmentAuditSnapshot: [
+        "id",
+        "task_id",
+        "experiment_id",
+        "url",
+        "path",
+        "caption",
+        "position",
+        "created_at",
+        "updated_at",
+      ],
+      ActivityAuditSnapshot: [
+        "id",
+        "task_id",
+        "experiment_id",
+        "text",
+        "kind",
+        "created_at",
+      ],
+    };
+    for (const [name, fields] of Object.entries(snapshotFields)) {
+      const block = componentBlock(openapi, "schemas", name);
+      expect(block).toContain("additionalProperties: false");
+      expect(directSchemaProperties(block)).toEqual([...fields].sort());
+      expect(directRequiredFields(block)).toEqual([...fields].sort());
+    }
+
+    const auditEntry = componentBlock(openapi, "schemas", "AuditEntry");
+    expect(componentSchemaRefs(auditEntry)).toEqual([
+      "TaskAuditEntry",
+      "ExperimentAuditEntry",
+      "AttachmentAuditEntry",
+      "ActivityAuditEntry",
+    ]);
+    expect(auditEntry).toContain("propertyName: resource_type");
+    for (const [resourceType, snapshot] of [
+      ["task", "TaskAuditSnapshot"],
+      ["experiment", "ExperimentAuditSnapshot"],
+      ["attachment", "AttachmentAuditSnapshot"],
+      ["activity", "ActivityAuditSnapshot"],
+    ] as const) {
+      const variant = componentBlock(
+        openapi,
+        "schemas",
+        `${resourceType[0].toUpperCase()}${resourceType.slice(1)}AuditEntry`,
+      );
+      expect(variant).toContain(
+        '$ref: "#/components/schemas/AuditEntryBase"',
+      );
+      expect(variant).toContain(`const: ${resourceType}`);
+      expect(variant).toContain(
+        `$ref: "#/components/schemas/${snapshot}"`,
+      );
+      const snapshotRefs = componentSchemaRefs(variant)
+        .filter((ref) => ref.endsWith("AuditSnapshot"));
+      expect(snapshotRefs.length).toBeGreaterThan(0);
+      expect(new Set(snapshotRefs)).toEqual(new Set([snapshot]));
+      expect(variant).toContain("unevaluatedProperties: false");
+    }
+    expect(openapi).not.toMatch(/^    AuditSnapshot:$/m);
+    expect(openapi).not.toMatch(/^    NullableAuditSnapshot:$/m);
+  });
+
+  it("couples create and patch audit state with the recorded status", () => {
+    const openapi = readFileSync(openapiPath, "utf8");
+    for (const [entry, snapshot] of [
+      ["ExperimentAuditEntry", "ExperimentAuditSnapshot"],
+      ["AttachmentAuditEntry", "AttachmentAuditSnapshot"],
+    ] as const) {
+      const branches = auditActionBranches(
+        componentBlock(openapi, "schemas", entry),
+      );
+      expect(branches).toHaveLength(2);
+      const create = branches.find((branch) => branch.includes("const: create"));
+      const patch = branches.find((branch) => branch.includes("const: patch"));
+      expect(create).toBeDefined();
+      expect(create).toMatch(/before_state:\n\s+type: "null"/);
+      expect(create).toContain(
+        `after_state:\n                  $ref: "#/components/schemas/${snapshot}"`,
+      );
+      expect(create).toMatch(/response_status:\n\s+type: integer\n\s+const: 201/);
+      expect(patch).toBeDefined();
+      expect(patch).toContain(
+        `before_state:\n                  $ref: "#/components/schemas/${snapshot}"`,
+      );
+      expect(patch).toContain(
+        `after_state:\n                  $ref: "#/components/schemas/${snapshot}"`,
+      );
+      expect(patch).toMatch(/response_status:\n\s+type: integer\n\s+const: 200/);
+    }
+  });
+
+  it("keeps generated UI metadata exact without an external validator", () => {
     const openai = readFileSync(openaiPath, "utf8");
     const fields = Object.fromEntries(
       openai.split("\n").flatMap((line) => {
@@ -493,13 +687,6 @@ describe("Triton Board API skill artifacts", () => {
       display_name: "Triton Board API",
       short_description: "Safely inspect and update Triton Board data",
     });
-    const validation = spawnSync(
-      "python3",
-      [quickValidatePath, skillRoot],
-      { cwd: root, encoding: "utf8" },
-    );
-    expect(validation.status, validation.stderr).toBe(0);
-    expect(validation.stdout).toContain("Skill is valid!");
   });
 
 });

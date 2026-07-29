@@ -137,3 +137,35 @@ Full verification:
 - `git diff --check` — passed.
 
 The existing Vitest plugin deprecation and Next.js multiple-lockfile workspace-root warnings remain unchanged. No production request, credential, external write, or context-carrying forward test was used.
+
+## Fix round 3 — conditional Attachment versions and exact audit/time contracts
+
+Review findings were verified against the implemented routes, `SNAPSHOT_FIELDS`, full SQL mutation snapshots, and `isRfc3339Timestamp`. Tests were written before the Skill/OpenAPI edits.
+
+RED evidence:
+
+- the normal focused Skill suite ran 42 tests with 4 expected failures: unconditional Attachment GET guidance, missing Attachment fallback/stop behavior, calendar-insensitive timestamp patterns, and the broad cross-resource audit snapshot;
+- with `HOME=/tmp/triton-board-clean-home-task10-r3`, the prior suite ran 38 tests with 1 expected failure because it attempted to execute `.codex/.../quick_validate.py` beneath that empty HOME;
+- a follow-up create/patch coupling regression failed because Experiment and Attachment audit entries allowed impossible action, state, and response-status combinations.
+
+GREEN implementation:
+
+- Task and Experiment PATCH retain their GET preflight; Attachment PATCH first accepts a trusted current target `attachment.updated_at` supplied in context without requiring `board:read`;
+- only an Experiment-linked Attachment with `board:read` may fall back to GETting its parent Experiment; direct Task Attachments have no Agent GET, and every recovery path stops without a trusted current target version;
+- repository tests validate `openai.yaml` locally and no longer depend on `HOME`, `.codex`, or an installed validator; the official validator remains a manual verification gate;
+- the OpenAPI audit response now has four exact, fully-required resource snapshot schemas and resource-discriminated entries; Experiment and Attachment entries further couple create/patch action, before-state nullability, and 201/200 status;
+- Timestamp and QuotedETag use calendar-aware ECMA patterns matching server year, Gregorian leap-day, time, fractional-second, and offset bounds. Tests execute patterns extracted from the OpenAPI against leap-century, year-boundary, and invalid-date cases for both raw and quoted forms, alongside the server predicate.
+
+Final verification:
+
+- focused suite under the normal environment — 2 files, 136/136 tests passed;
+- the same focused suite with an empty HOME — 2 files, 136/136 tests passed;
+- `npm test` — 42 files, 840/840 tests passed;
+- `npx tsc --noEmit` — passed;
+- `python3 -m py_compile .agents/skills/triton-board-api/scripts/triton_board_api.py` — passed;
+- manual official `quick_validate.py` — `Skill is valid!`;
+- OpenAPI YAML parse — OpenAPI 3.1, 13 paths;
+- `npm run build` — passed;
+- `git diff --check` — passed.
+
+The existing Vitest plugin deprecation and Next.js multiple-lockfile workspace-root warnings remain unchanged. No endpoint, dependency, production request, credential, external write, or context-carrying forward test was added.

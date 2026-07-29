@@ -11,8 +11,8 @@ Use the bundled safe client:
 2. Call `python3 scripts/triton_board_api.py capabilities`.
 3. Follow the matching operation recipe:
    - For GET/read: use the exact relative endpoint path, documented filters, and required read scope; use the successful response as the result.
-   - For PATCH: GET current resource, retain its quoted ETag, compute the smallest allowed change, and PATCH with `If-Match`.
-     For Attachment PATCH, GET the parent Experiment and locate the target Attachment in its response body. Treat that object as `attachment`; quote `attachment.updated_at` for `If-Match`, never the parent Experiment ETag. Stop if the target Attachment or its `updated_at` is unavailable.
+   - For Task or Experiment PATCH: GET current resource, retain its quoted ETag, compute the smallest allowed change, and PATCH with `If-Match`.
+   - For Attachment PATCH: use a trusted current target `attachment.updated_at` supplied in context when available; quote it for `If-Match`, never the parent Experiment ETag. Do not GET when that trusted target version is available. Otherwise, only when the Attachment is Experiment-linked and `board:read` is available, GET the parent Experiment and select the target Attachment. Direct Task Attachments have no Agent GET, and Attachment PATCH does not require `board:read`; stop if no trusted current target `attachment.updated_at` is available.
    - For POST: use the exact known parent, relative endpoint path, and strict input with the endpoint-specific write scope; let the server check live Task collaboration, and POST once with one stable `Idempotency-Key`. POST does not require `board:read` or a preflight GET.
 4. Verify the write response. A successful POST response is sufficient. Optional GET verification requires `board:read`.
 
@@ -23,9 +23,9 @@ Run `python3 scripts/triton_board_api.py --help` for client syntax. Prefer this 
 - Never print the raw Key or request headers.
 - Never attempt DELETE or batch operations.
 - Never send Owner, assignee, parent, or system fields. Send only an endpoint's documented request envelope.
-- On `412`, GET the latest resource and compare the intended fields. Stop when the same target fields changed remotely; otherwise retry one minimal PATCH with the new ETag.
+- On `412`, obtain a fresh trusted version through the matching PATCH version-source rule and compare the intended fields. Stop when the same target fields changed remotely or no trusted version is available; otherwise retry one minimal PATCH with the new ETag.
 - On `401`, `403`, or `422`, diagnose the request and do not repeat it unchanged.
 - On `409`, stop; do not repeat the conflicting POST or reuse its key for different request data.
 - On `429`, obey `Retry-After`.
 - On a POST transport or `5xx` outcome with unknown commit state, reuse the same `Idempotency-Key`; never generate a replacement for that logical request.
-- On a PATCH transport failure, GET the resource before deciding whether another PATCH is necessary.
+- On a PATCH transport failure, obtain a fresh trusted version through the matching PATCH version-source rule before deciding whether another PATCH is necessary; stop if that version is unavailable.

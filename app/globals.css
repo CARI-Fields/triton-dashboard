@@ -2020,6 +2020,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface);
+  font-size: 13px;
 }
 .selected-owner-name {
   min-width: 0;

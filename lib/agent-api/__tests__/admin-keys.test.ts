@@ -17,21 +17,24 @@ const ADMIN_ID = "50000000-0000-4000-8000-000000000001";
 const KEY_ID = "40000000-0000-4000-8000-000000000001";
 const CREATED_AT = "2026-07-29T12:00:00.000Z";
 
+type PersistedManagedKeyRow = ManagedKeyRow & { key_digest: string };
+
 class MemoryManagedKeyStore implements ManagedKeyStore {
   readonly members = new Map([
     [BRUCE_ID, "Bruce"],
     [ALICE_ID, "Alice"],
   ]);
-  readonly rows = new Map<string, ManagedKeyRow>();
+  readonly rows = new Map<string, PersistedManagedKeyRow>();
   inserted: Record<string, unknown> | null = null;
   updateCount = 0;
 
   async list(): Promise<ManagedKeyRow[]> {
-    return [...this.rows.values()];
+    return [...this.rows.values()].map((row) => this.project(row));
   }
 
   async get(id: string): Promise<ManagedKeyRow | null> {
-    return this.rows.get(id) ?? null;
+    const row = this.rows.get(id);
+    return row ? this.project(row) : null;
   }
 
   async memberExists(id: string): Promise<boolean> {
@@ -48,7 +51,7 @@ class MemoryManagedKeyStore implements ManagedKeyStore {
     created_by: string;
   }): Promise<ManagedKeyRow> {
     this.inserted = structuredClone(values);
-    const row: ManagedKeyRow = {
+    const row: PersistedManagedKeyRow = {
       id: KEY_ID,
       name: values.name,
       key_prefix: values.key_prefix,
@@ -65,28 +68,19 @@ class MemoryManagedKeyStore implements ManagedKeyStore {
       created_at: CREATED_AT,
     };
     this.rows.set(row.id, row);
-    return row;
+    return this.project(row);
   }
 
   async update(
     id: string,
-    changes: Partial<Pick<
-      ManagedKeyRow,
-      | "name"
-      | "key_prefix"
-      | "key_digest"
-      | "member_id"
-      | "scopes"
-      | "expires_at"
-      | "revoked_at"
-    >>,
+    changes: Parameters<ManagedKeyStore["update"]>[1],
     options?: { onlyActive?: boolean },
   ): Promise<ManagedKeyRow | null> {
     const row = this.rows.get(id);
     if (!row || (options?.onlyActive && row.revoked_at !== null)) return null;
     this.updateCount += 1;
     const memberId = changes.member_id ?? row.member_id;
-    const updated: ManagedKeyRow = {
+    const updated: PersistedManagedKeyRow = {
       ...row,
       ...changes,
       member: memberId === null
@@ -94,7 +88,12 @@ class MemoryManagedKeyStore implements ManagedKeyStore {
         : { id: memberId, name: this.members.get(memberId)! },
     };
     this.rows.set(id, updated);
-    return updated;
+    return this.project(updated);
+  }
+
+  private project(row: PersistedManagedKeyRow): ManagedKeyRow {
+    const { key_digest: _privateDigest, ...projected } = row;
+    return projected;
   }
 }
 
@@ -123,6 +122,7 @@ describe("Admin API key lifecycle", () => {
     expect(JSON.stringify(store.inserted)).not.toContain(created.secret);
 
     const listed = await listManagedKeys(store);
+    expect(await store.get(KEY_ID)).not.toHaveProperty("key_digest");
     expect(listed).toEqual([
       {
         id: KEY_ID,

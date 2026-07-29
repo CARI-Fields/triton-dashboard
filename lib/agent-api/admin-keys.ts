@@ -71,7 +71,6 @@ export interface ManagedKeyRow {
   id: string;
   name: string;
   key_prefix: string;
-  key_digest?: string;
   member_id: string | null;
   member: { id: string; name: string } | null;
   scopes: string[];
@@ -91,16 +90,15 @@ interface ManagedKeyInsert {
   created_by: string;
 }
 
-type ManagedKeyChanges = Partial<Pick<
-  ManagedKeyRow,
-  | "name"
-  | "key_prefix"
-  | "key_digest"
-  | "member_id"
-  | "scopes"
-  | "expires_at"
-  | "revoked_at"
->>;
+interface ManagedKeyChanges {
+  name?: string;
+  key_prefix?: string;
+  key_digest?: string;
+  member_id?: string | null;
+  scopes?: string[];
+  expires_at?: string | null;
+  revoked_at?: string | null;
+}
 
 export interface ManagedKeyStore {
   list(): Promise<ManagedKeyRow[]>;

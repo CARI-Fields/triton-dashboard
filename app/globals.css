@@ -572,6 +572,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   background: var(--good-soft); color: var(--good);
 }
 .api-key-status.revoked { background: var(--crit-soft); color: var(--crit); }
+.api-key-status.expired { background: var(--warn-soft); color: #7d5310; }
 .api-key-meta {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 12px; margin: 16px 0;

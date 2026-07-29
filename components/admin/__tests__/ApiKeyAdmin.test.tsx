@@ -9,16 +9,18 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ApiKeyAdmin from "@/components/admin/ApiKeyAdmin";
+import type { ManagedKeyView } from "@/lib/agent-api/admin-keys";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   getSession: vi.fn(),
+  signOut: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase", () => ({
   isSupabaseConfigured: true,
   supabase: {
-    auth: { getSession: mocks.getSession },
+    auth: { getSession: mocks.getSession, signOut: mocks.signOut },
     from: mocks.from,
   },
 }));
@@ -29,7 +31,7 @@ const MEMBERS = [
   { id: BRUCE_ID, name: "Bruce" },
   { id: "20000000-0000-4000-8000-000000000002", name: "Alice" },
 ];
-const VIEW = {
+const VIEW: ManagedKeyView = {
   id: KEY_ID,
   name: "Bruce experiments",
   key_prefix: "tb_live_AAECAwQF",
@@ -52,6 +54,24 @@ function envelope(data: unknown, status = 200): Response {
   );
 }
 
+function errorEnvelope(
+  status: number,
+  code: string,
+  message: string,
+): Response {
+  return Response.json(
+    {
+      error: {
+        code,
+        message,
+        request_id: "req_error",
+        retryable: false,
+      },
+    },
+    { status, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -63,9 +83,7 @@ function deferred<T>() {
 }
 
 function installFetch(initial = [VIEW]) {
-  let rows: Array<Omit<typeof VIEW, "revoked_at"> & {
-    revoked_at: string | null;
-  }> = initial;
+  let rows: ManagedKeyView[] = initial;
   const fetchMock = vi.fn(async (
     input: string | URL | Request,
     init?: RequestInit,
@@ -115,6 +133,7 @@ function installFetch(initial = [VIEW]) {
 describe("ApiKeyAdmin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     mocks.getSession.mockResolvedValue({
       data: {
         session: { access_token: "current-access-token" },
@@ -124,6 +143,7 @@ describe("ApiKeyAdmin", () => {
     const order = vi.fn().mockResolvedValue({ data: MEMBERS, error: null });
     const select = vi.fn().mockReturnValue({ order });
     mocks.from.mockReturnValue({ select });
+    mocks.signOut.mockResolvedValue({ error: null });
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -132,7 +152,9 @@ describe("ApiKeyAdmin", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("renders loading, complete key metadata, and the empty state", async () => {
@@ -315,5 +337,315 @@ describe("ApiKeyAdmin", () => {
       name: "Second Bruce key",
       secret: CREATE_SECRET,
     }, 201)));
+  });
+
+  it("distinguishes active, expired, and revoked keys at the exact current time", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime("2026-07-29T12:00:00.000Z");
+    const rows = [
+      { ...VIEW, id: "key-never", name: "Never expiry" },
+      {
+        ...VIEW,
+        id: "key-future",
+        name: "Future expiry",
+        expires_at: "2026-07-29T12:00:00.001Z",
+      },
+      {
+        ...VIEW,
+        id: "key-exact",
+        name: "Exact expiry",
+        expires_at: "2026-07-29T12:00:00.000Z",
+      },
+      {
+        ...VIEW,
+        id: "key-past",
+        name: "Past expiry",
+        expires_at: "2026-07-29T11:59:59.999Z",
+      },
+      {
+        ...VIEW,
+        id: "key-revoked",
+        name: "Revoked future key",
+        expires_at: "2026-07-30T12:00:00.000Z",
+        revoked_at: "2026-07-29T11:00:00.000Z",
+      },
+    ];
+    const fetchMock = installFetch(rows);
+    render(<ApiKeyAdmin />);
+
+    for (const name of ["Never expiry", "Future expiry"]) {
+      const card = await screen.findByRole("article", { name });
+      expect(within(card).getByText("Active")).toBeDefined();
+      expect(within(card).getByRole("button", {
+        name: `Rotate ${name}`,
+      })).toBeDefined();
+    }
+    for (const name of ["Exact expiry", "Past expiry"]) {
+      const card = screen.getByRole("article", { name });
+      expect(within(card).getByText("Expired")).toBeDefined();
+      expect(within(card).queryByRole("button", {
+        name: `Rotate ${name}`,
+      })).toBeNull();
+      expect(within(card).getByRole("button", {
+        name: `Edit ${name}`,
+      })).toBeDefined();
+      expect(within(card).getByRole("button", {
+        name: `Revoke ${name}`,
+      })).toBeDefined();
+    }
+    const revoked = screen.getByRole("article", {
+      name: "Revoked future key",
+    });
+    expect(within(revoked).getAllByText("Revoked")).toHaveLength(2);
+    expect(within(revoked).queryByText("Expired")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires explicit confirmation before rotate and explains one-time invalidation", async () => {
+    const confirm = vi.mocked(window.confirm);
+    confirm.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const fetchMock = installFetch();
+    render(<ApiKeyAdmin />);
+    await screen.findByRole("article", { name: "Bruce experiments" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }));
+    expect(confirm).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/immediately invalidate the old credential/i),
+    );
+    expect(confirm.mock.calls[0][0]).toMatch(/shown only once/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(ROTATE_SECRET)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }));
+    expect(await screen.findByText(ROTATE_SECRET)).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires explicit irreversible confirmation before revoke", async () => {
+    const confirm = vi.mocked(window.confirm);
+    confirm.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const fetchMock = installFetch();
+    render(<ApiKeyAdmin />);
+    const active = await screen.findByRole("article", {
+      name: "Bruce experiments",
+    });
+
+    fireEvent.click(within(active).getByRole("button", {
+      name: "Revoke Bruce experiments",
+    }));
+    expect(confirm).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/cannot be undone/i),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(within(active).getByText("Active")).toBeDefined();
+
+    fireEvent.click(within(active).getByRole("button", {
+      name: "Revoke Bruce experiments",
+    }));
+    await waitFor(() => {
+      expect(within(active).getAllByText("Revoked")).toHaveLength(2);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("locally signs out after a load 401 even when signOut itself fails", async () => {
+    mocks.signOut.mockRejectedValueOnce(new Error("Auth endpoint offline."));
+    const fetchMock = vi.fn().mockResolvedValueOnce(errorEnvelope(
+      401,
+      "INVALID_ADMIN_SESSION",
+      "Invalid Admin session.",
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ApiKeyAdmin />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Your session has expired");
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: "local" });
+    expect(screen.queryByRole("button", { name: "Retry list" })).toBeNull();
+    expect((screen.getByRole("button", {
+      name: "Create API key",
+    }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("locally signs out after a mutation 401 and blocks same-token reuse", async () => {
+    const fetchMock = installFetch([]);
+    fetchMock
+      .mockImplementationOnce(async () => envelope([]))
+      .mockImplementationOnce(async () => errorEnvelope(
+        401,
+        "INVALID_ADMIN_SESSION",
+        "Invalid Admin session.",
+      ));
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+
+    fireEvent.change(screen.getByLabelText("Key name"), {
+      target: { value: "Bruce experiments" },
+    });
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: BRUCE_ID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+
+    expect((await screen.findByRole("alert")).textContent)
+      .toContain("Your session has expired");
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: "local" });
+    const create = screen.getByRole("button", {
+      name: "Create API key",
+    }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    fireEvent.click(create);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not sign out for ordinary 403 or 500 API failures", async () => {
+    const loadFailure = vi.fn().mockResolvedValueOnce(errorEnvelope(
+      500,
+      "INTERNAL_ERROR",
+      "An internal error occurred.",
+    ));
+    vi.stubGlobal("fetch", loadFailure);
+    render(<ApiKeyAdmin />);
+    expect((await screen.findByRole("alert")).textContent)
+      .toContain("An internal error occurred.");
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Retry list" })).toBeDefined();
+
+    cleanup();
+    vi.clearAllMocks();
+    mocks.getSession.mockResolvedValue({
+      data: { session: { access_token: "current-access-token" } },
+      error: null,
+    });
+    const order = vi.fn().mockResolvedValue({ data: MEMBERS, error: null });
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({ order }),
+    });
+    const mutationFailure = installFetch([]);
+    mutationFailure
+      .mockImplementationOnce(async () => envelope([]))
+      .mockImplementationOnce(async () => errorEnvelope(
+        403,
+        "ADMIN_FORBIDDEN",
+        "Admin access is required.",
+      ));
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fireEvent.change(screen.getByLabelText("Key name"), {
+      target: { value: "Bruce experiments" },
+    });
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: BRUCE_ID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+    expect((await screen.findByRole("alert")).textContent)
+      .toContain("Admin access is required.");
+    expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+
+  it("serializes a deferred reload before create so old GET cannot overwrite it", async () => {
+    const oldReload = deferred<Response>();
+    const created = {
+      ...VIEW,
+      name: "Created after reload",
+      secret: CREATE_SECRET,
+    };
+    const fetchMock = installFetch();
+    fetchMock
+      .mockImplementationOnce(async () => envelope([VIEW]))
+      .mockImplementationOnce(async () => errorEnvelope(
+        500,
+        "INTERNAL_ERROR",
+        "Revoke failed.",
+      ))
+      .mockImplementationOnce(() => oldReload.promise)
+      .mockImplementationOnce(async () => envelope(created, 201));
+    render(<ApiKeyAdmin />);
+    await screen.findByRole("article", { name: "Bruce experiments" });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Revoke Bruce experiments",
+    }));
+    await screen.findByText("Revoke failed.");
+
+    fireEvent.change(screen.getByLabelText("Key name"), {
+      target: { value: "Created after reload" },
+    });
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: BRUCE_ID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry list" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const create = screen.getByRole("button", {
+      name: "Create API key",
+    }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    fireEvent.click(create);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    await act(async () => oldReload.resolve(envelope([VIEW])));
+    await waitFor(() => expect(create.disabled).toBe(false));
+    fireEvent.click(create);
+    expect(await screen.findByText(CREATE_SECRET)).toBeDefined();
+    expect(screen.getByRole("article", {
+      name: "Created after reload",
+    })).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps the one-time secret visible when clipboard copy is rejected", async () => {
+    installFetch([]);
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(
+      new Error("Clipboard permission denied."),
+    );
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fireEvent.change(screen.getByLabelText("Key name"), {
+      target: { value: "Bruce experiments" },
+    });
+    fireEvent.change(screen.getByLabelText("Member"), {
+      target: { value: BRUCE_ID },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+    await screen.findByText(CREATE_SECRET);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy secret" }));
+    expect((await screen.findByRole("alert")).textContent)
+      .toContain("Could not copy the secret.");
+    expect(screen.getByText(CREATE_SECRET)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Copy secret" })).toBeDefined();
+    expect(screen.getByRole("button", {
+      name: "Dismiss secret",
+    })).toBeDefined();
+  });
+
+  it("aborts a pending list request when the component unmounts", async () => {
+    const pending = deferred<Response>();
+    let signal: AbortSignal | undefined;
+    const fetchMock = vi.fn((
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      signal = init?.signal ?? undefined;
+      return pending.promise;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = render(<ApiKeyAdmin />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(signal?.aborted).toBe(false);
+
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(envelope([VIEW])));
+    expect(screen.queryByRole("article", {
+      name: "Bruce experiments",
+    })).toBeNull();
   });
 });

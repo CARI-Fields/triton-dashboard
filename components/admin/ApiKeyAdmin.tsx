@@ -24,7 +24,7 @@ interface MemberOption {
 
 interface ApiEnvelope<T> {
   data?: T;
-  error?: { message?: string };
+  error?: { code?: string; message?: string };
 }
 
 interface KeyDraft {
@@ -33,6 +33,8 @@ interface KeyDraft {
   scopes: ApiScope[];
   expires_at: string;
 }
+
+export type ManagedKeyStatus = "active" | "expired" | "revoked";
 
 const EMPTY_DRAFT: KeyDraft = {
   name: "",
@@ -47,6 +49,17 @@ function errorMessage(reason: unknown, fallback: string): string {
     : fallback;
 }
 
+export class AdminApiClientError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AdminApiClientError";
+  }
+}
+
 async function readEnvelope<T>(
   response: Response,
   fallback: string,
@@ -57,13 +70,16 @@ async function readEnvelope<T>(
   } catch {
     throw new Error(fallback);
   }
-  if (!response.ok || body.data === undefined) {
-    throw new Error(
-      typeof body.error?.message === "string"
-        ? body.error.message
-        : fallback,
+  if (!response.ok) {
+    throw new AdminApiClientError(
+      response.status,
+      typeof body.error?.code === "string"
+        ? body.error.code
+        : `HTTP_${response.status}`,
+      typeof body.error?.message === "string" ? body.error.message : fallback,
     );
   }
+  if (body.data === undefined) throw new Error(fallback);
   return body.data;
 }
 
@@ -88,6 +104,18 @@ function formatDate(value: string): string {
   return new Date(value).toLocaleString();
 }
 
+export function managedKeyStatus(
+  key: Pick<ManagedKeyView, "expires_at" | "revoked_at">,
+  now: number,
+): ManagedKeyStatus {
+  if (key.revoked_at !== null) return "revoked";
+  if (key.expires_at === null) return "active";
+  const expiresAt = Date.parse(key.expires_at);
+  return !Number.isFinite(expiresAt) || expiresAt <= now
+    ? "expired"
+    : "active";
+}
+
 function withoutSecret(result: ManagedKeyWithSecret): ManagedKeyView {
   const { secret: _discardedSecret, ...view } = result;
   return view;
@@ -98,6 +126,7 @@ export default function ApiKeyAdmin() {
   const [members, setMembers] = useState<MemberOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [createDraft, setCreateDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -111,8 +140,32 @@ export default function ApiKeyAdmin() {
   const mounted = useRef(false);
   const loadGeneration = useRef(0);
   const loadAbort = useRef<AbortController | null>(null);
+  const sessionInvalid = useRef(false);
+
+  const handleRequestFailure = useCallback(async (
+    reason: unknown,
+    fallback: string,
+  ) => {
+    if (reason instanceof AdminApiClientError && reason.status === 401) {
+      if (!sessionInvalid.current) {
+        sessionInvalid.current = true;
+        try {
+          await supabase?.auth.signOut({ scope: "local" });
+        } catch {
+          // AuthGate still needs the local session-expired state below.
+        }
+      }
+      if (mounted.current) {
+        setSessionExpired(true);
+        setError("Your session has expired. Sign in again.");
+      }
+      return;
+    }
+    if (mounted.current) setError(errorMessage(reason, fallback));
+  }, []);
 
   const load = useCallback(async () => {
+    if (sessionInvalid.current) return;
     const generation = ++loadGeneration.current;
     loadAbort.current?.abort();
     const controller = new AbortController();
@@ -167,13 +220,13 @@ export default function ApiKeyAdmin() {
       ) {
         return;
       }
-      setError(errorMessage(reason, "Could not load API keys."));
+      await handleRequestFailure(reason, "Could not load API keys.");
     } finally {
       if (mounted.current && generation === loadGeneration.current) {
         setLoading(false);
       }
     }
-  }, []);
+  }, [handleRequestFailure]);
 
   useEffect(() => {
     mounted.current = true;
@@ -191,6 +244,13 @@ export default function ApiKeyAdmin() {
     fallback: string,
   ): Promise<T> {
     if (!supabase) throw new Error("Connect Supabase first.");
+    if (sessionInvalid.current) {
+      throw new AdminApiClientError(
+        401,
+        "INVALID_ADMIN_SESSION",
+        "Your session has expired. Sign in again.",
+      );
+    }
     const { data, error: sessionError } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (sessionError || !token) {
@@ -222,7 +282,15 @@ export default function ApiKeyAdmin() {
 
   async function createKey(event: React.FormEvent) {
     event.preventDefault();
-    if (creating || !createDraft.name.trim() || !createDraft.member_id) return;
+    if (
+      loading
+      || sessionInvalid.current
+      || creating
+      || !createDraft.name.trim()
+      || !createDraft.member_id
+    ) {
+      return;
+    }
     setCreating(true);
     setError(null);
     setOneTimeSecret(null);
@@ -248,9 +316,7 @@ export default function ApiKeyAdmin() {
       setCreateDraft(EMPTY_DRAFT);
       setOneTimeSecret({ value: created.secret, source: "created" });
     } catch (reason) {
-      if (mounted.current) {
-        setError(errorMessage(reason, "Could not create the API key."));
-      }
+      await handleRequestFailure(reason, "Could not create the API key.");
     } finally {
       if (mounted.current) setCreating(false);
     }
@@ -270,8 +336,9 @@ export default function ApiKeyAdmin() {
     event.preventDefault();
     if (
       creating
-      ||
-      pendingId !== null
+      || loading
+      || sessionInvalid.current
+      || pendingId !== null
       || !editDraft.name.trim()
       || !editDraft.member_id
     ) {
@@ -297,16 +364,28 @@ export default function ApiKeyAdmin() {
       ));
       setEditingId(null);
     } catch (reason) {
-      if (mounted.current) {
-        setError(errorMessage(reason, "Could not update the API key."));
-      }
+      await handleRequestFailure(reason, "Could not update the API key.");
     } finally {
       if (mounted.current) setPendingId(null);
     }
   }
 
   async function rotateKey(key: ManagedKeyView) {
-    if (creating || pendingId !== null || key.revoked_at !== null) return;
+    if (
+      creating
+      || loading
+      || sessionInvalid.current
+      || pendingId !== null
+      || managedKeyStatus(key, Date.now()) !== "active"
+    ) {
+      return;
+    }
+    if (!window.confirm(
+      "Rotate this API key? This will immediately invalidate the old "
+      + "credential, and the new secret is shown only once.",
+    )) {
+      return;
+    }
     setPendingId(key.id);
     setError(null);
     setOneTimeSecret(null);
@@ -324,16 +403,27 @@ export default function ApiKeyAdmin() {
       ));
       setOneTimeSecret({ value: rotated.secret, source: "rotated" });
     } catch (reason) {
-      if (mounted.current) {
-        setError(errorMessage(reason, "Could not rotate the API key."));
-      }
+      await handleRequestFailure(reason, "Could not rotate the API key.");
     } finally {
       if (mounted.current) setPendingId(null);
     }
   }
 
   async function revokeKey(key: ManagedKeyView) {
-    if (creating || pendingId !== null || key.revoked_at !== null) return;
+    if (
+      creating
+      || loading
+      || sessionInvalid.current
+      || pendingId !== null
+      || key.revoked_at !== null
+    ) {
+      return;
+    }
+    if (!window.confirm(
+      "Revoke this API key? Revocation is immediate and cannot be undone.",
+    )) {
+      return;
+    }
     setPendingId(key.id);
     setError(null);
     try {
@@ -347,9 +437,7 @@ export default function ApiKeyAdmin() {
         (candidate) => candidate.id === revoked.id ? revoked : candidate,
       ));
     } catch (reason) {
-      if (mounted.current) {
-        setError(errorMessage(reason, "Could not revoke the API key."));
-      }
+      await handleRequestFailure(reason, "Could not revoke the API key.");
     } finally {
       if (mounted.current) setPendingId(null);
     }
@@ -409,7 +497,7 @@ export default function ApiKeyAdmin() {
       {error && (
         <div className="error-banner api-key-error" role="alert">
           <span>{error}</span>
-          {!loading && (
+          {!loading && !sessionExpired && (
             <button className="btn" type="button" onClick={() => void load()}>
               Retry list
             </button>
@@ -472,6 +560,8 @@ export default function ApiKeyAdmin() {
             type="submit"
             disabled={
               creating
+              || loading
+              || sessionExpired
               || pendingId !== null
               || !createDraft.name.trim()
               || !createDraft.member_id
@@ -525,7 +615,11 @@ export default function ApiKeyAdmin() {
         <div className="api-key-list">
           {keys.map((key) => {
             const busy = pendingId === key.id;
-            const controlsBusy = creating || pendingId !== null;
+            const controlsBusy = loading
+              || sessionExpired
+              || creating
+              || pendingId !== null;
+            const status = managedKeyStatus(key, Date.now());
             return (
               <article
                 className="panel api-key-card"
@@ -537,10 +631,12 @@ export default function ApiKeyAdmin() {
                     <h2>{key.name}</h2>
                     <code>{key.key_prefix}</code>
                   </div>
-                  <span className={`api-key-status ${
-                    key.revoked_at === null ? "active" : "revoked"
-                  }`}>
-                    {key.revoked_at === null ? "Active" : "Revoked"}
+                  <span className={`api-key-status ${status}`}>
+                    {status === "active"
+                      ? "Active"
+                      : status === "expired"
+                        ? "Expired"
+                        : "Revoked"}
                   </span>
                 </div>
 
@@ -668,17 +764,19 @@ export default function ApiKeyAdmin() {
                       >
                         Edit
                       </button>
-                      {key.revoked_at === null && (
+                      {status !== "revoked" && (
                         <>
-                          <button
-                            className="btn"
-                            type="button"
-                            disabled={controlsBusy}
-                            aria-label={`Rotate ${key.name}`}
-                            onClick={() => void rotateKey(key)}
-                          >
-                            {busy ? "Working…" : "Rotate"}
-                          </button>
+                          {status === "active" && (
+                            <button
+                              className="btn"
+                              type="button"
+                              disabled={controlsBusy}
+                              aria-label={`Rotate ${key.name}`}
+                              onClick={() => void rotateKey(key)}
+                            >
+                              {busy ? "Working…" : "Rotate"}
+                            </button>
+                          )}
                           <button
                             className="btn api-key-revoke"
                             type="button"

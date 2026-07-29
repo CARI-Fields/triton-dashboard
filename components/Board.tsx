@@ -471,9 +471,11 @@ export default function Board() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [loadErrorMsg, setLoadErrorMsg] = useState<string | null>(null);
+  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
   const [newMember, setNewMember] = useState("");
   const [pickerId, setPickerId] = useState<string | null>(null);
+  const errorMsg = actionErrorMsg ?? loadErrorMsg;
 
   const recordActivity = useCallback((
     taskId: string,
@@ -483,14 +485,14 @@ export default function Board() {
     void logActivity(taskId, text, kind)
       .then((activityError) => {
         if (activityError) {
-          setErrorMsg(`Could not record activity. ${activityError}`);
+          setActionErrorMsg(`Could not record activity. ${activityError}`);
         }
       })
       .catch((caught: unknown) => {
         const message = caught instanceof Error
           ? caught.message
           : "The request failed.";
-        setErrorMsg(`Could not record activity. ${message}`);
+        setActionErrorMsg(`Could not record activity. ${message}`);
       });
   }, []);
 
@@ -506,14 +508,14 @@ export default function Board() {
     ]);
     const firstError = m.error || t.error || mem.error;
     if (firstError) {
-      setErrorMsg(firstError.message);
+      setLoadErrorMsg(firstError.message);
     } else {
       setModules((m.data ?? []) as Module[]);
       setTasks(
         ((t.data ?? []) as unknown as TaskRelationRow[]).map(normalizeTaskRow),
       );
       setMembers((mem.data ?? []) as Member[]);
-      setErrorMsg(null);
+      setLoadErrorMsg(null);
     }
     setLoading(false);
   }, []);
@@ -628,6 +630,7 @@ export default function Board() {
       if (!supabase) return;
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
+      setActionErrorMsg(null);
       try {
         const member = members.find((candidate) => candidate.name === name);
         if (!member) throw new Error(`Unknown member: ${name}`);
@@ -644,7 +647,9 @@ export default function Board() {
         );
         reload();
       } catch (caught) {
-        setErrorMsg(`Could not update Task assignment. ${errorMessage(caught)}`);
+        setActionErrorMsg(
+          `Could not update Task assignment. ${errorMessage(caught)}`,
+        );
       }
     },
     [members, recordActivity, tasks, reload]
@@ -668,6 +673,7 @@ export default function Board() {
       if (!supabase) return;
       const n = name.trim();
       if (!n) return;
+      setActionErrorMsg(null);
       try {
         let member = members.find((candidate) => candidate.name === n);
         if (!member) {
@@ -690,7 +696,7 @@ export default function Board() {
         }
         reload();
       } catch (caught) {
-        setErrorMsg(
+        setActionErrorMsg(
           `Could not add and assign teammate. ${errorMessage(caught)}`,
         );
       }

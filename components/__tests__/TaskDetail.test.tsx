@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -1065,11 +1066,16 @@ describe("TaskDetail orchestration", () => {
       name: "Alicia",
       initials: "AC",
     };
+    const renamedMember = {
+      ...member,
+      name: "Bruno",
+      initials: "BR",
+    };
     enqueueLoad(
       { ...assignedTask, assignees: ["Alicia"] },
       [],
       [],
-      [member, renamedAlice],
+      [renamedMember, renamedAlice],
     );
     trigger(
       `task-${taskA.id}`,
@@ -1081,6 +1087,11 @@ describe("TaskDetail orchestration", () => {
     expect(await screen.findByRole("button", { name: "Unassign Alicia" }))
       .toBeDefined();
     expect(screen.queryByRole("button", { name: "Unassign Alice" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
+    const picker = screen.getByRole("menu");
+    expect(within(picker).getByRole("button", { name: /Bruno$/ }))
+      .toBeDefined();
+    expect(within(picker).queryByRole("button", { name: /Bruce$/ })).toBeNull();
 
     view.unmount();
     expect(supabaseState.removeChannel).toHaveBeenCalledTimes(1);

@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -22,9 +23,19 @@ interface QueryResult<T = unknown> {
   error: QueryError | null;
 }
 
+interface RealtimeHandler {
+  table: string;
+  callback: (payload: {
+    eventType: "INSERT" | "UPDATE" | "DELETE";
+    new: Record<string, unknown>;
+    old: Record<string, unknown>;
+  }) => void;
+}
+
 const supabaseState = vi.hoisted(() => ({
   queues: new Map<string, Promise<QueryResult>[]>(),
   fromCalls: [] as string[],
+  handlers: [] as RealtimeHandler[],
   removeChannel: vi.fn(),
 }));
 
@@ -55,7 +66,17 @@ vi.mock("@/lib/supabase", () => {
     }),
     channel: vi.fn(() => {
       const channel = {
-        on: vi.fn(() => channel),
+        on: vi.fn((
+          _kind: string,
+          config: { table: string },
+          callback: RealtimeHandler["callback"],
+        ) => {
+          supabaseState.handlers.push({
+            table: config.table,
+            callback,
+          });
+          return channel;
+        }),
         subscribe: vi.fn(() => channel),
       };
       return channel;
@@ -105,6 +126,14 @@ function failure(message: string): QueryResult<null> {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function enqueue(table: string, result: QueryResult | Promise<QueryResult>) {
   const queue = supabaseState.queues.get(table) ?? [];
   queue.push(Promise.resolve(result));
@@ -134,6 +163,21 @@ function enqueueBoardLoad(
   enqueue("members", ok(members));
 }
 
+function triggerRealtime(
+  table: string,
+  eventType: "INSERT" | "UPDATE" | "DELETE",
+  next: Record<string, unknown>,
+  old: Record<string, unknown> = {},
+) {
+  const handler = supabaseState.handlers.find(
+    (candidate) => candidate.table === table,
+  );
+  if (!handler) throw new Error(`No ${table} realtime handler registered.`);
+  act(() => {
+    handler.callback({ eventType, new: next, old });
+  });
+}
+
 async function openAssigneePicker() {
   await screen.findByText("Task A");
   fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
@@ -142,6 +186,7 @@ async function openAssigneePicker() {
 beforeEach(() => {
   supabaseState.queues.clear();
   supabaseState.fromCalls.length = 0;
+  supabaseState.handlers.length = 0;
   supabaseState.removeChannel.mockClear();
 });
 
@@ -206,6 +251,98 @@ describe("Board UUID assignment errors", () => {
       .toBeDefined();
     expect(supabaseState.fromCalls.filter((table) => table === "tasks"))
       .toHaveLength(1);
+  });
+
+  it("keeps an add-and-assign error visible after an earlier realtime reload finishes", async () => {
+    const cara = {
+      ...alice,
+      id: "00000000-0000-4000-8000-000000000022",
+      name: "Cara",
+      initials: "CA",
+    };
+    const assignment = deferred<QueryResult>();
+    const backgroundModules = deferred<QueryResult<Module[]>>();
+    enqueueBoardLoad(task, []);
+    enqueue("members", ok(cara));
+    enqueue("task_assignees", assignment.promise);
+    enqueue("modules", backgroundModules.promise);
+    enqueue("tasks", ok([taskRow(task, [cara])]));
+    enqueue("members", ok([cara]));
+    render(<Board />);
+    await openAssigneePicker();
+
+    const menu = screen.getByRole("menu");
+    fireEvent.change(within(menu).getByPlaceholderText("Add teammate…"), {
+      target: { value: "Cara" },
+    });
+    fireEvent.click(within(menu).getByRole("button", { name: "Add" }));
+    await waitFor(() => {
+      expect(supabaseState.fromCalls.filter(
+        (table) => table === "task_assignees",
+      )).toHaveLength(1);
+    });
+
+    triggerRealtime("members", "INSERT", cara);
+    await waitFor(() => {
+      expect(supabaseState.fromCalls.filter((table) => table === "modules"))
+        .toHaveLength(2);
+    });
+
+    act(() => {
+      assignment.resolve(failure("new teammate assignment denied"));
+    });
+    expect(await screen.findByText(/new teammate assignment denied/))
+      .toBeDefined();
+
+    act(() => {
+      backgroundModules.resolve(ok([moduleRow]));
+    });
+    expect(await within(screen.getByRole("menu")).findByRole(
+      "button",
+      { name: /Cara$/ },
+    )).toBeDefined();
+    expect(screen.getByText(/new teammate assignment denied/)).toBeDefined();
+  });
+
+  it("clears a load error after a later successful realtime reload", async () => {
+    enqueue("modules", failure("board load denied"));
+    enqueue("tasks", ok([taskRow(task, [alice])]));
+    enqueue("members", ok([alice]));
+    render(<Board />);
+
+    expect(await screen.findByText(/board load denied/)).toBeDefined();
+
+    enqueueBoardLoad();
+    triggerRealtime("members", "UPDATE", alice);
+
+    await screen.findByText("Task A");
+    await waitFor(() => {
+      expect(screen.queryByText(/board load denied/)).toBeNull();
+    });
+  });
+
+  it("clears an old assignment error when the next assignment succeeds", async () => {
+    enqueueBoardLoad();
+    enqueue("task_assignees", failure("first assignment denied"));
+    render(<Board />);
+    await openAssigneePicker();
+
+    fireEvent.click(
+      within(screen.getByRole("menu"))
+        .getByRole("button", { name: /Alice$/ }),
+    );
+    expect(await screen.findByText(/first assignment denied/)).toBeDefined();
+
+    enqueue("task_assignees", ok(null));
+    enqueueBoardLoad({ ...task, assignees: ["Alice"] });
+    fireEvent.click(
+      within(screen.getByRole("menu"))
+        .getByRole("button", { name: /Alice$/ }),
+    );
+
+    expect(await screen.findByRole("button", { name: "Unassign Alice" }))
+      .toBeDefined();
+    expect(screen.queryByText(/first assignment denied/)).toBeNull();
   });
 
   it("reloads after a successful UUID assignment", async () => {

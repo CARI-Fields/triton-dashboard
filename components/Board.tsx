@@ -472,6 +472,8 @@ function SetupScreen() {
 /* Board                                                               */
 /* ------------------------------------------------------------------ */
 export default function Board() {
+  const reloadGenerationRef = useRef(0);
+  const actionGenerationRef = useRef(0);
   const [modules, setModules] = useState<Module[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -481,14 +483,24 @@ export default function Board() {
   const [pickerId, setPickerId] = useState<string | null>(null);
   const errorMsg = currentError?.message ?? null;
 
+  const beginAction = useCallback(() => {
+    const generation = ++actionGenerationRef.current;
+    setCurrentError(null);
+    return generation;
+  }, []);
+
   const recordActivity = useCallback((
+    actionGeneration: number,
     taskId: string,
     text: string,
     kind: ActivityKind,
   ) => {
     void logActivity(taskId, text, kind)
       .then((activityError) => {
-        if (activityError) {
+        if (
+          activityError
+          && actionGenerationRef.current === actionGeneration
+        ) {
           setCurrentError({
             source: "action",
             message: `Could not record activity. ${activityError}`,
@@ -496,6 +508,7 @@ export default function Board() {
         }
       })
       .catch((caught: unknown) => {
+        if (actionGenerationRef.current !== actionGeneration) return;
         const message = caught instanceof Error
           ? caught.message
           : "The request failed.";
@@ -508,6 +521,8 @@ export default function Board() {
 
   const reload = useCallback(async () => {
     if (!supabase) return;
+    const reloadGeneration = ++reloadGenerationRef.current;
+    const actionGeneration = actionGenerationRef.current;
     const [m, t, mem] = await Promise.all([
       supabase.from("modules").select("*").order("position"),
       supabase
@@ -516,6 +531,12 @@ export default function Board() {
         .order("position"),
       supabase.from("members").select("*").order("position"),
     ]);
+    if (
+      reloadGenerationRef.current !== reloadGeneration
+      || actionGenerationRef.current !== actionGeneration
+    ) {
+      return;
+    }
     const firstError = m.error || t.error || mem.error;
     if (firstError) {
       setCurrentError({ source: "load", message: firstError.message });
@@ -557,41 +578,41 @@ export default function Board() {
   const addModule = useCallback(
     async (kind: Module["kind"]) => {
       if (!supabase) return;
-      setCurrentError(null);
+      beginAction();
       const siblings = modules.filter((m) => m.kind === kind);
       await supabase
         .from("modules")
         .insert({ name: "New module", kind, objective: "", position: nextPosition(siblings) });
       reload();
     },
-    [modules, reload]
+    [beginAction, modules, reload]
   );
 
   const patchModule = useCallback(
     async (id: string, patch: Partial<Module>) => {
       if (!supabase) return;
-      setCurrentError(null);
+      beginAction();
       await supabase.from("modules").update(patch).eq("id", id);
       reload();
     },
-    [reload]
+    [beginAction, reload]
   );
 
   const deleteModule = useCallback(
     async (id: string, name: string) => {
       if (!supabase) return;
       if (!window.confirm(`Delete module "${name}" and all its tasks?`)) return;
-      setCurrentError(null);
+      beginAction();
       await supabase.from("modules").delete().eq("id", id);
       reload();
     },
-    [reload]
+    [beginAction, reload]
   );
 
   const addTask = useCallback(
     async (moduleId: string) => {
       if (!supabase) return;
-      setCurrentError(null);
+      const actionGeneration = beginAction();
       const siblings = tasks.filter((t) => t.module_id === moduleId);
       // Pin new tasks to the top of the column, and open the assignee picker
       // right away so the task can be assigned without another click.
@@ -607,38 +628,48 @@ export default function Board() {
         .select("id")
         .single();
       if (data) {
-        recordActivity(data.id, "Task created", "create");
+        recordActivity(actionGeneration, data.id, "Task created", "create");
         setPickerId(data.id);
       }
       reload();
     },
-    [recordActivity, tasks, reload]
+    [beginAction, recordActivity, tasks, reload]
   );
 
   const patchTask = useCallback(
     async (id: string, patch: Partial<Task>) => {
       if (!supabase) return;
-      setCurrentError(null);
+      const actionGeneration = beginAction();
       await supabase.from("tasks").update(patch).eq("id", id);
       if (patch.status) {
-        recordActivity(id, `Status set to ${statusLabel(patch.status)}`, "status");
+        recordActivity(
+          actionGeneration,
+          id,
+          `Status set to ${statusLabel(patch.status)}`,
+          "status",
+        );
       }
       if (patch.title) {
-        recordActivity(id, `Renamed to “${patch.title}”`, "edit");
+        recordActivity(
+          actionGeneration,
+          id,
+          `Renamed to “${patch.title}”`,
+          "edit",
+        );
       }
       reload();
     },
-    [recordActivity, reload]
+    [beginAction, recordActivity, reload]
   );
 
   const deleteTask = useCallback(
     async (id: string) => {
       if (!supabase) return;
-      setCurrentError(null);
+      beginAction();
       await supabase.from("tasks").delete().eq("id", id);
       reload();
     },
-    [reload]
+    [beginAction, reload]
   );
 
   const toggleAssignee = useCallback(
@@ -646,7 +677,7 @@ export default function Board() {
       if (!supabase) return;
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
-      setCurrentError(null);
+      const actionGeneration = beginAction();
       try {
         const member = members.find((candidate) => candidate.name === name);
         if (!member) throw new Error(`Unknown member: ${name}`);
@@ -657,19 +688,21 @@ export default function Board() {
           await assignTaskMember(supabase, taskId, member.id);
         }
         recordActivity(
+          actionGeneration,
           taskId,
           `${had ? "Unassigned" : "Assigned"} ${name}`,
           "assign",
         );
         reload();
       } catch (caught) {
+        if (actionGenerationRef.current !== actionGeneration) return;
         setCurrentError({
           source: "action",
           message: `Could not update Task assignment. ${errorMessage(caught)}`,
         });
       }
     },
-    [members, recordActivity, tasks, reload]
+    [beginAction, members, recordActivity, tasks, reload]
   );
 
   const addMember = useCallback(
@@ -677,13 +710,13 @@ export default function Board() {
       if (!supabase) return;
       const n = name.trim();
       if (!n || members.some((m) => m.name === n)) return;
-      setCurrentError(null);
+      beginAction();
       await supabase
         .from("members")
         .insert({ name: n, initials: initialsFromName(n), position: nextPosition(members) });
       reload();
     },
-    [members, reload]
+    [beginAction, members, reload]
   );
 
   const addMemberToTask = useCallback(
@@ -691,9 +724,11 @@ export default function Board() {
       if (!supabase) return;
       const n = name.trim();
       if (!n) return;
-      setCurrentError(null);
+      const task = tasks.find((candidate) => candidate.id === taskId);
+      if (!task || task.assignees.includes(n)) return;
+      let member = members.find((candidate) => candidate.name === n);
+      const actionGeneration = beginAction();
       try {
-        let member = members.find((candidate) => candidate.name === n);
         if (!member) {
           const { data, error } = await supabase
             .from("members")
@@ -707,31 +742,34 @@ export default function Board() {
           if (error) throw new Error(error.message);
           member = data as Member;
         }
-        const task = tasks.find((t) => t.id === taskId);
-        if (task && !task.assignees.includes(n)) {
-          await assignTaskMember(supabase, taskId, member.id);
-          recordActivity(taskId, `Assigned ${n}`, "assign");
-        }
+        await assignTaskMember(supabase, taskId, member.id);
+        recordActivity(
+          actionGeneration,
+          taskId,
+          `Assigned ${n}`,
+          "assign",
+        );
         reload();
       } catch (caught) {
+        if (actionGenerationRef.current !== actionGeneration) return;
         setCurrentError({
           source: "action",
           message: `Could not add and assign teammate. ${errorMessage(caught)}`,
         });
       }
     },
-    [members, recordActivity, tasks, reload]
+    [beginAction, members, recordActivity, tasks, reload]
   );
 
   const removeMember = useCallback(
     async (member: Member) => {
       if (!supabase) return;
       if (!window.confirm(`Remove ${member.name} from the team?`)) return;
-      setCurrentError(null);
+      beginAction();
       await supabase.from("members").delete().eq("id", member.id);
       reload();
     },
-    [reload]
+    [beginAction, reload]
   );
 
   /* ---- derived ---- */

@@ -34,13 +34,16 @@ interface RealtimeHandler {
 
 const supabaseState = vi.hoisted(() => ({
   queues: new Map<string, Promise<QueryResult>[]>(),
+  activityResponses: [] as Promise<string | null>[],
   fromCalls: [] as string[],
   handlers: [] as RealtimeHandler[],
   removeChannel: vi.fn(),
 }));
 
 vi.mock("@/lib/activity", () => ({
-  logActivity: vi.fn().mockResolvedValue(null),
+  logActivity: vi.fn(() => (
+    supabaseState.activityResponses.shift() ?? Promise.resolve(null)
+  )),
 }));
 
 vi.mock("@/lib/supabase", () => {
@@ -185,6 +188,7 @@ async function openAssigneePicker() {
 
 beforeEach(() => {
   supabaseState.queues.clear();
+  supabaseState.activityResponses.length = 0;
   supabaseState.fromCalls.length = 0;
   supabaseState.handlers.length = 0;
   supabaseState.removeChannel.mockClear();
@@ -302,6 +306,164 @@ describe("Board UUID assignment errors", () => {
       { name: /Cara$/ },
     )).toBeDefined();
     expect(screen.getByText(/new teammate assignment denied/)).toBeDefined();
+  });
+
+  it("ignores an older reload failure after a newer assignment error", async () => {
+    const oldModules = deferred<QueryResult>();
+    enqueueBoardLoad();
+    render(<Board />);
+    await openAssigneePicker();
+
+    enqueue("modules", oldModules.promise);
+    enqueue("tasks", ok([taskRow(task, [alice])]));
+    enqueue("members", ok([alice]));
+    triggerRealtime("members", "UPDATE", alice);
+
+    enqueue("task_assignees", failure("newer assignment denied"));
+    fireEvent.click(
+      within(screen.getByRole("menu"))
+        .getByRole("button", { name: /Alice$/ }),
+    );
+    expect(await screen.findByText(/newer assignment denied/)).toBeDefined();
+
+    await act(async () => {
+      oldModules.resolve(failure("older reload denied"));
+      await oldModules.promise;
+    });
+
+    expect(screen.getByText(/newer assignment denied/)).toBeDefined();
+    expect(screen.queryByText(/older reload denied/)).toBeNull();
+  });
+
+  it("ignores stale reload data and success after a newer reload fails", async () => {
+    const oldModules = deferred<QueryResult<Module[]>>();
+    const staleTask = { ...task, title: "Stale Task from reload A" };
+    enqueueBoardLoad();
+    render(<Board />);
+    await screen.findByText("Task A");
+
+    enqueue("modules", oldModules.promise);
+    enqueue("tasks", ok([taskRow(staleTask, [alice])]));
+    enqueue("members", ok([alice]));
+    triggerRealtime("members", "UPDATE", alice);
+
+    enqueue("modules", failure("reload B denied"));
+    enqueue("tasks", ok([taskRow(task, [alice])]));
+    enqueue("members", ok([alice]));
+    triggerRealtime("tasks", "UPDATE", task);
+    expect(await screen.findByText(/reload B denied/)).toBeDefined();
+
+    await act(async () => {
+      oldModules.resolve(ok([moduleRow]));
+      await oldModules.promise;
+    });
+
+    expect(screen.getByText(/reload B denied/)).toBeDefined();
+    expect(screen.queryByText("Stale Task from reload A")).toBeNull();
+    expect(screen.getByText("Task A")).toBeDefined();
+  });
+
+  it("does not let an old activity failure overwrite a newer action error", async () => {
+    const oldActivity = deferred<string | null>();
+    enqueueBoardLoad();
+    supabaseState.activityResponses.push(oldActivity.promise);
+    render(<Board />);
+    await screen.findByText("Task A");
+
+    enqueue("tasks", ok(null));
+    enqueueBoardLoad({ ...task, status: "done" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), {
+      target: { value: "done" },
+    });
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("combobox", { name: "Status" }) as HTMLSelectElement)
+          .value,
+      ).toBe("done");
+    });
+
+    enqueue("task_assignees", failure("newer assignment denied"));
+    await openAssigneePicker();
+    fireEvent.click(
+      within(screen.getByRole("menu"))
+        .getByRole("button", { name: /Alice$/ }),
+    );
+    expect(await screen.findByText(/newer assignment denied/)).toBeDefined();
+
+    await act(async () => {
+      oldActivity.resolve("older status activity denied");
+      await oldActivity.promise;
+    });
+
+    expect(screen.getByText(/newer assignment denied/)).toBeDefined();
+    expect(screen.queryByText(/older status activity denied/)).toBeNull();
+  });
+
+  it("does not revive an old activity failure after a newer action succeeds", async () => {
+    const oldActivity = deferred<string | null>();
+    enqueueBoardLoad();
+    supabaseState.activityResponses.push(oldActivity.promise);
+    render(<Board />);
+    await screen.findByText("Task A");
+
+    enqueue("tasks", ok(null));
+    enqueueBoardLoad({ ...task, status: "done" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), {
+      target: { value: "done" },
+    });
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("combobox", { name: "Status" }) as HTMLSelectElement)
+          .value,
+      ).toBe("done");
+    });
+
+    supabaseState.activityResponses.push(Promise.resolve(null));
+    enqueue("task_assignees", ok(null));
+    enqueueBoardLoad({ ...task, status: "done", assignees: ["Alice"] });
+    await openAssigneePicker();
+    fireEvent.click(
+      within(screen.getByRole("menu"))
+        .getByRole("button", { name: /Alice$/ }),
+    );
+    expect(await screen.findByRole("button", { name: "Unassign Alice" }))
+      .toBeDefined();
+
+    await act(async () => {
+      oldActivity.resolve("older status activity denied");
+      await oldActivity.promise;
+    });
+
+    expect(screen.queryByText(/older status activity denied/)).toBeNull();
+    expect(document.querySelector(".error-banner")).toBeNull();
+  });
+
+  it("keeps an unassign error when adding the already assigned teammate is a no-op", async () => {
+    const assignedTask = { ...task, assignees: ["Alice"] };
+    enqueueBoardLoad(assignedTask);
+    enqueue("task_assignees", failure("unassignment denied"));
+    render(<Board />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Unassign Alice" }),
+    );
+    expect(await screen.findByText(/unassignment denied/)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
+    const menu = screen.getByRole("menu");
+    fireEvent.change(within(menu).getByPlaceholderText("Add teammate…"), {
+      target: { value: "Alice" },
+    });
+    const callsBeforeNoOp = [...supabaseState.fromCalls];
+    enqueueBoardLoad(assignedTask);
+    await act(async () => {
+      fireEvent.click(within(menu).getByRole("button", { name: "Add" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/unassignment denied/)).toBeDefined();
+    expect(supabaseState.fromCalls).toEqual(callsBeforeNoOp);
   });
 
   it("clears a load error after a later successful realtime reload", async () => {

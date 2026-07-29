@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -284,9 +285,41 @@ describe("ExperimentDetail orchestration", () => {
       expect(document.getElementById(id)?.getAttribute("aria-labelledby"))
         .toBe(`${id}-title`);
     }
-    expect(screen.getByRole("complementary", {
+    expect(screen.getByRole("region", { name: "Experiment details" }))
+      .toBeDefined();
+    const showActivity = screen.getByRole("button", {
+      name: "Show activity",
+    });
+    expect(showActivity.getAttribute("aria-expanded")).toBe("false");
+    expect(showActivity.getAttribute("aria-controls"))
+      .toBe("experiment-activity-drawer");
+    expect(screen.queryByRole("dialog", {
+      name: "Experiment activity",
+    })).toBeNull();
+    showActivity.focus();
+    fireEvent.click(showActivity);
+    const activityDialog = screen.getByRole("dialog", {
+      name: "Experiment activity",
+    });
+    expect(within(activityDialog).getByRole("heading", {
+      name: "Activity",
+    })).toBeDefined();
+    expect(within(activityDialog).getByLabelText(
+      "Experiment timeline note",
+    )).toBeDefined();
+    fireEvent.click(within(activityDialog).getByRole("button", {
+      name: "Close activity",
+    }));
+    expect(screen.queryByRole("dialog", {
+      name: "Experiment activity",
+    })).toBeNull();
+    showActivity.focus();
+    fireEvent.click(showActivity);
+    expect(screen.getByRole("dialog", {
       name: "Experiment activity",
     })).toBeDefined();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(showActivity));
     expect(screen.getByText(/Saved|Unsaved changes/)).toBeDefined();
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
     const moreActions = screen.getByRole("button", {

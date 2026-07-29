@@ -17,7 +17,15 @@ const FOCUSABLE_SELECTOR = [
 ].join(",");
 const NARROW_NAVIGATION_QUERY = "(max-width: 767px)";
 
-const NAV_ITEMS = [
+interface NavigationItem {
+  href: string;
+  label: string;
+  icon: IconName;
+  active(pathname: string): boolean;
+  children?: NavigationItem[];
+}
+
+const NAV_ITEMS: NavigationItem[] = [
   {
     href: "/",
     label: "Task Board",
@@ -35,15 +43,17 @@ const NAV_ITEMS = [
       && pathname !== "/experiments/compare"
       && !pathname.startsWith("/experiments/compare/")
     ),
-  },
-  {
-    href: "/experiments/compare",
-    label: "Compare",
-    icon: "compare",
-    active: (pathname: string) => (
-      pathname === "/experiments/compare"
-      || pathname.startsWith("/experiments/compare/")
-    ),
+    children: [
+      {
+        href: "/experiments/compare",
+        label: "Compare",
+        icon: "compare",
+        active: (pathname: string) => (
+          pathname === "/experiments/compare"
+          || pathname.startsWith("/experiments/compare/")
+        ),
+      },
+    ],
   },
   {
     href: "/analytics",
@@ -51,12 +61,35 @@ const NAV_ITEMS = [
     icon: "analytics",
     active: (pathname: string) => pathname === "/analytics",
   },
-] satisfies Array<{
-  href: string;
-  label: string;
-  icon: IconName;
-  active(pathname: string): boolean;
-}>;
+];
+
+function NavigationLink({
+  item,
+  active,
+  ancestorActive = false,
+  secondary = false,
+}: {
+  item: NavigationItem;
+  active: boolean;
+  ancestorActive?: boolean;
+  secondary?: boolean;
+}) {
+  return (
+    <Link
+      href={item.href}
+      className={[
+        "nav-btn",
+        secondary ? "nav-subnav" : "",
+        active ? "active" : "",
+        ancestorActive ? "ancestor-active" : "",
+      ].filter(Boolean).join(" ")}
+      aria-current={active ? "page" : undefined}
+    >
+      <Icon name={item.icon} />
+      <span>{item.label}</span>
+    </Link>
+  );
+}
 
 function BrandLink() {
   return (
@@ -215,16 +248,40 @@ export default function Navbar() {
           <div className="nav-section">
             {NAV_ITEMS.map((item) => {
               const active = item.active(pathname);
+              const descendantActive = item.children?.some(
+                (child) => child.active(pathname),
+              ) ?? false;
+              if (!item.children) {
+                return (
+                  <NavigationLink
+                    key={item.href}
+                    item={item}
+                    active={active}
+                  />
+                );
+              }
               return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`nav-btn ${active ? "active" : ""}`}
-                  aria-current={active ? "page" : undefined}
-                >
-                  <Icon name={item.icon} />
-                  <span>{item.label}</span>
-                </Link>
+                <div className="nav-group" key={item.href}>
+                  <NavigationLink
+                    item={item}
+                    active={active}
+                    ancestorActive={descendantActive}
+                  />
+                  <div
+                    className="nav-subsection"
+                    role="group"
+                    aria-label={`${item.label} pages`}
+                  >
+                    {item.children.map((child) => (
+                      <NavigationLink
+                        key={child.href}
+                        item={child}
+                        active={child.active(pathname)}
+                        secondary
+                      />
+                    ))}
+                  </div>
+                </div>
               );
             })}
           </div>

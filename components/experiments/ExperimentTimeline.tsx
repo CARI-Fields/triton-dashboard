@@ -77,16 +77,11 @@ export default function ExperimentTimeline({
   }
 
   return (
-    <aside
-      className="activity-rail experiment-timeline"
-      aria-label="Experiment activity"
-      aria-labelledby="experiment-timeline-title"
+    <section
+      className="experiment-timeline"
+      aria-label="Experiment activity timeline"
       aria-busy={saving}
     >
-      <h2 id="experiment-timeline-title">
-        <span className="sr-only">Experiment activity</span>
-        <span aria-hidden="true">Activity</span>
-      </h2>
       <p className="field-help">Anonymous events from the shared team account.</p>
       <div className="timeline-note-form">
         <textarea
@@ -126,6 +121,6 @@ export default function ExperimentTimeline({
           </div>
         ))}
       </div>
-    </aside>
+    </section>
   );
 }

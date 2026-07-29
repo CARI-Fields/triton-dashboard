@@ -392,8 +392,9 @@ describe("workspace visual contracts", () => {
 
   it("uses the approved 256px desktop shell and semantic sidebar surface", () => {
     const shell = ruleBody(globals, ".app-shell");
+    expect(shell).toMatch(/--app-sidebar-width\s*:\s*256px/);
     expect(shell).toMatch(
-      /grid-template-columns\s*:\s*256px\s+minmax\(0,\s*1fr\)/,
+      /grid-template-columns\s*:\s*var\(--app-sidebar-width\)\s+minmax\(0,\s*1fr\)/,
     );
     expect(shell).toMatch(/background\s*:\s*var\(--canvas\)/);
     expect(shell).toMatch(/height\s*:\s*100dvh/);
@@ -414,7 +415,21 @@ describe("workspace visual contracts", () => {
     expect(sidebar).toMatch(/height\s*:\s*100dvh/);
   });
 
-  it("gives Task Detail one visible main scrollbar and hidden fixed-rail scrollbars", () => {
+  it("shows Compare as a nested Experiments destination", () => {
+    const subsection = ruleBody(globals, ".nav-subsection");
+    expect(subsection).toMatch(/position\s*:\s*relative/);
+    expect(subsection).toMatch(/margin-left\s*:\s*24px/);
+    expect(subsection).toMatch(/padding-left\s*:\s*16px/);
+    expect(ruleBody(globals, ".nav-subsection::before")).toMatch(
+      /background\s*:\s*var\(--border-strong\)/,
+    );
+    expect(ruleBody(globals, ".nav-subnav")).toMatch(/font-size\s*:\s*13px/);
+    const ancestor = ruleBody(globals, ".nav-btn.ancestor-active");
+    expect(ancestor).toMatch(/background\s*:\s*var\(--surface-hover\)/);
+    expect(ancestor).toMatch(/color\s*:\s*var\(--text-primary\)/);
+  });
+
+  it("gives Task and Experiment full-width main scroll regions with an overlay Activity drawer", () => {
     const nav = ruleBody(globals, ".app-sidebar > nav");
     expect(nav).toMatch(/overflow-y\s*:\s*auto/);
     expect(nav).toMatch(/scrollbar-width\s*:\s*none/);
@@ -429,40 +444,60 @@ describe("workspace visual contracts", () => {
     expect(taskHost).toMatch(/padding-inline\s*:\s*0/);
     expect(taskHost).toMatch(/scrollbar-gutter\s*:\s*auto/);
 
-    const middle = ruleBody(globals, ".task-detail-scroll-region");
-    expect(middle).toMatch(/height\s*:\s*100%/);
-    expect(middle).toMatch(/overflow-y\s*:\s*auto/);
-    expect(middle).toMatch(/scrollbar-gutter\s*:\s*stable/);
-    expect(middle).toMatch(/scrollbar-width\s*:\s*thin/);
+    const taskPage = ruleBody(globals, ".record-page.task-detail-page");
+    expect(taskPage).toMatch(/display\s*:\s*block/);
+    expect(taskPage).not.toMatch(/grid-template-columns/);
 
-    const activity = ruleBody(
-      globals,
-      ".task-detail-page .task-activity-scroll-region",
-    );
-    expect(activity).toMatch(/min-height\s*:\s*0/);
-    expect(activity).toMatch(/overflow-y\s*:\s*auto/);
-    expect(activity).toMatch(/scrollbar-width\s*:\s*none/);
-    expect(
-      ruleBody(
-        globals,
-        ".task-detail-page .task-activity-scroll-region::-webkit-scrollbar",
-      ),
-    ).toMatch(/display\s*:\s*none/);
+    const taskMain = ruleBody(globals, ".task-detail-scroll-region");
+    expect(taskMain).toMatch(/height\s*:\s*100%/);
+    expect(taskMain).toMatch(/overflow-y\s*:\s*auto/);
+    expect(taskMain).toMatch(/scrollbar-gutter\s*:\s*stable/);
+    expect(taskMain).toMatch(/scrollbar-width\s*:\s*thin/);
 
-    const activityRail = ruleBody(
-      globals,
-      ".task-detail-page .task-activity-panel",
+    const experimentCss = workspaceCss();
+    const experimentHost = ruleBody(
+      experimentCss,
+      ".app-content:has(.experiment-detail-page)",
     );
-    expect(activityRail).toMatch(
+    expect(experimentHost).toMatch(/overflow\s*:\s*hidden/);
+    expect(experimentHost).toMatch(/padding-inline\s*:\s*0/);
+    const experimentPage = ruleBody(
+      experimentCss,
+      ".record-page.experiment-detail-page",
+    );
+    expect(experimentPage).toMatch(/display\s*:\s*block/);
+    expect(experimentPage).not.toMatch(/grid-template-columns/);
+    const experimentMain = ruleBody(
+      experimentCss,
+      ".experiment-detail-scroll-region",
+    );
+    expect(experimentMain).toMatch(/height\s*:\s*100%/);
+    expect(experimentMain).toMatch(/overflow-y\s*:\s*auto/);
+    expect(experimentMain).toMatch(/scrollbar-width\s*:\s*thin/);
+
+    const drawer = ruleBody(globals, ".activity-drawer");
+    expect(drawer).toMatch(/position\s*:\s*fixed/);
+    expect(drawer).toMatch(
       /grid-template-rows\s*:\s*auto\s+minmax\(0,\s*1fr\)/,
     );
-    expect(activityRail).toMatch(/overflow\s*:\s*hidden/);
-
-    const collapsed = ruleBody(
+    expect(drawer).toMatch(/transform\s*:\s*translateX\(100%\)/);
+    expect(drawer).toMatch(/visibility\s*:\s*hidden/);
+    const openDrawer = ruleBody(
       globals,
-      '.record-page.task-detail-page[data-activity-collapsed="true"]',
+      '.activity-drawer[data-open="true"]',
     );
-    expect(collapsed).toMatch(/--activity-rail-width\s*:\s*48px/);
+    expect(openDrawer).toMatch(/transform\s*:\s*translateX\(0\)/);
+    expect(openDrawer).toMatch(/visibility\s*:\s*visible/);
+
+    const activityScroll = ruleBody(globals, ".activity-drawer-scroll");
+    expect(activityScroll).toMatch(/min-height\s*:\s*0/);
+    expect(activityScroll).toMatch(/overflow-y\s*:\s*auto/);
+    expect(activityScroll).toMatch(/scrollbar-width\s*:\s*none/);
+    expect(ruleBody(globals, ".activity-drawer-scroll::-webkit-scrollbar"))
+      .toMatch(/display\s*:\s*none/);
+    expect(ruleBody(globals, ".activity-drawer-backdrop")).toMatch(
+      /left\s*:\s*var\(--app-sidebar-width,\s*0\)/,
+    );
     expect(ruleBody(globals, ".task-detail-page .experiment-table-scroll"))
       .toMatch(/max-height\s*:\s*none/);
   });
@@ -557,7 +592,7 @@ describe("workspace visual contracts", () => {
       /grid-template-columns\s*:\s*repeat\(4,\s*minmax\(240px,\s*1fr\)\)/,
     );
     expect(ruleBody(globals, ".skeleton-record")).toMatch(
-      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s+320px/,
+      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/,
     );
     expect(ruleBody(globals, ".skeleton-analytics")).toMatch(
       /grid-template-columns\s*:\s*repeat\(5,\s*1fr\)/,
@@ -605,18 +640,18 @@ describe("workspace visual contracts", () => {
 
   it("keeps desktop, compact, tablet, narrow, and phone workspace contracts", () => {
     expect(ruleBody(globals, ".app-shell")).toMatch(
-      /grid-template-columns\s*:\s*256px\s+minmax\(0,\s*1fr\)/,
+      /--app-sidebar-width\s*:\s*256px/,
     );
 
     const compact = mediaBody(globals, 1279);
+    expect(ruleBody(compact, ".app-shell")).toMatch(
+      /--app-sidebar-width\s*:\s*72px/,
+    );
     expect(ruleBody(compact, ".app-shell")).toMatch(
       /grid-template-columns\s*:\s*72px\s+minmax\(0,\s*1fr\)/,
     );
     expect(compact).toMatch(
       /\.task-board-scroll[\s\S]*overflow-x\s*:\s*auto/,
-    );
-    expect(compact).toMatch(
-      /\.activity-rail[\s\S]*position\s*:\s*static/,
     );
     const compactLabels = ruleBody(
       compact,
@@ -635,7 +670,7 @@ describe("workspace visual contracts", () => {
     );
 
     const mobile = mediaBody(globals, 767);
-    expect(mobile).toMatch(/\.app-shell\s*\{\s*display\s*:\s*block/);
+    expect(ruleBody(mobile, ".app-shell")).toMatch(/display\s*:\s*block/);
     expect(ruleBody(mobile, ".app-shell")).toMatch(/height\s*:\s*auto/);
     expect(ruleBody(mobile, ".app-shell")).toMatch(/overflow\s*:\s*visible/);
     expect(ruleBody(mobile, ".app-content")).toMatch(/height\s*:\s*auto/);

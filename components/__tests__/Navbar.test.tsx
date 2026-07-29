@@ -141,6 +141,26 @@ describe("Navbar", () => {
     });
   }
 
+  it("renders Compare as the current child of the Experiments section", () => {
+    pathnameState.value = "/experiments/compare";
+    renderNavbar();
+
+    const experimentPages = screen.getByRole("group", {
+      name: "Experiments pages",
+    });
+    const experiments = screen.getByRole("link", { name: "Experiments" });
+    const compare = within(experimentPages).getByRole("link", {
+      name: "Compare",
+    });
+
+    expect(experiments.classList).toContain("ancestor-active");
+    expect(experiments.classList).not.toContain("active");
+    expect(experiments.getAttribute("aria-current")).toBeNull();
+    expect(compare.classList).toContain("nav-subnav");
+    expect(compare.classList).toContain("active");
+    expect(compare.getAttribute("aria-current")).toBe("page");
+  });
+
   it("moves focus to the labelled modal sheet close control when opened", async () => {
     renderNavbar();
 

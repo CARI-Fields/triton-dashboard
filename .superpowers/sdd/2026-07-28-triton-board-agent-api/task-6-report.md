@@ -232,3 +232,65 @@
 - Production secret, browser persistence, Authorization logging, and debug
   scans: clean.
 - `progress.md` remains unchanged.
+
+## Fix Round 3
+
+### Review fixes
+
+- Added strict runtime response DTO validators for `ManagedKeyView`,
+  `ManagedKeyWithSecret`, and managed-key arrays. The validators require exact
+  public keys, UUIDs, bounded names, valid public prefixes, fixed unique scopes,
+  nullable RFC 3339 timestamps, and the full generated-secret format. Unknown
+  fields such as `key_digest` and misplaced `secret` values are rejected.
+- Extended `readEnvelope(response, fallback, validator)` so every successful
+  endpoint response is validated before reaching component state. List,
+  create, patch, rotate, and revoke each use the endpoint-specific validator;
+  malformed successes fail with the operation's safe fallback without
+  exposing response payloads, digests, or candidate secrets.
+- Added an explicit `requestDispatched` marker to typed request failures.
+  Missing/rejected sessions and local header construction failures remain
+  known preflight failures, while fetch rejection and malformed responses after
+  dispatch retain the uncertain-rotation recovery latch. Structured 4xx
+  responses remain known server failures.
+- Made initial load error handling deterministic with `Promise.allSettled`.
+  The Admin response is processed before a concurrent Members error or
+  rejection, so an Admin 401 always triggers the session-expired path and an
+  Admin transport failure keeps the stable safe list fallback. A Members
+  failure is reported only after a valid Admin list response.
+
+### TDD evidence
+
+1. DTO validator RED: the direct validator suite initially failed to resolve
+   the missing module. Exact view, secret, and array validators made 3/3 pass.
+2. Endpoint-boundary RED: 10/42 UI tests failed for null/string/invalid list
+   payloads, missing or malformed create/rotate secrets, and extra digest
+   fields in list/PATCH/revoke results. Wiring each endpoint to its validator
+   made the UI and DTO run pass after correcting pre-existing fixtures to use
+   real response shapes.
+3. Dispatch-marker RED: 2/44 UI tests failed because missing-token and rejected
+   session lookups incorrectly latched uncertain rotation. Explicit preflight
+   versus dispatched errors made 44/44 pass and allowed a later valid rotation
+   without a forced reload.
+4. Load-priority RED: 2/47 UI tests failed because Members failures masked an
+   Admin 401 and exposed a rejected Members error message. Settled concurrency
+   with Admin-first processing made the expanded UI and DTO run pass 52/52.
+
+### Fresh verification
+
+- Focused Task 6/Fix Round 3 tests: 6 files, 76/76 passed.
+- Full Vitest suite: 34 files, 484/484 passed.
+- `npx tsc --noEmit`: exit 0.
+- Next.js 16.2.10 production build: exit 0; the Admin page and four Admin API
+  routes were generated.
+- Supabase rollback-only schema regression: 20/20 passed.
+- `git diff --check`: exit 0.
+- Production secret, browser persistence, Authorization logging, and debug
+  scans: clean.
+- `progress.md` remains unchanged.
+
+### Concerns
+
+- Vitest still emits the repository's existing `vite-tsconfig-paths`
+  deprecation notice.
+- Next build still emits the existing multiple-lockfile workspace-root
+  warning.

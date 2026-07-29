@@ -43,9 +43,10 @@ const VIEW: ManagedKeyView = {
   created_at: "2026-07-29T12:00:00.000Z",
 };
 const CREATE_SECRET =
-  "tb_live_CCCCCCCC_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+  "tb_live_CCCCCCCC_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const ROTATE_SECRET =
-  "tb_live_RRRRRRRR_RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR";
+  "tb_live_RRRRRRRR_BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const { created_at: _missingCreatedAt, ...VIEW_WITHOUT_CREATED_AT } = VIEW;
 
 function envelope(data: unknown, status = 200): Response {
   return Response.json(
@@ -130,12 +131,13 @@ function installFetch(initial = [VIEW]) {
     }
     if (method === "PATCH") {
       const body = JSON.parse(String(init?.body));
+      const { member_id: memberId, ...viewChanges } = body;
       rows = [{
         ...rows[0],
-        ...body,
-        member: body.member_id === undefined
+        ...viewChanges,
+        member: memberId === undefined
           ? rows[0].member
-          : MEMBERS.find((member) => member.id === body.member_id)!,
+          : MEMBERS.find((member) => member.id === memberId)!,
       }];
       return envelope(rows[0]);
     }
@@ -143,6 +145,15 @@ function installFetch(initial = [VIEW]) {
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function fillCreateDraft(name = "Bruce experiments") {
+  fireEvent.change(screen.getByLabelText("Key name"), {
+    target: { value: name },
+  });
+  fireEvent.change(screen.getByLabelText("Member"), {
+    target: { value: BRUCE_ID },
+  });
 }
 
 describe("ApiKeyAdmin", () => {
@@ -358,28 +369,32 @@ describe("ApiKeyAdmin", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime("2026-07-29T12:00:00.000Z");
     const rows = [
-      { ...VIEW, id: "key-never", name: "Never expiry" },
       {
         ...VIEW,
-        id: "key-future",
+        id: "40000000-0000-4000-8000-000000000002",
+        name: "Never expiry",
+      },
+      {
+        ...VIEW,
+        id: "40000000-0000-4000-8000-000000000003",
         name: "Future expiry",
         expires_at: "2026-07-29T12:00:00.001Z",
       },
       {
         ...VIEW,
-        id: "key-exact",
+        id: "40000000-0000-4000-8000-000000000004",
         name: "Exact expiry",
         expires_at: "2026-07-29T12:00:00.000Z",
       },
       {
         ...VIEW,
-        id: "key-past",
+        id: "40000000-0000-4000-8000-000000000005",
         name: "Past expiry",
         expires_at: "2026-07-29T11:59:59.999Z",
       },
       {
         ...VIEW,
-        id: "key-revoked",
+        id: "40000000-0000-4000-8000-000000000006",
         name: "Revoked future key",
         expires_at: "2026-07-30T12:00:00.000Z",
         revoked_at: "2026-07-29T11:00:00.000Z",
@@ -653,6 +668,29 @@ describe("ApiKeyAdmin", () => {
     }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("treats a DTO-invalid rotation success as uncertain without exposing it", async () => {
+    const fetchMock = installFetch();
+    fetchMock
+      .mockImplementationOnce(async () => envelope([VIEW]))
+      .mockImplementationOnce(async () => envelope({
+        ...VIEW,
+        secret: "payload-secret-marker",
+        key_digest: "digest-leak-marker",
+      }));
+    render(<ApiKeyAdmin />);
+    await screen.findByRole("article", { name: "Bruce experiments" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/new secret cannot be recovered/i);
+    expect(alert.textContent).not.toContain("payload-secret-marker");
+    expect(alert.textContent).not.toContain("digest-leak-marker");
+    expect(screen.queryByText("payload-secret-marker")).toBeNull();
+  });
+
   it("keeps a structured rotation 409 as a known failure", async () => {
     const fetchMock = installFetch();
     fetchMock
@@ -686,6 +724,54 @@ describe("ApiKeyAdmin", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it.each([
+    { name: "a missing token", preflight: "missing" },
+    { name: "a session lookup error", preflight: "error" },
+    { name: "a rejected session lookup", preflight: "rejected" },
+  ])("does not latch uncertain rotation for $name", async ({ preflight }) => {
+    const fetchMock = installFetch();
+    render(<ApiKeyAdmin />);
+    await screen.findByRole("article", { name: "Bruce experiments" });
+    if (preflight === "missing") {
+      mocks.getSession.mockResolvedValueOnce({
+        data: { session: null },
+        error: null,
+      });
+    } else if (preflight === "error") {
+      mocks.getSession.mockResolvedValueOnce({
+        data: { session: { access_token: "current-access-token" } },
+        error: { message: "payload-secret-marker" },
+      });
+    } else {
+      mocks.getSession.mockRejectedValueOnce(
+        new Error("payload-secret-marker"),
+      );
+    }
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Your session has expired");
+    expect(alert.textContent).not.toContain("payload-secret-marker");
+    expect(alert.textContent).not.toMatch(/new secret cannot be recovered/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }) as HTMLButtonElement).disabled).toBe(false);
+
+    mocks.getSession.mockResolvedValue({
+      data: { session: { access_token: "current-access-token" } },
+      error: null,
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }));
+    expect(await screen.findByText(ROTATE_SECRET)).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("locally signs out after a load 401 even when signOut itself fails", async () => {
     mocks.signOut.mockRejectedValueOnce(new Error("Auth endpoint offline."));
     const fetchMock = vi.fn().mockResolvedValueOnce(errorEnvelope(
@@ -705,6 +791,73 @@ describe("ApiKeyAdmin", () => {
     }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { name: "a Members query error", membersOutcome: "error" },
+    { name: "a rejected Members query", membersOutcome: "rejected" },
+  ])("prioritizes an Admin 401 over $name", async ({ membersOutcome }) => {
+    const order = membersOutcome === "error"
+      ? vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: "payload-secret-marker" },
+      })
+      : vi.fn().mockRejectedValue(new Error("payload-secret-marker"));
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({ order }),
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce(errorEnvelope(
+      401,
+      "INVALID_ADMIN_SESSION",
+      "Invalid Admin session.",
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ApiKeyAdmin />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Your session has expired");
+    expect(alert.textContent).not.toContain("payload-secret-marker");
+    expect(mocks.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a Members error after a valid Admin list response", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "payload-secret-marker" },
+    });
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({ order }),
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce(envelope([VIEW]));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ApiKeyAdmin />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not load Members.");
+    expect(alert.textContent).not.toContain("payload-secret-marker");
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(screen.queryByRole("article")).toBeNull();
+  });
+
+  it("prioritizes a safe Admin network error over a Members error", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "members-payload-marker" },
+    });
+    mocks.from.mockReturnValue({
+      select: vi.fn().mockReturnValue({ order }),
+    });
+    const fetchMock = vi.fn().mockRejectedValueOnce(
+      new Error("transport-payload-marker"),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ApiKeyAdmin />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not load API keys.");
+    expect(alert.textContent).not.toContain("members-payload-marker");
+    expect(alert.textContent).not.toContain("transport-payload-marker");
+    expect(mocks.signOut).not.toHaveBeenCalled();
   });
 
   it("locally signs out after a mutation 401 and blocks same-token reuse", async () => {
@@ -945,6 +1098,107 @@ describe("ApiKeyAdmin", () => {
       .toContain("Could not load API keys.");
     expect(mocks.signOut).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Retry list" })).toBeDefined();
+  });
+
+  it.each([
+    { name: "null", data: null },
+    { name: "a string", data: "payload-secret-marker" },
+    { name: "an invalid item", data: [null] },
+    { name: "a missing view field", data: [VIEW_WITHOUT_CREATED_AT] },
+    {
+      name: "an extra digest field",
+      data: [{ ...VIEW, key_digest: "digest-leak-marker" }],
+    },
+  ])("rejects $name in a successful list envelope", async ({ data }) => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(envelope(data));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ApiKeyAdmin />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not load API keys.");
+    expect(alert.textContent).not.toContain("payload-secret-marker");
+    expect(alert.textContent).not.toContain("digest-leak-marker");
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "a missing secret",
+      result: VIEW,
+    },
+    {
+      name: "a malformed secret",
+      result: { ...VIEW, secret: "payload-secret-marker" },
+    },
+  ])("rejects $name in a successful create envelope", async ({ result }) => {
+    const fetchMock = installFetch([]);
+    fetchMock
+      .mockImplementationOnce(async () => envelope([]))
+      .mockImplementationOnce(async () => envelope(result, 201));
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fillCreateDraft();
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not create the API key.");
+    expect(alert.textContent).not.toContain("payload-secret-marker");
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(screen.queryByText("payload-secret-marker")).toBeNull();
+  });
+
+  it("rejects an extra digest in a successful patch envelope", async () => {
+    const fetchMock = installFetch();
+    fetchMock
+      .mockImplementationOnce(async () => envelope([VIEW]))
+      .mockImplementationOnce(async () => envelope({
+        ...VIEW,
+        name: "Renamed with digest",
+        key_digest: "digest-leak-marker",
+      }));
+    render(<ApiKeyAdmin />);
+    await screen.findByRole("article", { name: "Bruce experiments" });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Edit Bruce experiments",
+    }));
+    fireEvent.change(screen.getByLabelText("Key name for Bruce experiments"), {
+      target: { value: "Renamed with digest" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save key changes" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not update the API key.");
+    expect(alert.textContent).not.toContain("digest-leak-marker");
+    expect(screen.getByRole("article", {
+      name: "Bruce experiments",
+    })).toBeDefined();
+    expect(screen.queryByRole("article", {
+      name: "Renamed with digest",
+    })).toBeNull();
+  });
+
+  it("rejects an extra digest in a successful revoke envelope", async () => {
+    const fetchMock = installFetch();
+    fetchMock
+      .mockImplementationOnce(async () => envelope([VIEW]))
+      .mockImplementationOnce(async () => envelope({
+        ...VIEW,
+        revoked_at: "2026-07-29T14:00:00.000Z",
+        key_digest: "digest-leak-marker",
+      }));
+    render(<ApiKeyAdmin />);
+    const card = await screen.findByRole("article", {
+      name: "Bruce experiments",
+    });
+    fireEvent.click(within(card).getByRole("button", {
+      name: "Revoke Bruce experiments",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not revoke the API key.");
+    expect(alert.textContent).not.toContain("digest-leak-marker");
+    expect(within(card).getByText("Active")).toBeDefined();
   });
 
   it("does not sign out for ordinary 403 or 500 API failures", async () => {

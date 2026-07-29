@@ -11,6 +11,11 @@ import {
   API_SCOPES,
   type ApiScope,
 } from "@/lib/agent-api/types";
+import {
+  isManagedKeyView,
+  isManagedKeyViewArray,
+  isManagedKeyWithSecret,
+} from "@/lib/agent-api/admin-key-dto";
 import type {
   ManagedKeyInput,
   ManagedKeyView,
@@ -62,15 +67,27 @@ export class AdminApiClientError extends Error {
     readonly statusText: string,
     readonly code: string,
     message: string,
+    readonly requestDispatched = true,
   ) {
     super(message);
     this.name = "AdminApiClientError";
   }
 }
 
+export class AdminRequestError extends Error {
+  constructor(
+    readonly requestDispatched: boolean,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AdminRequestError";
+  }
+}
+
 async function readEnvelope<T>(
   response: Response,
   fallback: string,
+  validator: (value: unknown) => value is T,
 ): Promise<T> {
   const { ok, status, statusText } = response;
   let parsed: unknown;
@@ -85,7 +102,7 @@ async function readEnvelope<T>(
         fallback,
       );
     }
-    throw new Error(fallback);
+    throw new AdminRequestError(true, fallback);
   }
   const body: ApiEnvelope<T> = (
     parsed !== null && typeof parsed === "object"
@@ -100,7 +117,7 @@ async function readEnvelope<T>(
       typeof body.error?.message === "string" ? body.error.message : fallback,
     );
   }
-  if (body.data === undefined) throw new Error(fallback);
+  if (!validator(body.data)) throw new AdminRequestError(true, fallback);
   return body.data;
 }
 
@@ -143,11 +160,16 @@ function withoutSecret(result: ManagedKeyWithSecret): ManagedKeyView {
 }
 
 function isUncertainRotationFailure(reason: unknown): boolean {
-  return !(
-    reason instanceof AdminApiClientError
-    && reason.status >= 400
-    && reason.status < 500
-  );
+  if (
+    !(reason instanceof AdminApiClientError)
+    && !(reason instanceof AdminRequestError)
+  ) {
+    return false;
+  }
+  if (!reason.requestDispatched) return false;
+  return reason instanceof AdminApiClientError
+    ? reason.status >= 500
+    : true;
 }
 
 interface RequestOperation {
@@ -267,19 +289,26 @@ export default function ApiKeyAdmin() {
         cache: "no-store",
         signal: controller.signal,
       });
-      const [membersResult, response] = await Promise.all([
+      const [membersOutcome, responseOutcome] = await Promise.allSettled([
         membersPromise,
         responsePromise,
       ]);
-      if (membersResult.error) {
-        throw new Error("Could not load Members.");
+      if (responseOutcome.status === "rejected") {
+        throw new AdminRequestError(true, "Could not load API keys.");
       }
       const loaded = await readEnvelope<ManagedKeyView[]>(
-        response,
+        responseOutcome.value,
         "Could not load API keys.",
+        isManagedKeyViewArray,
       );
+      if (
+        membersOutcome.status === "rejected"
+        || membersOutcome.value.error
+      ) {
+        throw new AdminRequestError(false, "Could not load Members.");
+      }
       if (!mounted.current || generation !== loadGeneration.current) return;
-      setMembers((membersResult.data ?? []) as MemberOption[]);
+      setMembers((membersOutcome.value.data ?? []) as MemberOption[]);
       setKeys(loaded);
       setRotationUncertain(false);
     } catch (reason) {
@@ -347,6 +376,7 @@ export default function ApiKeyAdmin() {
     init: RequestInit,
     fallback: string,
     operation: RequestOperation,
+    validator: (value: unknown) => value is T,
   ): Promise<T> {
     if (!supabase) throw new Error("Connect Supabase first.");
     if (sessionInvalid.current) {
@@ -355,23 +385,48 @@ export default function ApiKeyAdmin() {
         "Unauthorized",
         "INVALID_ADMIN_SESSION",
         "Your session has expired. Sign in again.",
+        false,
       );
     }
-    const { data, error: sessionError } = await supabase.auth.getSession();
+    let sessionResult;
+    try {
+      sessionResult = await supabase.auth.getSession();
+    } catch {
+      throw new AdminRequestError(
+        false,
+        "Your session has expired. Sign in again.",
+      );
+    }
+    const { data, error: sessionError } = sessionResult;
     const token = data.session?.access_token;
     if (sessionError || !token) {
-      throw new Error("Your session has expired. Sign in again.");
+      throw new AdminRequestError(
+        false,
+        "Your session has expired. Sign in again.",
+      );
     }
     operation.token = token;
-    const headers = new Headers(init.headers);
-    headers.set("Authorization", `Bearer ${token}`);
-    if (init.body !== undefined) headers.set("Content-Type", "application/json");
-    const response = await fetch(path, {
-      ...init,
-      headers,
-      cache: "no-store",
-    });
-    return readEnvelope<T>(response, fallback);
+    let headers: Headers;
+    try {
+      headers = new Headers(init.headers);
+      headers.set("Authorization", `Bearer ${token}`);
+      if (init.body !== undefined) {
+        headers.set("Content-Type", "application/json");
+      }
+    } catch {
+      throw new AdminRequestError(false, fallback);
+    }
+    let response: Response;
+    try {
+      response = await fetch(path, {
+        ...init,
+        headers,
+        cache: "no-store",
+      });
+    } catch {
+      throw new AdminRequestError(true, fallback);
+    }
+    return readEnvelope<T>(response, fallback, validator);
   }
 
   function beginMutationOperation(): RequestOperation | null {
@@ -433,6 +488,7 @@ export default function ApiKeyAdmin() {
         { method: "POST", body: JSON.stringify(input) },
         "Could not create the API key.",
         operation,
+        isManagedKeyWithSecret,
       );
       if (!operation.isCurrent()) return;
       const view = withoutSecret(created);
@@ -493,6 +549,7 @@ export default function ApiKeyAdmin() {
         { method: "PATCH", body: JSON.stringify(changes) },
         "Could not update the API key.",
         operation,
+        isManagedKeyView,
       );
       if (!operation.isCurrent()) return;
       setKeys((current) => current.map(
@@ -541,6 +598,7 @@ export default function ApiKeyAdmin() {
         { method: "POST" },
         "Could not rotate the API key.",
         operation,
+        isManagedKeyWithSecret,
       );
       if (!operation.isCurrent()) return;
       const view = withoutSecret(rotated);
@@ -592,6 +650,7 @@ export default function ApiKeyAdmin() {
         { method: "POST" },
         "Could not revoke the API key.",
         operation,
+        isManagedKeyView,
       );
       if (!operation.isCurrent()) return;
       setKeys((current) => current.map(

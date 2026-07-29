@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import mimetypes
 import os
 import re
 import sys
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,11 @@ API_SUFFIX = "/api/agent/v1"
 CANONICAL_UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
+CANONICAL_API_KEY = re.compile(
+    r"^tb_live_([A-Za-z0-9_-]{8})_"
+    r"([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$"
+)
+HOST_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
 ALLOWED_ATTACHMENT_TYPES = {
@@ -64,6 +71,29 @@ class MultipartBody:
         self.content_type = content_type
 
 
+def _invalid_api_base() -> None:
+    raise ClientError(
+        f"{API_URL_ENV} must be an http(s) origin plus the full "
+        f"{API_SUFFIX} base."
+    )
+
+
+def _valid_hostname(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        pass
+    try:
+        ascii_hostname = value.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    if len(ascii_hostname) > 253:
+        return False
+    labels = ascii_hostname.removesuffix(".").split(".")
+    return bool(labels) and all(HOST_LABEL.fullmatch(label) for label in labels)
+
+
 def _required_environment() -> tuple[str, str]:
     base = os.environ.get(API_URL_ENV, "")
     key = os.environ.get(API_KEY_ENV, "")
@@ -72,32 +102,77 @@ def _required_environment() -> tuple[str, str]:
     if not key:
         raise ClientError(f"{API_KEY_ENV} is required.")
 
-    parts = urlsplit(base)
+    if (
+        _contains_control(base)
+        or any(character.isspace() for character in base)
+        or "\\" in base
+        or "?" in base
+        or "#" in base
+    ):
+        _invalid_api_base()
+    try:
+        parts = urlsplit(base)
+        hostname = parts.hostname
+        port = parts.port
+    except (ValueError, UnicodeError):
+        _invalid_api_base()
     clean_path = parts.path.rstrip("/")
     if (
         parts.scheme not in {"http", "https"}
         or not parts.netloc
+        or hostname is None
+        or not _valid_hostname(hostname)
+        or (port is not None and not 1 <= port <= 65535)
+        or parts.netloc.endswith(":")
         or parts.username is not None
         or parts.password is not None
         or parts.query
         or parts.fragment
         or clean_path != API_SUFFIX
     ):
+        _invalid_api_base()
+    key_match = CANONICAL_API_KEY.fullmatch(key)
+    if key_match is None or key_match[1] != key_match[2][:8]:
         raise ClientError(
-            f"{API_URL_ENV} must be an http(s) origin plus the full "
-            f"{API_SUFFIX} base."
+            f"{API_KEY_ENV} must be a canonical Triton Board API Key."
         )
     return f"{parts.scheme}://{parts.netloc}{clean_path}", key
 
 
 def _contains_control(value: str) -> bool:
-    return any(ord(character) < 32 or ord(character) == 127 for character in value)
+    return any(
+        unicodedata.category(character) == "Cc"
+        for character in value
+    )
+
+
+def _fully_unquote(value: str) -> str:
+    current = value
+    for _ in range(8):
+        if re.search(r"%(?![0-9A-Fa-f]{2})", current):
+            raise ClientError("path contains invalid percent encoding.")
+        decoded = unquote(current)
+        if decoded == current:
+            return current
+        current = decoded
+    raise ClientError("path is encoded too many times.")
 
 
 def _safe_url(base: str, path: str) -> str:
-    if not path or _contains_control(path) or "\\" in path:
+    if (
+        not path
+        or _contains_control(path)
+        or any(character.isspace() for character in path)
+        or "\\" in path
+        or "#" in path
+    ):
         raise ClientError("path must be a non-empty safe relative API path.")
-    parts = urlsplit(path)
+    try:
+        parts = urlsplit(path)
+    except (ValueError, UnicodeError):
+        raise ClientError(
+            "path must be a non-empty safe relative API path."
+        ) from None
     if (
         parts.scheme
         or parts.netloc
@@ -106,18 +181,21 @@ def _safe_url(base: str, path: str) -> str:
     ):
         raise ClientError("path must be relative to the configured API base.")
 
-    decoded_path = unquote(parts.path)
-    decoded_query = unquote(parts.query)
+    decoded_query = _fully_unquote(parts.query)
     if (
-        not decoded_path
-        or
-        _contains_control(decoded_path)
+        not parts.path
         or _contains_control(decoded_query)
-        or decoded_path.startswith("/")
-        or "\\" in decoded_path
-        or any(segment in {".", ".."} for segment in decoded_path.split("/"))
     ):
         raise ClientError("path contains traversal or unsafe characters.")
+    for segment in parts.path.split("/"):
+        decoded_segment = _fully_unquote(segment)
+        if (
+            _contains_control(decoded_segment)
+            or "/" in decoded_segment
+            or "\\" in decoded_segment
+            or decoded_segment in {".", ".."}
+        ):
+            raise ClientError("path contains traversal or unsafe characters.")
     return f"{base}/{path}"
 
 
@@ -145,6 +223,19 @@ def _decode_response(raw: bytes) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ClientError("API response was not a JSON object.")
     return value
+
+
+def _decode_error_response(raw: bytes, status: int) -> dict[str, object]:
+    try:
+        return _decode_response(raw)
+    except ClientError:
+        return {
+            "error": {
+                "code": "NON_JSON_RESPONSE",
+                "message": "API returned a non-JSON HTTP error response.",
+                "retryable": status == 429 or status >= 500,
+            }
+        }
 
 
 def request(
@@ -183,7 +274,10 @@ def request(
     if idempotency_key is not None:
         headers["Idempotency-Key"] = idempotency_key
 
-    api_request = Request(url, data=data, headers=headers, method=method)
+    try:
+        api_request = Request(url, data=data, headers=headers, method=method)
+    except (ValueError, UnicodeError):
+        raise ClientError("API request could not be constructed safely.") from None
     opener = build_opener(NoRedirects)
     try:
         with opener.open(api_request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
@@ -191,11 +285,13 @@ def request(
             _last_retry_after = response.headers.get("Retry-After")
             return response.status, payload, response.headers.get("ETag")
     except HTTPError as reason:
-        payload = _decode_response(reason.read())
         _last_retry_after = reason.headers.get("Retry-After")
+        payload = _decode_error_response(reason.read(), reason.code)
         return reason.code, payload, reason.headers.get("ETag")
-    except (URLError, OSError) as reason:
-        raise ClientError("API transport failed; request outcome is unknown.") from reason
+    except (URLError, OSError, ValueError, UnicodeError):
+        raise ClientError(
+            "API transport failed; request outcome is unknown."
+        ) from None
 
 
 def _multipart(file_path: str, caption: str) -> MultipartBody:
@@ -216,9 +312,16 @@ def _multipart(file_path: str, caption: str) -> MultipartBody:
         contents = path.read_bytes()
     except OSError as reason:
         raise ClientError("attachment file could not be read.") from reason
+    if len(contents) < 1 or len(contents) > MAX_ATTACHMENT_BYTES:
+        raise ClientError("attachment must be between 1 byte and 10 MiB.")
 
     boundary = f"triton-board-{uuid.uuid4().hex}"
-    safe_name = path.name.replace('"', "_").replace("\r", "_").replace("\n", "_")
+    safe_name = "".join(
+        "_"
+        if character in {'"', "\\"} or _contains_control(character)
+        else character
+        for character in path.name
+    )
     chunks = [
         f"--{boundary}\r\n".encode(),
         (

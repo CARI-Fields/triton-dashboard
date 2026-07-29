@@ -88,3 +88,52 @@ Evaluation GREEN: kept the Skill at 29 lines and replaced only the universal wri
 A follow-up consistency assertion first failed because the conditional section said “write recipe” and omitted read-only use; the one-line GET/read recipe made it GREEN without changing the POST fix.
 
 The focused suite then passed 19/19. Full verification passed 42 Vitest files / 815 tests, `tsc --noEmit`, `py_compile`, official `quick_validate.py`, client `--help`, and `git diff --check`. The controller will perform the fresh re-evaluation; no context-carrying forward test was launched from this fix round.
+
+## Fix round 2 — client and contract hardening
+
+RED tests were added before implementation for the reviewed failure modes. The combined focused run covered the Skill/OpenAPI/client and Experiment PATCH parser:
+
+```text
+npm test -- scripts/__tests__/triton-board-api-skill.test.ts \
+  lib/agent-api/__tests__/schemas.test.ts
+```
+
+Observed RED: 2 files failed; 17 tests failed and 111 passed. Failures reproduced:
+
+- malformed API Key input escaping as an uncaught urllib/header error;
+- unsafe raw bases and recursively encoded path traversal reaching transport;
+- non-JSON HTTP 429 losing status, ETag, and Retry-After;
+- missing read-route 400 responses and undifferentiated idempotency metadata;
+- missing Attachment PATCH ETag and POST recovery guidance;
+- multipart filename controls/backslashes and post-stat size changes;
+- uppercase `baseline_experiment_id` reaching repository dispatch.
+
+GREEN implementation:
+
+- validates the exact server-generated Key grammar and prefix relationship before constructing an Authorization header, and converts request/header/transport `ValueError` and Unicode failures into credential-free `ClientError` output;
+- rejects raw base controls, whitespace, backslashes, query/fragment markers, malformed hostnames, and invalid ports before dispatch, and recursively decodes path segments to reject traversal and encoded separators;
+- preserves HTTP status, ETag, and Retry-After for non-JSON errors while replacing the raw body with a safe synthetic error;
+- documents the complete 13-path/16-operation response and scope matrix, including 400 responses for all read routes, strict timestamp/quoted-ETag schemas, distinct ordinary/created/replayed metadata, and allowlisted audit snapshots;
+- enforces lowercase baseline UUIDs before repository dispatch;
+- makes the Skill frontmatter enumerate only supported operations, derives Attachment PATCH `If-Match` only from the target Attachment's `updated_at`, reuses a stable POST key after transport/5xx uncertainty, and stops on 409;
+- sanitizes every multipart filename control, quote, and backslash, and validates the actual bytes after reading the file.
+
+Focused GREEN:
+
+```text
+npm test -- scripts/__tests__/triton-board-api-skill.test.ts \
+  lib/agent-api/__tests__/schemas.test.ts
+```
+
+Result: 2 files passed; 131/131 tests passed.
+
+Full verification:
+
+- `npm test` — 42 files, 835/835 tests passed.
+- `npx tsc --noEmit` — passed.
+- `python3 -m py_compile .agents/skills/triton-board-api/scripts/triton_board_api.py` — passed.
+- official `quick_validate.py` — `Skill is valid!`.
+- `npm run build` — passed, including the framework's TypeScript and route build.
+- `git diff --check` — passed.
+
+The existing Vitest plugin deprecation and Next.js multiple-lockfile workspace-root warnings remain unchanged. No production request, credential, external write, or context-carrying forward test was used.

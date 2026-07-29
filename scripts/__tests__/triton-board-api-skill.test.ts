@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -9,6 +9,13 @@ const skillRoot = join(root, ".agents/skills/triton-board-api");
 const clientPath = join(skillRoot, "scripts/triton_board_api.py");
 const skillPath = join(skillRoot, "SKILL.md");
 const openapiPath = join(skillRoot, "references/openapi.yaml");
+const openaiPath = join(skillRoot, "agents/openai.yaml");
+const quickValidatePath = join(
+  homedir(),
+  ".codex/skills/.system/skill-creator/scripts/quick_validate.py",
+);
+const TEST_API_KEY =
+  "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
 const tempDirectories: string[] = [];
 
@@ -40,8 +47,9 @@ function runHarness(
   args: string[],
   response: {
     status?: number;
-    body?: object;
+    body?: object | string;
     headers?: Record<string, string>;
+    contentType?: string;
   } = {},
 ) {
   const harness = String.raw`
@@ -65,12 +73,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(reply.get("status", 200))
         for key, value in reply.get("headers", {}).items():
             self.send_header(key, value)
-        self.send_header("Content-Type", "application/json")
+        content_type = reply.get("contentType", "application/json")
+        if content_type is not None:
+            self.send_header("Content-Type", content_type)
         self.end_headers()
-        self.wfile.write(json.dumps(reply.get("body", {
+        body = reply.get("body", {
             "data": {"ok": True},
             "meta": {"request_id": "req-default"},
-        })).encode())
+        })
+        if isinstance(body, str):
+            self.wfile.write(body.encode())
+        else:
+            self.wfile.write(json.dumps(body).encode())
     def log_message(self, *_args): pass
 
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -79,7 +93,7 @@ thread.start()
 os.environ["TRITON_BOARD_API_URL"] = (
     f"http://127.0.0.1:{server.server_port}/api/agent/v1"
 )
-os.environ["TRITON_BOARD_API_KEY"] = "tb_live_super-secret"
+os.environ["TRITON_BOARD_API_KEY"] = os.environ["HARNESS_KEY"]
 
 spec = importlib.util.spec_from_file_location("triton_board_api", os.environ["CLIENT"])
 module = importlib.util.module_from_spec(spec)
@@ -104,6 +118,7 @@ print(json.dumps({
     env: {
       ...process.env,
       CLIENT: clientPath,
+      HARNESS_KEY: TEST_API_KEY,
       HARNESS_ARGS: JSON.stringify(args),
       HARNESS_REPLY: JSON.stringify(response),
     },
@@ -123,9 +138,131 @@ print(json.dumps({
   };
 }
 
+interface OpenApiOperation {
+  method: "get" | "patch" | "post";
+  operationId: string;
+  path: string;
+  responses: string[];
+  scope: string | null;
+}
+
+function parseOpenApiOperations(source: string): OpenApiOperation[] {
+  const operations: OpenApiOperation[] = [];
+  let path = "";
+  let current: OpenApiOperation | null = null;
+  let inResponses = false;
+  const finish = () => {
+    if (current !== null) operations.push(current);
+    current = null;
+  };
+
+  for (const line of source.split("\n")) {
+    if (line === "components:") break;
+    const pathMatch = line.match(/^  (\/.*):$/);
+    if (pathMatch) {
+      finish();
+      path = pathMatch[1];
+      inResponses = false;
+      continue;
+    }
+    const methodMatch = line.match(/^    (get|patch|post):$/);
+    if (methodMatch) {
+      finish();
+      current = {
+        method: methodMatch[1] as OpenApiOperation["method"],
+        operationId: "",
+        path,
+        responses: [],
+        scope: null,
+      };
+      inResponses = false;
+      continue;
+    }
+    if (current === null) continue;
+    const operationId = line.match(/^      operationId: (\S+)$/);
+    if (operationId) current.operationId = operationId[1];
+    const scope = line.match(/^      x-required-scope: (\S+)$/);
+    if (scope) current.scope = scope[1];
+    if (line === "      responses:") {
+      inResponses = true;
+      continue;
+    }
+    if (inResponses) {
+      const status = line.match(/^        "(\d{3})":$/);
+      if (status) current.responses.push(status[1]);
+      if (/^      \S/.test(line)) inResponses = false;
+    }
+  }
+  finish();
+  return operations;
+}
+
+function componentBlock(
+  source: string,
+  section: string,
+  name: string,
+): string {
+  const lines = source.split("\n");
+  const sectionIndex = lines.indexOf(`  ${section}:`);
+  expect(sectionIndex).toBeGreaterThan(-1);
+  const start = lines.findIndex(
+    (line, index) => index > sectionIndex && line === `    ${name}:`,
+  );
+  expect(start).toBeGreaterThan(sectionIndex);
+  let end = start + 1;
+  while (
+    end < lines.length
+    && (!/^\s*\S/.test(lines[end]) || lines[end].match(/^ */)![0].length > 4)
+  ) {
+    end += 1;
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+function operationBlock(source: string, operationId: string): string {
+  const lines = source.split("\n");
+  const operationIdIndex = lines.indexOf(`      operationId: ${operationId}`);
+  expect(operationIdIndex).toBeGreaterThan(-1);
+  let start = operationIdIndex;
+  while (start >= 0 && !/^    (?:get|patch|post):$/.test(lines[start])) {
+    start -= 1;
+  }
+  expect(start).toBeGreaterThan(-1);
+  let end = start + 1;
+  while (
+    end < lines.length
+    && !/^    (?:get|patch|post):$/.test(lines[end])
+    && !/^  \//.test(lines[end])
+    && lines[end] !== "components:"
+  ) {
+    end += 1;
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+function operationResponseSchema(
+  operation: string,
+  status: string,
+): string | undefined {
+  const lines = operation.split("\n");
+  const start = lines.indexOf(`        "${status}":`);
+  expect(start).toBeGreaterThan(-1);
+  let end = start + 1;
+  while (end < lines.length && !/^        "\d{3}":$/.test(lines[end])) {
+    end += 1;
+  }
+  return lines
+    .slice(start, end)
+    .join("\n")
+    .match(/\$ref: "#\/components\/schemas\/([^"]+)"/)?.[1];
+}
+
 describe("Triton Board API skill artifacts", () => {
   it("keeps the skill concise, imperative, and explicit about safe recovery", () => {
     const skill = readFileSync(skillPath, "utf8");
+    expect(skill.match(/^description: (.+)$/m)?.[1]).toBe(
+      "Use when an AI agent needs to read Triton Board capabilities, board data, tasks, experiments, activity, attachments, or audit records; patch tasks, experiments, or attachment captions; or create experiments, activity comments, or experiment attachments through the Triton Board Agent API.",
+    );
     expect(skill).toContain("GET current resource");
     expect(skill).toContain("If-Match");
     expect(skill).toContain("Idempotency-Key");
@@ -148,30 +285,221 @@ describe("Triton Board API skill artifacts", () => {
     expect(skill).toContain(
       "Optional GET verification requires `board:read`",
     );
+    expect(skill).toContain("target Attachment");
+    expect(skill).toContain("attachment.updated_at");
+    expect(skill).toContain("never the parent Experiment ETag");
+    expect(skill).toContain("transport or `5xx`");
+    expect(skill).toContain("On `409`, stop");
   });
 
-  it("defines only actual Agent API routes and no destructive operation", () => {
+  it("defines the exact route, scope, and response matrix", () => {
     const openapi = readFileSync(openapiPath, "utf8");
-    expect(openapi).toContain("openapi: 3.1.0");
-    for (const path of [
-      "/capabilities:",
-      "/board:",
-      "/modules:",
-      "/members:",
-      "/tasks:",
-      "/tasks/{id}:",
-      "/tasks/{id}/activity:",
-      "/tasks/{id}/experiments:",
-      "/experiments:",
-      "/experiments/{id}:",
-      "/experiments/{id}/attachments:",
-      "/attachments/{id}:",
-      "/audit:",
-    ]) {
-      expect(openapi).toContain(path);
+    const operations = parseOpenApiOperations(openapi);
+    const byOperation = Object.fromEntries(
+      operations.map((operation) => [operation.operationId, operation]),
+    );
+    const responseMatrix: Record<string, string[]> = {
+      getCapabilities: ["200", "400", "401", "500"],
+      getBoardSummary: ["200", "400", "401", "403", "500"],
+      listModules: ["200", "400", "401", "403", "500"],
+      listMembers: ["200", "400", "401", "403", "500"],
+      listTasks: ["200", "400", "401", "403", "500"],
+      getTask: ["200", "400", "401", "403", "404", "500"],
+      patchTask: ["200", "400", "401", "403", "412", "413", "422", "429", "500"],
+      listTaskActivity: ["200", "400", "401", "403", "404", "500"],
+      appendTaskActivity: ["200", "201", "400", "401", "403", "409", "413", "422", "429", "500"],
+      createTaskExperiment: ["200", "201", "400", "401", "403", "409", "413", "422", "429", "500"],
+      listExperiments: ["200", "400", "401", "403", "500"],
+      getExperiment: ["200", "400", "401", "403", "404", "500"],
+      patchExperiment: ["200", "400", "401", "403", "404", "412", "413", "422", "429", "500"],
+      createExperimentAttachment: ["200", "201", "400", "401", "403", "404", "409", "422", "429", "500"],
+      patchAttachment: ["200", "400", "401", "403", "404", "412", "413", "422", "429", "500"],
+      listAudit: ["200", "400", "401", "403", "500"],
+    };
+    const scopeMatrix: Record<string, string | null> = {
+      getCapabilities: null,
+      getBoardSummary: "board:read",
+      listModules: "board:read",
+      listMembers: "board:read",
+      listTasks: "board:read",
+      getTask: "board:read",
+      patchTask: "tasks:write",
+      listTaskActivity: "board:read",
+      appendTaskActivity: "activity:append",
+      createTaskExperiment: "experiments:write",
+      listExperiments: "board:read",
+      getExperiment: "board:read",
+      patchExperiment: "experiments:write",
+      createExperimentAttachment: "attachments:write",
+      patchAttachment: "attachments:write",
+      listAudit: "audit:read",
+    };
+
+    expect(new Set(operations.map(({ path }) => path)).size).toBe(13);
+    expect(operations).toHaveLength(16);
+    expect(new Set(operations.map(({ operationId }) => operationId)).size)
+      .toBe(16);
+    expect(Object.keys(byOperation).sort()).toEqual(
+      Object.keys(responseMatrix).sort(),
+    );
+    for (const [operationId, statuses] of Object.entries(responseMatrix)) {
+      expect(byOperation[operationId].responses.sort()).toEqual(
+        [...statuses].sort(),
+      );
+      expect(byOperation[operationId].scope).toBe(scopeMatrix[operationId]);
     }
     expect(openapi).not.toMatch(/^\s+delete:/m);
     expect(openapi).not.toContain("/batch");
+  });
+
+  it("resolves component refs and models exact enums and success metadata", () => {
+    const openapi = readFileSync(openapiPath, "utf8");
+    const definitions = new Set<string>();
+    let section = "";
+    for (const line of openapi.split("\n")) {
+      const sectionMatch = line.match(/^  ([A-Za-z]+):$/);
+      if (sectionMatch) section = sectionMatch[1];
+      const definition = line.match(/^    ([A-Za-z][A-Za-z0-9]+):$/);
+      if (section && definition) {
+        definitions.add(`#/components/${section}/${definition[1]}`);
+      }
+    }
+    const refs = [...openapi.matchAll(/\$ref: "([^"]+)"/g)]
+      .map((match) => match[1]);
+    expect(refs.length).toBeGreaterThan(200);
+    expect(refs.filter((ref) => !definitions.has(ref))).toEqual([]);
+    expect(componentBlock(openapi, "schemas", "TaskStatus"))
+      .toContain("enum: [todo, in_progress, done, blocked]");
+    expect(componentBlock(openapi, "schemas", "ExperimentStatus"))
+      .toContain(
+        "enum: [planned, running, analyzing, completed, blocked, cancelled]",
+      );
+    const scope = componentBlock(openapi, "schemas", "Scope");
+    for (const value of [
+      "board:read",
+      "tasks:write",
+      "experiments:write",
+      "attachments:write",
+      "activity:append",
+      "audit:read",
+    ]) {
+      expect(scope).toContain(`- ${value}`);
+    }
+    expect(componentBlock(openapi, "schemas", "SuccessMeta"))
+      .not.toContain("idempotency_replayed");
+    expect(componentBlock(openapi, "schemas", "CreatedMeta"))
+      .toContain("const: false");
+    expect(componentBlock(openapi, "schemas", "ReplayedMeta"))
+      .toContain("const: true");
+    const expectedPostResponses = {
+      appendTaskActivity: {
+        "200": "ActivityReplayedSuccess",
+        "201": "ActivityCreatedSuccess",
+      },
+      createTaskExperiment: {
+        "200": "ExperimentReplayedSuccess",
+        "201": "ExperimentCreatedSuccess",
+      },
+      createExperimentAttachment: {
+        "200": "AttachmentReplayedSuccess",
+        "201": "AttachmentCreatedSuccess",
+      },
+    };
+    for (const [operationId, responseSchemas] of Object.entries(
+      expectedPostResponses,
+    )) {
+      const operation = operationBlock(openapi, operationId);
+      for (const [status, schema] of Object.entries(responseSchemas)) {
+        expect(operationResponseSchema(operation, status)).toBe(schema);
+      }
+    }
+
+    const timestamp = componentBlock(openapi, "schemas", "Timestamp");
+    expect(timestamp).toContain("format: date-time");
+    expect(timestamp).toContain(
+      "pattern: '^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?(?:Z|[+-](?:0\\d|1[0-5]):[0-5]\\d)$'",
+    );
+    const quotedEtag = componentBlock(openapi, "schemas", "QuotedETag");
+    expect(quotedEtag).toContain(
+      "pattern: '^\"\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?(?:Z|[+-](?:0\\d|1[0-5]):[0-5]\\d)\"$'",
+    );
+    expect(componentBlock(openapi, "parameters", "IfMatch"))
+      .toContain('$ref: "#/components/schemas/QuotedETag"');
+    expect(componentBlock(openapi, "parameters", "UpdatedAfter"))
+      .toContain('$ref: "#/components/schemas/Timestamp"');
+    expect(componentBlock(openapi, "headers", "ETag"))
+      .toContain('$ref: "#/components/schemas/QuotedETag"');
+
+    const auditSnapshot = componentBlock(
+      openapi,
+      "schemas",
+      "AuditSnapshot",
+    );
+    expect(auditSnapshot).toContain("additionalProperties: false");
+    expect(
+      [...auditSnapshot.matchAll(/^        ([a-z][a-z0-9_]*):$/gm)]
+        .map((match) => match[1])
+        .sort(),
+    ).toEqual([
+      "baseline_experiment_id",
+      "caption",
+      "completed_at",
+      "config",
+      "created_at",
+      "data_spec",
+      "decision_notes",
+      "decision_outcome",
+      "environment_spec",
+      "experiment_id",
+      "experiment_no",
+      "featured_metric_keys",
+      "id",
+      "kind",
+      "metrics",
+      "module_id",
+      "name",
+      "notes",
+      "object_spec",
+      "owner_id",
+      "path",
+      "position",
+      "result_summary",
+      "started_at",
+      "status",
+      "task_id",
+      "text",
+      "title",
+      "updated_at",
+      "url",
+    ]);
+    const auditEntry = componentBlock(openapi, "schemas", "AuditEntry");
+    expect(auditEntry).toContain(
+      '$ref: "#/components/schemas/NullableAuditSnapshot"',
+    );
+    expect(auditEntry).not.toContain("additionalProperties: true");
+  });
+
+  it("keeps generated UI metadata exact and passes the official validator", () => {
+    const openai = readFileSync(openaiPath, "utf8");
+    const fields = Object.fromEntries(
+      openai.split("\n").flatMap((line) => {
+        const match = line.match(/^  ([a-z_]+): "(.*)"$/);
+        return match ? [[match[1], match[2]]] : [];
+      }),
+    );
+    expect(fields).toEqual({
+      default_prompt:
+        "Use $triton-board-api to inspect a Task and apply a minimal, concurrency-safe update.",
+      display_name: "Triton Board API",
+      short_description: "Safely inspect and update Triton Board data",
+    });
+    const validation = spawnSync(
+      "python3",
+      [quickValidatePath, skillRoot],
+      { cwd: root, encoding: "utf8" },
+    );
+    expect(validation.status, validation.stderr).toBe(0);
+    expect(validation.stdout).toContain("Skill is valid!");
   });
 
 });
@@ -190,12 +518,45 @@ describe("Triton Board API client", () => {
     expect(missing.status).not.toBe(0);
     expect(missing.stderr).toContain("TRITON_BOARD_API_URL");
 
-    const key = "tb_live_never-print-this";
+    const key = TEST_API_KEY;
     const unreachable = runClient(["capabilities"], {
       TRITON_BOARD_API_URL: "http://127.0.0.1:1/api/agent/v1",
       TRITON_BOARD_API_KEY: key,
     });
     expect(`${unreachable.stdout}${unreachable.stderr}`).not.toContain(key);
+  });
+
+  it("rejects a malformed API key without leaking it or a traceback", () => {
+    const malformed = `${TEST_API_KEY}\n`;
+    const result = runClient(["capabilities"], {
+      TRITON_BOARD_API_URL: "http://127.0.0.1:1/api/agent/v1",
+      TRITON_BOARD_API_KEY: malformed,
+    });
+    const output = `${result.stdout}${result.stderr}`;
+    expect(result.status).toBe(2);
+    expect(output).toContain("TRITON_BOARD_API_KEY");
+    expect(output).not.toContain(TEST_API_KEY);
+    expect(output).not.toContain("Traceback");
+  });
+
+  it.each([
+    [" http://127.0.0.1/api/agent/v1", "whitespace"],
+    ["http://127.0.0.1/api/agent/v1 ", "whitespace"],
+    ["http://127.0.0.1\\evil/api/agent/v1", "backslash"],
+    ["http://127.0.0.1/api/agent/v1?", "query marker"],
+    ["http://127.0.0.1/api/agent/v1#", "fragment marker"],
+    ["http://:8080/api/agent/v1", "hostname"],
+    ["http://127.0.0.1:/api/agent/v1", "empty port"],
+    ["http://127.0.0.1:0/api/agent/v1", "zero port"],
+    ["http://127.0.0.1:bad/api/agent/v1", "port"],
+  ])("rejects an unsafe API base containing %s", (base) => {
+    const result = runClient(["capabilities"], {
+      TRITON_BOARD_API_URL: base,
+      TRITON_BOARD_API_KEY: TEST_API_KEY,
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("TRITON_BOARD_API_URL");
+    expect(result.stderr).not.toContain("Traceback");
   });
 
   it.each([
@@ -205,13 +566,18 @@ describe("Triton Board API client", () => {
     ["tasks/../../admin", "traversal"],
     ["tasks#secret", "fragment"],
     ["tasks\u000aX-Evil: yes", "control"],
+    ["%252e%252e/admin", "recursively encoded traversal"],
+    ["tasks/%252fadmin", "recursively encoded slash"],
+    ["tasks/%255cadmin", "recursively encoded backslash"],
+    ["//[", "malformed authority"],
   ])("rejects unsafe path %j before dispatch", (path) => {
     const result = runClient(["get", path], {
       TRITON_BOARD_API_URL: "http://127.0.0.1:1/api/agent/v1",
-      TRITON_BOARD_API_KEY: "tb_live_safe",
+      TRITON_BOARD_API_KEY: TEST_API_KEY,
     });
-    expect(result.status).not.toBe(0);
+    expect(result.status).toBe(2);
     expect(result.stderr).toContain("path");
+    expect(result.stderr).not.toContain("Traceback");
   });
 
   it("joins relative paths beneath the full API base and emits safe metadata", () => {
@@ -225,12 +591,12 @@ describe("Triton Board API client", () => {
     expect(result.exit_code).toBe(0);
     expect(result.request.path).toBe("/api/agent/v1/tasks?status=todo");
     expect(result.request.headers.Authorization).toBe(
-      "Bearer tb_live_super-secret",
+      `Bearer ${TEST_API_KEY}`,
     );
     expect(result.stdout).toContain("status: 200");
     expect(result.stdout).toContain("request_id: req-get");
     expect(result.stdout).toContain('etag: "2026-07-29T00:00:00Z"');
-    expect(result.stdout).not.toContain("tb_live_super-secret");
+    expect(result.stdout).not.toContain(TEST_API_KEY);
   });
 
   it("sends the exact PATCH envelope and quoted If-Match", () => {
@@ -278,7 +644,7 @@ describe("Triton Board API client", () => {
       '{"text":"Profile this"}',
     ], {
       TRITON_BOARD_API_URL: "http://127.0.0.1:1/api/agent/v1",
-      TRITON_BOARD_API_KEY: "tb_live_safe",
+      TRITON_BOARD_API_KEY: TEST_API_KEY,
     });
     expect(result.status).not.toBe(0);
     expect(result.stdout).toMatch(
@@ -294,7 +660,7 @@ describe("Triton Board API client", () => {
       "[]",
     ], {
       TRITON_BOARD_API_URL: "http://127.0.0.1:1/api/agent/v1",
-      TRITON_BOARD_API_KEY: "tb_live_safe",
+      TRITON_BOARD_API_KEY: TEST_API_KEY,
     });
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
@@ -329,7 +695,26 @@ describe("Triton Board API client", () => {
     expect(result.stdout).toContain("status: 429");
     expect(result.stdout).toContain("request_id: req-error");
     expect(result.stdout).toContain("retry_after: 60");
-    expect(result.stdout).not.toContain("tb_live_super-secret");
+    expect(result.stdout).not.toContain(TEST_API_KEY);
+  });
+
+  it("retains HTTP metadata for a non-JSON error without printing its body", () => {
+    const result = runHarness(["capabilities"], {
+      status: 429,
+      headers: {
+        ETag: '"2026-07-29T00:00:00Z"',
+        "Retry-After": "60",
+      },
+      contentType: "text/plain",
+      body: "proxy secret body must not be printed",
+    });
+    expect(result.exit_code).toBe(1);
+    expect(result.stdout).toContain("status: 429");
+    expect(result.stdout).toContain('etag: "2026-07-29T00:00:00Z"');
+    expect(result.stdout).toContain("retry_after: 60");
+    expect(result.stdout).toContain('"code": "NON_JSON_RESPONSE"');
+    expect(result.stdout).toContain('"retryable": true');
+    expect(result.stdout).not.toContain("proxy secret body");
   });
 
   it("encodes the actual Attachment multipart write with file and caption", () => {
@@ -357,5 +742,57 @@ describe("Triton Board API client", () => {
     expect(body).toContain("Content-Type: image/png");
     expect(body).toContain('name="caption"');
     expect(body).toContain("profile");
+  });
+
+  it("sanitizes every multipart filename header control and backslash", () => {
+    const directory = mkdtempSync(join(tmpdir(), "triton-board-client-"));
+    tempDirectories.push(directory);
+    const file = join(directory, 'bad\\name\t"\u0085.png');
+    writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const result = runHarness([
+      "post",
+      "experiments/11111111-1111-1111-1111-111111111111/attachments",
+      "--idempotency-key",
+      "33333333-3333-4333-8333-333333333333",
+      "--file",
+      file,
+    ]);
+    const body = Buffer.from(result.request.body_hex, "hex").toString("latin1");
+    const filename = body.match(/filename="([^"]+)"/)?.[1];
+    expect(result.exit_code).toBe(0);
+    expect(filename).toBe("bad_name___.png");
+    expect(filename).not.toMatch(/[\p{Cc}\\]/u);
+  });
+
+  it("validates the bytes read instead of trusting the earlier file stat", () => {
+    const probe = String.raw`
+import importlib.util, json, os
+spec = importlib.util.spec_from_file_location("client", os.environ["CLIENT"])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class FakePath:
+    name = "race.png"
+    suffix = ".png"
+    def stat(self):
+        return type("Stat", (), {"st_size": 1})()
+    def read_bytes(self):
+        return b"x" * (module.MAX_ATTACHMENT_BYTES + 1)
+module.Path = lambda _value: FakePath()
+try:
+    module._multipart("ignored.png", "")
+except module.ClientError as error:
+    print(json.dumps({"error": str(error)}))
+else:
+    print(json.dumps({"error": None}))
+`;
+    const result = spawnSync("python3", ["-c", probe], {
+      cwd: root,
+      env: { ...process.env, CLIENT: clientPath },
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      error: "attachment must be between 1 byte and 10 MiB.",
+    });
   });
 });

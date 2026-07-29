@@ -32,6 +32,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CapabilitiesSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
@@ -49,6 +51,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BoardSummarySuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -68,6 +72,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ModulesSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -87,6 +93,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MembersSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -234,13 +242,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ActivitySuccess"
+                $ref: "#/components/schemas/ActivityReplayedSuccess"
         "201":
           description: Activity created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ActivitySuccess"
+                $ref: "#/components/schemas/ActivityCreatedSuccess"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -285,7 +293,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExperimentMutationSuccess"
+                $ref: "#/components/schemas/ExperimentReplayedSuccess"
         "201":
           description: Experiment created.
           headers:
@@ -294,7 +302,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExperimentMutationSuccess"
+                $ref: "#/components/schemas/ExperimentCreatedSuccess"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -443,7 +451,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AttachmentSuccess"
+                $ref: "#/components/schemas/AttachmentReplayedSuccess"
         "201":
           description: Attachment created.
           headers:
@@ -452,7 +460,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AttachmentSuccess"
+                $ref: "#/components/schemas/AttachmentCreatedSuccess"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -530,6 +538,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -556,8 +566,7 @@ components:
       required: true
       description: Exact quoted RFC 3339 updated_at ETag from the latest GET.
       schema:
-        type: string
-        pattern: '^"[^",]+"$'
+        $ref: "#/components/schemas/QuotedETag"
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -604,8 +613,7 @@ components:
       in: query
       description: Strict RFC 3339 timestamp accepted by PostgreSQL timestamptz.
       schema:
-        type: string
-        format: date-time
+        $ref: "#/components/schemas/Timestamp"
     Cursor:
       name: cursor
       in: query
@@ -625,7 +633,7 @@ components:
     ETag:
       description: Quoted updated_at value to send unchanged as If-Match.
       schema:
-        type: string
+        $ref: "#/components/schemas/QuotedETag"
     RetryAfter:
       description: Seconds to wait before considering a new write.
       schema:
@@ -705,6 +713,10 @@ components:
     Timestamp:
       type: string
       format: date-time
+      pattern: '^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:0\d|1[0-5]):[0-5]\d)$'
+    QuotedETag:
+      type: string
+      pattern: '^"\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:0\d|1[0-5]):[0-5]\d)"$'
     NullableTimestamp:
       oneOf:
         - $ref: "#/components/schemas/Timestamp"
@@ -741,8 +753,28 @@ components:
         request_id:
           type: string
           pattern: "^req_"
+    CreatedMeta:
+      type: object
+      additionalProperties: false
+      required: [request_id, idempotency_replayed]
+      properties:
+        request_id:
+          type: string
+          pattern: "^req_"
         idempotency_replayed:
           type: boolean
+          const: false
+    ReplayedMeta:
+      type: object
+      additionalProperties: false
+      required: [request_id, idempotency_replayed]
+      properties:
+        request_id:
+          type: string
+          pattern: "^req_"
+        idempotency_replayed:
+          type: boolean
+          const: true
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -1226,6 +1258,78 @@ components:
           properties:
             caption:
               type: string
+    AuditSnapshot:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        module_id:
+          $ref: "#/components/schemas/Uuid"
+        title:
+          type: string
+        status:
+          type: string
+          enum: [todo, in_progress, done, blocked, planned, running, analyzing, completed, cancelled]
+        notes:
+          type: string
+        position:
+          type: number
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+        experiment_no:
+          type: number
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        owner_id:
+          $ref: "#/components/schemas/NullableUuid"
+        name:
+          type: string
+        baseline_experiment_id:
+          $ref: "#/components/schemas/NullableUuid"
+        data_spec:
+          $ref: "#/components/schemas/DataSpec"
+        object_spec:
+          $ref: "#/components/schemas/ObjectSpec"
+        environment_spec:
+          $ref: "#/components/schemas/EnvironmentSpec"
+        config:
+          $ref: "#/components/schemas/Config"
+        metrics:
+          $ref: "#/components/schemas/Metrics"
+        featured_metric_keys:
+          type: array
+          items:
+            type: string
+        result_summary:
+          type: string
+        decision_outcome:
+          $ref: "#/components/schemas/DecisionOutcome"
+        decision_notes:
+          type: string
+        started_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        completed_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        experiment_id:
+          $ref: "#/components/schemas/NullableUuid"
+        url:
+          type: string
+        path:
+          type: string
+        caption:
+          type: string
+        text:
+          type: string
+        kind:
+          type: string
+          enum: [create, status, assign, experiment, note, edit, comment]
+    NullableAuditSnapshot:
+      oneOf:
+        - $ref: "#/components/schemas/AuditSnapshot"
+        - type: "null"
     AuditEntry:
       type: object
       additionalProperties: false
@@ -1265,6 +1369,7 @@ components:
           type: string
         resource_type:
           type: string
+          enum: [task, experiment, attachment, activity]
         resource_id:
           $ref: "#/components/schemas/Uuid"
         task_id:
@@ -1272,15 +1377,9 @@ components:
         action:
           type: string
         before_state:
-          oneOf:
-            - type: object
-              additionalProperties: true
-            - type: "null"
+          $ref: "#/components/schemas/NullableAuditSnapshot"
         after_state:
-          oneOf:
-            - type: object
-              additionalProperties: true
-            - type: "null"
+          $ref: "#/components/schemas/NullableAuditSnapshot"
         response_status:
           type: integer
         created_at:
@@ -1444,6 +1543,24 @@ components:
           $ref: "#/components/schemas/ExperimentMutation"
         meta:
           $ref: "#/components/schemas/SuccessMeta"
+    ExperimentCreatedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/ExperimentMutation"
+        meta:
+          $ref: "#/components/schemas/CreatedMeta"
+    ExperimentReplayedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/ExperimentMutation"
+        meta:
+          $ref: "#/components/schemas/ReplayedMeta"
     ActivitiesSuccess:
       type: object
       additionalProperties: false
@@ -1455,7 +1572,7 @@ components:
             $ref: "#/components/schemas/Activity"
         meta:
           $ref: "#/components/schemas/SuccessMeta"
-    ActivitySuccess:
+    ActivityCreatedSuccess:
       type: object
       additionalProperties: false
       required: [data, meta]
@@ -1463,7 +1580,16 @@ components:
         data:
           $ref: "#/components/schemas/Activity"
         meta:
-          $ref: "#/components/schemas/SuccessMeta"
+          $ref: "#/components/schemas/CreatedMeta"
+    ActivityReplayedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Activity"
+        meta:
+          $ref: "#/components/schemas/ReplayedMeta"
     AttachmentSuccess:
       type: object
       additionalProperties: false
@@ -1473,6 +1599,24 @@ components:
           $ref: "#/components/schemas/Attachment"
         meta:
           $ref: "#/components/schemas/SuccessMeta"
+    AttachmentCreatedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Attachment"
+        meta:
+          $ref: "#/components/schemas/CreatedMeta"
+    AttachmentReplayedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Attachment"
+        meta:
+          $ref: "#/components/schemas/ReplayedMeta"
     AuditSuccess:
       type: object
       additionalProperties: false

@@ -237,6 +237,18 @@ describe("Experiment PATCH schema", () => {
     );
   });
 
+  it("rejects an uppercase baseline UUID before repository dispatch", () => {
+    expect(() => parseExperimentPatch({
+      changes: {
+        baseline_experiment_id: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+      },
+    })).toThrowError(expect.objectContaining({
+      status: 422,
+      code: "INVALID_FIELD",
+      details: { field: "baseline_experiment_id" },
+    }));
+  });
+
   it.each([
     null,
     [],

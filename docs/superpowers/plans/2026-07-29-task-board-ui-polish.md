@@ -55,7 +55,7 @@ No component, hook, type, route, data adapter, or dependency is added. Temporary
 **Interfaces:**
 
 - Consumes: existing `TaskCardProps`, `TaskModel`, `TaskType`, `OwnerAvatar`, `StatusDot`, `relTime`.
-- Produces: `.task-card-heading`, `.task-card-type.is-empty`, and `.task-card-meta` DOM/style hooks. `TaskCardProps` stays unchanged.
+- Produces: `.task-card-heading`, `.task-card-type.is-empty`, and `.task-card-meta` DOM/style hooks. The heading stacks Type above Title while the existing menu remains aligned to the Type line. `TaskCardProps` stays unchanged.
 
 - [ ] **Step 1: Write failing DOM-order and footer tests**
 
@@ -64,7 +64,7 @@ Add `within` to the Testing Library import in
 existing `describe("TaskCard", ...)` block:
 
 ```tsx
-it("places Type before the title and keeps freshness in the footer", () => {
+it("places Type above the title and keeps freshness in the footer", () => {
   render(
     <TaskCard
       task={task}
@@ -115,10 +115,11 @@ it("renders an unassigned Type with the neutral treatment hook", () => {
 Add this test to `app/__tests__/workspace-styles.test.ts`:
 
 ```ts
-it("uses compact Type-first headings and a single task-card metadata row", () => {
+it("uses a compact two-line Type-first heading and one metadata row", () => {
   const heading = ruleBody(globals, ".task-card-heading");
-  expect(heading).toMatch(/display\s*:\s*flex/);
+  expect(heading).toMatch(/display\s*:\s*grid/);
   expect(heading).toMatch(/min-width\s*:\s*0/);
+  expect(heading).toMatch(/gap\s*:\s*4px/);
 
   const type = ruleBody(globals, ".task-card-type");
   expect(type).toMatch(
@@ -257,11 +258,10 @@ Update the matching rules in `app/globals.css`:
 
 ```css
 .task-card-heading {
-  display: flex;
+  display: grid;
   min-width: 0;
   flex: 1;
-  align-items: baseline;
-  gap: 7px;
+  gap: 4px;
 }
 .task-card-type {
   max-width: min(112px, 40%);
@@ -303,7 +303,9 @@ Update the matching rules in `app/globals.css`:
 ```
 
 Keep `.task-card-title { min-width: 0; flex: 1; }`, Owner overlap, hover,
-focus, quick-edit, and action-menu rules unchanged.
+focus, quick-edit, and action-menu rules unchanged. Because the menu remains a
+sibling of `.task-card-heading` inside `.task-card-head`, it stays right-aligned
+with the Type line while the title occupies the second line.
 
 - [ ] **Step 5: Run focused tests**
 
@@ -648,7 +650,7 @@ Start:
 env PATH=/tmp/node-v24.18.0-linux-arm64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /tmp/node-v24.18.0-linux-arm64/bin/npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-The flow under test is: `/` → inspect Type-first cards and open global
+The flow under test is: `/` → inspect two-line Type-first cards and open global
 `New task` → close the drawer → open one task → inspect divider-free Task
 Detail.
 

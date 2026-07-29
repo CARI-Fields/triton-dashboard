@@ -33,12 +33,11 @@ handling remain unchanged.
 
 ### Type and title
 
-Task Type moves from its own line to the beginning of the title row. The row
-contains:
+Task Type and title remain on two distinct lines, with a clearer hierarchy:
 
-1. a Type label;
-2. the linked task title;
-3. the existing overflow-actions control.
+1. the first line contains the Type label and the existing right-aligned
+   overflow-actions control;
+2. the second line contains the linked task title at the full available width.
 
 The Type label uses `font-variant-caps: all-small-caps`, slightly expanded
 tracking, compact horizontal padding, a small radius, accent-colored text, and
@@ -48,7 +47,8 @@ it less prominent than an assigned type.
 
 The Type label is capped at 112px and no more than 40% of the available heading
 width, then truncates with an ellipsis. The title keeps its existing wrapping
-and focus behavior. The overflow menu remains anchored at the right edge.
+and focus behavior on the line below. The overflow menu remains anchored at the
+right edge of the Type line.
 
 ### Tags and footer
 
@@ -111,12 +111,13 @@ retaining clear boundaries inside structured or interactive content.
 
 ## Responsive and Theme Behavior
 
-At desktop and compact desktop widths, Type, title, and actions share the
-heading row and Owner/update metadata share the footer row.
+At desktop and compact desktop widths, Type and actions share the first heading
+line, title occupies the second line, and Owner/update metadata share the footer
+row.
 
 On narrow screens:
 
-- the Type label stays before the title;
+- the Type label stays on the line above the title;
 - the title remains allowed to wrap;
 - the footer continues to place Owner information left and updated metadata
   right;
@@ -156,7 +157,8 @@ change is required.
 
 Automated checks must cover:
 
-- Type appears before the title in the task-card heading.
+- Type appears on the first line and title on the second line in the task-card
+  heading.
 - Owner and updated time share the card footer.
 - Status remains present in the footer when grouped by Type.
 - Per-column `Add task` controls are absent.

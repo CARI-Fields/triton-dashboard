@@ -486,6 +486,7 @@ describe("experiment evidence", () => {
       caption: "Latency plot",
       position: 0,
       created_at: "2026-07-24T00:00:00.000Z",
+      updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     vi.mocked(updateExperimentAttachment).mockRejectedValue(
       new Error("Caption failed."),
@@ -548,6 +549,7 @@ describe("experiment evidence", () => {
       caption: "",
       position: 0,
       created_at: "2026-07-24T00:00:00.000Z",
+      updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const first = new File(["first"], "first.png", { type: "image/png" });
     const second = new File(["second"], "second.png", { type: "image/png" });
@@ -603,6 +605,7 @@ describe("experiment evidence", () => {
       caption: "",
       position: 0,
       created_at: "2026-07-24T00:00:00.000Z",
+      updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(deleteExperimentAttachment).mockResolvedValue();
@@ -633,6 +636,7 @@ describe("experiment evidence", () => {
       caption: "",
       position: 0,
       created_at: "2026-07-24T00:00:00.000Z",
+      updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(deleteExperimentAttachment).mockRejectedValue(
@@ -667,6 +671,7 @@ describe("experiment evidence", () => {
       caption: "A caption",
       position: 0,
       created_at: "2026-07-24T00:00:00.000Z",
+      updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const attachmentB = {
       ...attachmentA,
@@ -735,6 +740,7 @@ describe("experiment evidence", () => {
       caption: "A caption",
       position: 0,
       created_at: "2026-07-24T00:00:00.000Z",
+      updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
     const captionSave = deferred<void>();
     vi.mocked(updateExperimentAttachment)

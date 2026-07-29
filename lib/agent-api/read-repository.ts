@@ -94,22 +94,6 @@ const EXPERIMENT_DETAIL_SELECT = [
 ].join(",");
 const ACTIVITY_SELECT =
   "id,task_id,experiment_id,text,kind,created_at";
-const AUDIT_SELECT = [
-  "id",
-  "api_key_id",
-  "member_id",
-  "request_id",
-  "resource_type",
-  "resource_id",
-  "task_id",
-  "action",
-  "before_state",
-  "after_state",
-  "response_status",
-  "created_at",
-  "api_key:api_keys!inner(id,key_prefix)",
-  "task_scope:tasks!inner(task_assignees!inner(member_id))",
-].join(",");
 
 export interface UpdatedCursor {
   updated_at: string;
@@ -456,6 +440,99 @@ function memberDto(row: Record<string, unknown>): Member {
   };
 }
 
+function recordValue(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function nullableNumber(value: unknown): number | null {
+  return value === null || (typeof value === "number" && Number.isFinite(value))
+    ? value
+    : null;
+}
+
+function normalizedExperimentFields(
+  row: Record<string, unknown>,
+): Pick<
+  Experiment,
+  | "data_spec"
+  | "object_spec"
+  | "environment_spec"
+  | "config"
+  | "metrics"
+  | "featured_metric_keys"
+> {
+  const data = recordValue(row.data_spec);
+  const object = recordValue(row.object_spec);
+  const environment = recordValue(row.environment_spec);
+  const datasets = Array.isArray(data.datasets)
+    ? data.datasets.map((value) => {
+      const dataset = recordValue(value);
+      return {
+        role: dataset.role === "evaluation" ? "evaluation" as const
+          : "training" as const,
+        name: stringValue(dataset.name),
+        split: stringValue(dataset.split),
+        revision: stringValue(dataset.revision),
+        task_count: nullableNumber(dataset.task_count),
+        samples_per_task: nullableNumber(dataset.samples_per_task),
+      };
+    })
+    : [];
+  const platform = environment.platform === "npu"
+    || environment.platform === "gpu"
+    ? environment.platform
+    : "";
+  return {
+    data_spec: { datasets },
+    object_spec: {
+      model: stringValue(object.model),
+      harness: stringValue(object.harness),
+      parent_harness: stringValue(object.parent_harness),
+      prompt: stringValue(object.prompt),
+      prompt_change: stringValue(object.prompt_change),
+      skills: stringArray(object.skills),
+      tools: stringArray(object.tools),
+    },
+    environment_spec: {
+      platform,
+      server: stringValue(environment.server),
+      devices: stringArray(environment.devices),
+      hardware: stringValue(environment.hardware),
+      evaluator: stringValue(environment.evaluator),
+      revision: stringValue(environment.revision),
+      precision_policy: stringValue(environment.precision_policy),
+    },
+    config: recordValue(row.config) as Experiment["config"],
+    metrics: recordValue(row.metrics) as Experiment["metrics"],
+    featured_metric_keys: stringArray(row.featured_metric_keys),
+  };
+}
+
+function taskReferenceDto(
+  value: unknown,
+): ExperimentListRow["task"] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  return {
+    id: row.id as string,
+    title: row.title as string,
+  };
+}
+
 function experimentDto(row: Record<string, unknown>): ExperimentListRow {
   const experiment: Experiment = {
     id: row.id as string,
@@ -465,13 +542,8 @@ function experimentDto(row: Record<string, unknown>): ExperimentListRow {
     name: row.name as string,
     status: row.status as ExperimentStatus,
     baseline_experiment_id: row.baseline_experiment_id as string | null,
-    data_spec: row.data_spec as Experiment["data_spec"],
-    object_spec: row.object_spec as Experiment["object_spec"],
-    environment_spec: row.environment_spec as Experiment["environment_spec"],
-    config: row.config as Experiment["config"],
+    ...normalizedExperimentFields(row),
     notes: row.notes as string,
-    metrics: row.metrics as Experiment["metrics"],
-    featured_metric_keys: row.featured_metric_keys as string[],
     result_summary: row.result_summary as string,
     decision_outcome: row.decision_outcome as Experiment["decision_outcome"],
     decision_notes: row.decision_notes as string,
@@ -483,8 +555,8 @@ function experimentDto(row: Record<string, unknown>): ExperimentListRow {
   };
   return {
     ...experiment,
-    task: row.task as ExperimentListRow["task"],
-    owner: row.owner === null
+    task: taskReferenceDto(row.task),
+    owner: row.owner === null || row.owner === undefined
       ? null
       : memberDto(row.owner as Record<string, unknown>),
   };
@@ -548,12 +620,11 @@ function snapshotDto(
 
 function auditDto(row: Record<string, unknown>): AuditDto {
   const resourceType = row.resource_type as string;
-  const apiKey = row.api_key as Record<string, unknown>;
   return {
     id: row.id as string,
     key: {
       id: row.api_key_id as string,
-      prefix: apiKey.key_prefix as string,
+      prefix: row.key_prefix as string,
     },
     member: { id: row.member_id as string },
     request_id: row.request_id as string,
@@ -565,6 +636,43 @@ function auditDto(row: Record<string, unknown>): AuditDto {
     after_state: snapshotDto(resourceType, row.after_state),
     response_status: row.response_status as number,
     created_at: row.created_at as string,
+  };
+}
+
+function countValue(value: unknown): number {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < 0
+  ) {
+    throw new Error("Agent API read query failed.");
+  }
+  return value;
+}
+
+function boardSummaryDto(value: unknown): BoardSummaryDto {
+  const row = recordValue(value);
+  const tasks = recordValue(row.task_statuses);
+  const experiments = recordValue(row.experiment_statuses);
+  return {
+    modules: countValue(row.modules),
+    members: countValue(row.members),
+    tasks: countValue(row.tasks),
+    experiments: countValue(row.experiments),
+    task_statuses: {
+      todo: countValue(tasks.todo),
+      in_progress: countValue(tasks.in_progress),
+      done: countValue(tasks.done),
+      blocked: countValue(tasks.blocked),
+    },
+    experiment_statuses: {
+      planned: countValue(experiments.planned),
+      running: countValue(experiments.running),
+      analyzing: countValue(experiments.analyzing),
+      completed: countValue(experiments.completed),
+      blocked: countValue(experiments.blocked),
+      cancelled: countValue(experiments.cancelled),
+    },
   };
 }
 
@@ -612,43 +720,9 @@ export function createReadRepository(client: SupabaseClient) {
     },
 
     async getBoardSummary(): Promise<BoardSummaryDto> {
-      const [modules, members, tasks, experiments] = await Promise.all([
-        client.from("modules").select("id"),
-        client.from("members").select("id"),
-        client.from("tasks").select("id,status"),
-        client.from("experiments").select("id,status"),
-      ]);
-      for (const result of [modules, members, tasks, experiments]) {
-        throwIfError(result.error);
-      }
-      const taskStatuses: Record<Status, number> = {
-        todo: 0,
-        in_progress: 0,
-        done: 0,
-        blocked: 0,
-      };
-      const experimentStatuses: Record<ExperimentStatus, number> = {
-        planned: 0,
-        running: 0,
-        analyzing: 0,
-        completed: 0,
-        blocked: 0,
-        cancelled: 0,
-      };
-      for (const row of tasks.data ?? []) {
-        taskStatuses[row.status as Status] += 1;
-      }
-      for (const row of experiments.data ?? []) {
-        experimentStatuses[row.status as ExperimentStatus] += 1;
-      }
-      return {
-        modules: modules.data?.length ?? 0,
-        members: members.data?.length ?? 0,
-        tasks: tasks.data?.length ?? 0,
-        experiments: experiments.data?.length ?? 0,
-        task_statuses: taskStatuses,
-        experiment_statuses: experimentStatuses,
-      };
+      const { data, error } = await client.rpc("agent_api_board_summary");
+      throwIfError(error);
+      return boardSummaryDto(data);
     },
 
     async listModules(): Promise<Module[]> {
@@ -772,12 +846,9 @@ export function createReadRepository(client: SupabaseClient) {
       agent: AgentContext,
       _filters: Record<string, never>,
     ): Promise<AuditDto[]> {
-      const { data, error } = await client
-        .from("agent_api_audit_log")
-        .select(AUDIT_SELECT)
-        .eq("task_scope.task_assignees.member_id", agent.memberId)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false });
+      const { data, error } = await client.rpc("agent_api_list_audit", {
+        p_member_id: agent.memberId,
+      });
       throwIfError(error);
       return ((data ?? []) as unknown as Record<string, unknown>[])
         .map(auditDto);

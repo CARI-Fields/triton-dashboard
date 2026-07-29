@@ -8,6 +8,7 @@ import {
   parseExperimentListFilters,
   parseTaskListFilters,
 } from "@/lib/agent-api/read-repository";
+import { parseExperimentPatch } from "@/lib/agent-api/schemas";
 import type { AgentContext } from "@/lib/agent-api/types";
 
 const TASK_ID = "30000000-0000-4000-8000-000000000001";
@@ -74,6 +75,25 @@ function clientFor(
     client: { from } as unknown as SupabaseClient,
     from,
     queries,
+  };
+}
+
+function rpcClient(
+  data: unknown,
+  error: unknown = null,
+): {
+  client: SupabaseClient;
+  rpc: ReturnType<typeof vi.fn>;
+  from: ReturnType<typeof vi.fn>;
+} {
+  const rpc = vi.fn().mockResolvedValue({ data, error });
+  const from = vi.fn(() => {
+    throw new Error("Read RPC paths must not query tables directly.");
+  });
+  return {
+    client: { rpc, from } as unknown as SupabaseClient,
+    rpc,
+    from,
   };
 }
 
@@ -289,6 +309,44 @@ describe("read repository DTOs and queries", () => {
     expect(serialized).not.toContain("secret");
   });
 
+  it("uses the exact aggregate RPC so Board counts can exceed max_rows", async () => {
+    const summary = {
+      modules: 1201,
+      members: 1302,
+      tasks: 1403,
+      experiments: 1504,
+      task_statuses: {
+        todo: 1101,
+        in_progress: 101,
+        done: 100,
+        blocked: 101,
+      },
+      experiment_statuses: {
+        planned: 1102,
+        running: 102,
+        analyzing: 100,
+        completed: 100,
+        blocked: 50,
+        cancelled: 50,
+      },
+    };
+    const { client, rpc, from } = rpcClient(summary);
+
+    await expect(createReadRepository(client).getBoardSummary())
+      .resolves.toEqual(summary);
+    expect(rpc).toHaveBeenCalledWith("agent_api_board_summary");
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("turns Board summary RPC errors into the safe read error", async () => {
+    const { client } = rpcClient(null, {
+      message: "sb_secret_do_not_expose",
+    });
+
+    await expect(createReadRepository(client).getBoardSummary())
+      .rejects.toEqual(new Error("Agent API read query failed."));
+  });
+
   it("normalizes Task relations and allowlists DTO fields", async () => {
     const { client, queries } = clientFor({
       tasks: { data: [taskRow()] },
@@ -450,6 +508,166 @@ describe("read repository DTOs and queries", () => {
     });
   });
 
+  it("normalizes real RPC Experiment defaults and strips nested list extras", async () => {
+    const row = {
+      ...experimentRow(),
+      data_spec: {},
+      object_spec: {},
+      environment_spec: {},
+      config: null,
+      metrics: null,
+      featured_metric_keys: null,
+      task: {
+        id: TASK_ID,
+        title: "Fused attention",
+        internal_task_secret: "do-not-return",
+      },
+      owner: {
+        ...(experimentRow().owner as Record<string, unknown>),
+        auth_data: "do-not-return",
+      },
+    };
+    const { client } = clientFor({ experiments: { data: [row] } });
+
+    const result = await createReadRepository(client).listExperiments({
+      limit: 50,
+    });
+    const experiment = result.items[0];
+
+    expect(experiment.task).toEqual({
+      id: TASK_ID,
+      title: "Fused attention",
+    });
+    expect(experiment.owner).toEqual({
+      id: MEMBER_ID,
+      name: "Bruce",
+      initials: "B",
+      position: 0,
+      created_at: "2026-07-28T12:00:00.000Z",
+    });
+    expect(experiment).toMatchObject({
+      data_spec: { datasets: [] },
+      object_spec: {
+        model: "",
+        harness: "",
+        parent_harness: "",
+        prompt: "",
+        prompt_change: "",
+        skills: [],
+        tools: [],
+      },
+      environment_spec: {
+        platform: "",
+        server: "",
+        devices: [],
+        hardware: "",
+        evaluator: "",
+        revision: "",
+        precision_policy: "",
+      },
+      config: {},
+      metrics: {},
+      featured_metric_keys: [],
+    });
+    expect(JSON.stringify(experiment)).not.toContain("internal_task_secret");
+    expect(JSON.stringify(experiment)).not.toContain("auth_data");
+
+    expect(() => parseExperimentPatch({
+      changes: {
+        data_spec: experiment.data_spec,
+        object_spec: experiment.object_spec,
+        environment_spec: experiment.environment_spec,
+        config: experiment.config,
+        metrics: experiment.metrics,
+        featured_metric_keys: experiment.featured_metric_keys,
+      },
+    })).not.toThrow();
+  });
+
+  it("normalizes detail defaults and strips nested Task and structured extras", async () => {
+    const row = {
+      ...experimentRow(),
+      data_spec: {
+        datasets: [{
+          role: "evaluation",
+          name: "kernelbench",
+          split: "test",
+          revision: "v1",
+          task_count: 250,
+          samples_per_task: 1,
+          internal_dataset_secret: "do-not-return",
+        }],
+        internal_data_secret: "do-not-return",
+      },
+      object_spec: {
+        model: "Qwen",
+        internal_object_secret: "do-not-return",
+      },
+      environment_spec: {
+        platform: "npu",
+        internal_environment_secret: "do-not-return",
+      },
+      task: {
+        id: TASK_ID,
+        title: "Fused attention",
+        notes: "do-not-return",
+      },
+      attachments: [],
+    };
+    const { client } = clientFor({ experiments: { data: row } });
+
+    const result = await createReadRepository(client)
+      .getExperiment(EXPERIMENT_ID);
+    const serialized = JSON.stringify(result);
+
+    expect(result?.task).toEqual({
+      id: TASK_ID,
+      title: "Fused attention",
+    });
+    expect(result?.data_spec).toEqual({
+      datasets: [{
+        role: "evaluation",
+        name: "kernelbench",
+        split: "test",
+        revision: "v1",
+        task_count: 250,
+        samples_per_task: 1,
+      }],
+    });
+    expect(result?.object_spec).toEqual({
+      model: "Qwen",
+      harness: "",
+      parent_harness: "",
+      prompt: "",
+      prompt_change: "",
+      skills: [],
+      tools: [],
+    });
+    expect(result?.environment_spec).toEqual({
+      platform: "npu",
+      server: "",
+      devices: [],
+      hardware: "",
+      evaluator: "",
+      revision: "",
+      precision_policy: "",
+    });
+    expect(serialized).not.toContain("internal_");
+    expect(serialized).not.toContain('"notes":"do-not-return"');
+  });
+
+  it("preserves a nullable embedded Task relation without leaking row fields", async () => {
+    const { client } = clientFor({
+      experiments: { data: [{ ...experimentRow(), task: null }] },
+    });
+
+    const result = await createReadRepository(client).listExperiments({
+      limit: 50,
+    });
+
+    expect(result.items[0].task).toBeNull();
+  });
+
   it("includes allowlisted Attachments with updated_at in Experiment detail", async () => {
     const row = {
       ...experimentRow(),
@@ -546,31 +764,17 @@ describe("read repository DTOs and queries", () => {
       },
       response_status: 200,
       created_at: UPDATED_AT,
-      api_key: { key_prefix: context.keyPrefix, key_digest: "secret-digest" },
-      member: { id: MEMBER_ID, name: "Bruce", auth_data: "secret-auth" },
-      task_scope: {
-        task_assignees: [{ member_id: MEMBER_ID }],
-      },
+      key_prefix: context.keyPrefix,
     };
-    const { client, queries } = clientFor({
-      agent_api_audit_log: { data: [auditRow] },
-    });
+    const { client, rpc, from } = rpcClient([auditRow]);
 
     const result = await createReadRepository(client).listAudit(context, {});
     const serialized = JSON.stringify(result);
 
-    expect(queries.agent_api_audit_log.eq).toHaveBeenCalledWith(
-      "task_scope.task_assignees.member_id",
-      MEMBER_ID,
-    );
-    const select =
-      queries.agent_api_audit_log.select.mock.calls[0][0] as string;
-    expect(select).toContain(
-      "task_scope:tasks!inner(task_assignees!inner(member_id))",
-    );
-    expect(select).not.toContain("request_hash");
-    expect(select).not.toContain("idempotency_key");
-    expect(select).not.toContain("key_digest");
+    expect(rpc).toHaveBeenCalledWith("agent_api_list_audit", {
+      p_member_id: MEMBER_ID,
+    });
+    expect(from).not.toHaveBeenCalled();
     expect(result[0]).toMatchObject({
       id: auditRow.id,
       key: { id: context.apiKeyId, prefix: context.keyPrefix },
@@ -587,20 +791,15 @@ describe("read repository DTOs and queries", () => {
   });
 
   it("does not use historical audit ownership to determine audit visibility", async () => {
-    const { client, queries } = clientFor({
-      agent_api_audit_log: { data: [] },
-    });
+    const { client, rpc } = rpcClient([]);
 
     await createReadRepository(client).listAudit(context, {});
 
-    expect(queries.agent_api_audit_log.eq).not.toHaveBeenCalledWith(
-      "member_id",
-      MEMBER_ID,
-    );
-    expect(queries.agent_api_audit_log.eq).not.toHaveBeenCalledWith(
-      "api_key_id",
-      context.apiKeyId,
-    );
+    expect(rpc).toHaveBeenCalledWith("agent_api_list_audit", {
+      p_member_id: MEMBER_ID,
+    });
+    expect(rpc.mock.calls[0][1]).not.toHaveProperty("member_id");
+    expect(rpc.mock.calls[0][1]).not.toHaveProperty("api_key_id");
   });
 
   it("returns safe query failures without leaking Supabase errors", async () => {

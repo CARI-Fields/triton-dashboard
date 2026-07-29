@@ -197,3 +197,130 @@ the shared assignee module; Task 7 did not add or alter those writes.
 - Next.js continues to print the existing multiple-lockfile workspace-root
   inference warning.
 - No new contract blocker or unresolved functional concern remains.
+
+## Fix Round 1 — Hardened Read Semantics
+
+### Outcome
+
+The four review findings were fixed:
+
+- Audit reads now use the service-role-only
+  `agent_api_list_audit(p_member_id)` RPC. It filters through the current live
+  `task_assignees` row before returning an audit entry, does not add an
+  `agent_api_audit_log.task_id -> tasks.id` foreign key, and never projects
+  `key_digest`, `request_hash`, or `idempotency_key`.
+- Experiment DTOs now explicitly allowlist their embedded Task and Owner and
+  normalize the real RPC `{}` defaults for `data_spec`, `object_spec`,
+  `environment_spec`, `config`, `metrics`, and `featured_metric_keys`.
+  Normalized responses satisfy the strict Experiment PATCH parser.
+- Board summary now uses the service-role-only
+  `agent_api_board_summary()` aggregate RPC. Exact counts no longer depend on
+  PostgREST's configured `max_rows = 1000`.
+- Both RPCs are `SECURITY INVOKER`, use `search_path = ''`, revoke execution
+  from `PUBLIC`, `anon`, and `authenticated`, and grant execution only to
+  `service_role`.
+
+The database changes are in the CLI-generated migration
+`20260729083128_harden_agent_api_reads.sql`.
+
+### RED evidence
+
+The new repository regressions initially failed 6 of 42 tests:
+
+```text
+Test Files 1 failed (1)
+Tests 6 failed | 36 passed (42)
+```
+
+They demonstrated direct table reads for Board and audit, non-safe Board error
+handling, and leaked nested Task fields in Experiment list/detail DTOs.
+
+The new database security/behavior test initially failed because
+`agent_api_list_audit(uuid)` and `agent_api_board_summary()` did not exist.
+After the production migration was added, the first SQL GREEN attempt exposed
+two fixture-only errors: the plan declared 19 rather than 20 assertions, and
+the generated Task range produced 902 rather than 1001 `todo` rows. The
+fixture was corrected to compare against seeded baseline counts without
+relaxing any production assertion.
+
+### GREEN evidence
+
+Focused repository:
+
+```text
+Test Files 1 passed (1)
+Tests 42 passed (42)
+```
+
+Focused read surface:
+
+```text
+Test Files 3 passed (3)
+Tests 154 passed (154)
+```
+
+Full application suite:
+
+```text
+Test Files 37 passed (37)
+Tests 562 passed (562)
+```
+
+Other application gates:
+
+```text
+npx tsc --noEmit
+exit 0
+
+npm run build
+exit 0
+Next.js 16.2.10 compiled successfully
+all ten Agent read routes emitted
+```
+
+Canonical Agent API pgTAP, including the new read tests:
+
+```text
+Files=4, Tests=97
+Result: PASS
+```
+
+The standalone non-pgTAP Experiment workspace migration smoke also completed
+`BEGIN / DO / ROLLBACK`. The concurrency wrapper passed 10/10, and the
+historical grant-upgrade wrapper passed both its 3/3 prior-state and 9/9
+corrected-state phases.
+
+The new 20-assertion read RPC test covers:
+
+- function existence and service-role-only execution;
+- absence of an audit-to-Task foreign key;
+- empty visibility without a live assignment;
+- visibility for a current collaborator independent of historical audit
+  Member/Key ownership;
+- removal immediately hiding prior audit entries;
+- exact audit projection with secret fields excluded;
+- audit survival after Task deletion, with the deleted Task no longer visible;
+- exact Board counts above the PostgREST 1000-row response ceiling.
+
+### Real local PostgREST smoke
+
+Using the local service-role and anonymous credentials without printing either
+secret:
+
+```text
+PASS service summary tasks=3; service audit rows=0; anonymous denied=42501
+```
+
+This verifies both RPCs through the Data API rather than only through direct
+Postgres execution.
+
+### Final audit
+
+`git diff --check` passed. Production scans found no wildcard projection,
+secret field projection, permissive CORS, debug logging, Agent write/delete
+route, or `SECURITY DEFINER` function in this fix.
+
+The Supabase security/performance advisor reported only the repository's
+pre-existing mutable search paths on `set_experiment_status_timestamps` and
+`set_updated_at`, plus the pre-existing broad authenticated RLS policies. The
+two new RPCs produced no advisor warning.

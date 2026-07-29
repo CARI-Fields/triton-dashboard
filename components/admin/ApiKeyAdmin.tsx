@@ -12,11 +12,13 @@ import {
   type ApiScope,
 } from "@/lib/agent-api/types";
 import {
+  isDeletedManagedKey,
   isManagedKeyView,
   isManagedKeyViewArray,
   isManagedKeyWithSecret,
 } from "@/lib/agent-api/admin-key-dto";
 import type {
+  DeletedManagedKey,
   ManagedKeyInput,
   ManagedKeyView,
   ManagedKeyWithSecret,
@@ -710,6 +712,53 @@ export default function ApiKeyAdmin() {
     }
   }
 
+  async function deleteKey(key: ManagedKeyView) {
+    if (
+      creating
+      || loading
+      || sessionInvalid.current
+      || rotationUncertain
+      || pendingId !== null
+      || key.revoked_at === null
+      || key.last_used_at !== null
+    ) {
+      return;
+    }
+    const operation = beginMutationOperation();
+    if (!operation) return;
+    if (!window.confirm(
+      `Delete revoked API key “${key.name}”? `
+        + "This permanently removes the record and cannot be undone.",
+    )) {
+      operation.finish();
+      return;
+    }
+    setPendingId(key.id);
+    setError(null);
+    try {
+      const deleted = await adminRequest<DeletedManagedKey>(
+        `/api/admin/v1/api-keys/${key.id}`,
+        { method: "DELETE" },
+        "Could not delete the API key.",
+        operation,
+        isDeletedManagedKey,
+      );
+      if (!operation.isCurrent()) return;
+      setKeys((current) => current.filter(
+        (candidate) => candidate.id !== deleted.id,
+      ));
+    } catch (reason) {
+      await handleRequestFailure(
+        reason,
+        "Could not delete the API key.",
+        operation,
+      );
+    } finally {
+      operation.finish();
+      if (operation.isCurrent()) setPendingId(null);
+    }
+  }
+
   async function copySecret() {
     if (!oneTimeSecret) return;
     try {
@@ -894,6 +943,7 @@ export default function ApiKeyAdmin() {
               || creating
               || pendingId !== null;
             const status = managedKeyStatus(key, clockNow);
+            const deleteReasonId = `api-key-delete-reason-${key.id}`;
             return (
               <article
                 className="panel api-key-card"
@@ -1066,6 +1116,29 @@ export default function ApiKeyAdmin() {
                           >
                             {busy ? "Working…" : "Revoke"}
                           </button>
+                        </>
+                      )}
+                      {status === "revoked" && (
+                        <>
+                          <button
+                            className="btn api-key-revoke"
+                            type="button"
+                            disabled={controlsBusy || key.last_used_at !== null}
+                            aria-label={`Delete ${key.name}`}
+                            aria-describedby={
+                              key.last_used_at !== null
+                                ? deleteReasonId
+                                : undefined
+                            }
+                            onClick={() => void deleteKey(key)}
+                          >
+                            {busy ? "Working…" : "Delete"}
+                          </button>
+                          {key.last_used_at !== null && (
+                            <span className="muted" id={deleteReasonId}>
+                              Previously used keys cannot be deleted.
+                            </span>
+                          )}
                         </>
                       )}
                     </div>

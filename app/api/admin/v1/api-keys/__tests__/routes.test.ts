@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentApiError } from "@/lib/agent-api/errors";
 
 const mocks = vi.hoisted(() => ({
   authenticateAdmin: vi.fn(),
   createManagedKey: vi.fn(),
   createStore: vi.fn(),
+  deleteManagedKey: vi.fn(),
   getServerSupabase: vi.fn(),
   listManagedKeys: vi.fn(),
   patchManagedKey: vi.fn(),
@@ -21,6 +23,7 @@ vi.mock("@/lib/agent-api/server", () => ({
 vi.mock("@/lib/agent-api/admin-keys", () => ({
   createManagedKey: mocks.createManagedKey,
   createSupabaseManagedKeyStore: mocks.createStore,
+  deleteManagedKey: mocks.deleteManagedKey,
   listManagedKeys: mocks.listManagedKeys,
   patchManagedKey: mocks.patchManagedKey,
   revokeManagedKey: mocks.revokeManagedKey,
@@ -77,6 +80,7 @@ describe("Admin API key Route Handlers", () => {
       secret: "tb_live_AAECAwQF_one-time-secret",
     });
     mocks.patchManagedKey.mockResolvedValue(VIEW);
+    mocks.deleteManagedKey.mockResolvedValue({ id: KEY_ID });
     mocks.rotateManagedKey.mockResolvedValue({
       ...VIEW,
       secret: "tb_live_AAECAwQF_rotated-secret",
@@ -87,13 +91,12 @@ describe("Admin API key Route Handlers", () => {
     });
   });
 
-  it("exports only the designed methods and no DELETE handler", () => {
+  it("exports only the designed methods", () => {
     expect(Object.keys(collectionRoute).sort()).toEqual(["GET", "POST"]);
-    expect(Object.keys(itemRoute)).toEqual(["PATCH"]);
+    expect(Object.keys(itemRoute).sort()).toEqual(["DELETE", "PATCH"]);
     expect(Object.keys(rotateRoute)).toEqual(["POST"]);
     expect(Object.keys(revokeRoute)).toEqual(["POST"]);
     expect("DELETE" in collectionRoute).toBe(false);
-    expect("DELETE" in itemRoute).toBe(false);
   });
 
   it("authenticates every handler and awaits dynamic ids", async () => {
@@ -107,26 +110,35 @@ describe("Admin API key Route Handlers", () => {
       collectionRoute.GET(request("GET")),
       collectionRoute.POST(request("POST", body)),
       itemRoute.PATCH(request("PATCH", { name: "Renamed" }), params()),
+      itemRoute.DELETE(request("DELETE"), params()),
       rotateRoute.POST(request("POST"), params()),
       revokeRoute.POST(request("POST"), params()),
     ]);
+    const bodies = await Promise.all(
+      responses.map((response) => response.json()),
+    );
 
-    expect(mocks.authenticateAdmin).toHaveBeenCalledTimes(5);
+    expect(mocks.authenticateAdmin).toHaveBeenCalledTimes(6);
     expect(mocks.authenticateAdmin.mock.calls.map(([value]) => (
       (value as Request).headers.get("authorization")
-    ))).toEqual(Array(5).fill("Bearer admin-session"));
+    ))).toEqual(Array(6).fill("Bearer admin-session"));
     expect(mocks.createManagedKey).toHaveBeenCalledWith(STORE, ADMIN, body);
     expect(mocks.patchManagedKey).toHaveBeenCalledWith(
       STORE,
       KEY_ID,
       { name: "Renamed" },
     );
+    expect(mocks.deleteManagedKey).toHaveBeenCalledWith(STORE, KEY_ID);
     expect(mocks.rotateManagedKey).toHaveBeenCalledWith(STORE, KEY_ID);
     expect(mocks.revokeManagedKey).toHaveBeenCalledWith(STORE, KEY_ID);
-    for (const response of responses) {
+    expect(bodies[3]).toMatchObject({
+      data: { id: KEY_ID },
+      meta: { request_id: expect.stringMatching(/^req_/) },
+    });
+    for (const [index, response] of responses.entries()) {
       expect(response.ok).toBe(true);
       expect(response.headers.get("cache-control")).toBe("no-store");
-      expect((await response.json()).meta.request_id).toMatch(/^req_/);
+      expect(bodies[index].meta.request_id).toMatch(/^req_/);
     }
     expect(responses[1].status).toBe(201);
   });
@@ -153,5 +165,31 @@ describe("Admin API key Route Handlers", () => {
     expect(failed.headers.get("cache-control")).toBe("no-store");
     expect(serialized).not.toContain("sb_secret_do_not_expose");
     expect(serialized).not.toContain("SUPABASE_SECRET_KEY");
+  });
+
+  it("serializes delete conflicts and hides internal database details", async () => {
+    mocks.deleteManagedKey.mockRejectedValueOnce(new AgentApiError(
+      409,
+      "API_KEY_HAS_AUDIT_HISTORY",
+      "API keys with audit history cannot be deleted.",
+    ));
+    const conflict = await itemRoute.DELETE(request("DELETE"), params());
+    expect(conflict.status).toBe(409);
+    expect(conflict.headers.get("cache-control")).toBe("no-store");
+    expect(await conflict.json()).toMatchObject({
+      error: {
+        code: "API_KEY_HAS_AUDIT_HISTORY",
+        message: "API keys with audit history cannot be deleted.",
+        request_id: expect.stringMatching(/^req_/),
+      },
+    });
+
+    mocks.deleteManagedKey.mockRejectedValueOnce(
+      new Error("private database detail"),
+    );
+    const failed = await itemRoute.DELETE(request("DELETE"), params());
+    const serialized = JSON.stringify(await failed.json());
+    expect(failed.status).toBe(500);
+    expect(serialized).not.toContain("private database detail");
   });
 });

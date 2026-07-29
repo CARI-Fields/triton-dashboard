@@ -42,6 +42,16 @@ const VIEW: ManagedKeyView = {
   last_used_at: null,
   created_at: "2026-07-29T12:00:00.000Z",
 };
+const REVOKED_VIEW: ManagedKeyView = {
+  ...VIEW,
+  revoked_at: "2026-07-29T14:00:00.000Z",
+};
+const USED_REVOKED_VIEW: ManagedKeyView = {
+  ...REVOKED_VIEW,
+  id: "40000000-0000-4000-8000-000000000002",
+  name: "Previously used revoked key",
+  last_used_at: "2026-07-29T13:00:00.000Z",
+};
 const CREATE_SECRET =
   "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const INTERNAL_PREFIX_MISMATCH_SECRET =
@@ -120,6 +130,11 @@ function installFetch(initial = [VIEW]) {
     expect(new Headers(init?.headers).get("authorization"))
       .toBe("Bearer current-access-token");
     if (method === "GET") return envelope(rows);
+    if (method === "DELETE") {
+      const id = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
+      rows = rows.filter((row) => row.id !== id);
+      return envelope({ id });
+    }
     if (method === "POST" && url.endsWith("/rotate")) {
       rows = [{ ...rows[0], key_prefix: ROTATE_PREFIX }];
       return envelope({ ...rows[0], secret: ROTATE_SECRET });
@@ -1759,6 +1774,117 @@ describe("ApiKeyAdmin", () => {
     expect(screen.getByRole("button", {
       name: "Dismiss secret",
     })).toBeDefined();
+  });
+
+  it("shows Delete only for revoked keys and explains used-key ineligibility", async () => {
+    installFetch([VIEW, USED_REVOKED_VIEW]);
+    render(<ApiKeyAdmin />);
+
+    const active = await screen.findByRole("article", {
+      name: "Bruce experiments",
+    });
+    expect(within(active).queryByRole("button", {
+      name: "Delete Bruce experiments",
+    })).toBeNull();
+
+    const used = screen.getByRole("article", {
+      name: "Previously used revoked key",
+    });
+    const button = within(used).getByRole("button", {
+      name: "Delete Previously used revoked key",
+    }) as HTMLButtonElement;
+    const reason = within(used).getByText(
+      "Previously used keys cannot be deleted.",
+    );
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-describedby")).toBe(reason.id);
+    fireEvent.click(button);
+    expect(window.confirm).not.toHaveBeenCalled();
+  });
+
+  it("cancels then permanently deletes an eligible revoked key", async () => {
+    const confirm = vi.mocked(window.confirm);
+    confirm.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const fetchMock = installFetch([REVOKED_VIEW]);
+    render(<ApiKeyAdmin />);
+    const card = await screen.findByRole("article", {
+      name: "Bruce experiments",
+    });
+    const button = within(card).getByRole("button", {
+      name: "Delete Bruce experiments",
+    });
+
+    fireEvent.click(button);
+    expect(confirm).toHaveBeenNthCalledWith(
+      1,
+      "Delete revoked API key “Bruce experiments”? "
+        + "This permanently removes the record and cannot be undone.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("article", {
+      name: "Bruce experiments",
+    })).toBeDefined();
+
+    fireEvent.click(button);
+    expect(await screen.findByText("No API keys yet.")).toBeDefined();
+    const deleteCall = fetchMock.mock.calls.find(([, init]) => (
+      init?.method === "DELETE"
+    ));
+    expect(String(deleteCall?.[0])).toBe(
+      `/api/admin/v1/api-keys/${KEY_ID}`,
+    );
+    expect(deleteCall?.[1]?.body).toBeUndefined();
+  });
+
+  it("keeps the card when audit history blocks deletion", async () => {
+    const fetchMock = installFetch([REVOKED_VIEW]);
+    fetchMock
+      .mockImplementationOnce(async () => envelope([REVOKED_VIEW]))
+      .mockImplementationOnce(async () => errorEnvelope(
+        409,
+        "API_KEY_HAS_AUDIT_HISTORY",
+        "API keys with audit history cannot be deleted.",
+      ));
+    render(<ApiKeyAdmin />);
+    const card = await screen.findByRole("article", {
+      name: "Bruce experiments",
+    });
+
+    fireEvent.click(within(card).getByRole("button", {
+      name: "Delete Bruce experiments",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "API keys with audit history cannot be deleted.",
+    );
+    expect(screen.getByRole("article", {
+      name: "Bruce experiments",
+    })).toBeDefined();
+  });
+
+  it("atomically guards duplicate deletes and ignores completion after unmount", async () => {
+    const deletion = deferred<Response>();
+    const confirm = vi.mocked(window.confirm);
+    const fetchMock = installFetch([REVOKED_VIEW]);
+    fetchMock
+      .mockImplementationOnce(async () => envelope([REVOKED_VIEW]))
+      .mockImplementationOnce(() => deletion.promise);
+    const { unmount } = render(<ApiKeyAdmin />);
+    const button = await screen.findByRole("button", {
+      name: "Delete Bruce experiments",
+    });
+
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    unmount();
+    await act(async () => deletion.resolve(envelope({ id: KEY_ID })));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("aborts a pending list request when the component unmounts", async () => {

@@ -80,6 +80,15 @@ export interface ManagedKeyRow {
   created_at: string;
 }
 
+export interface DeletedManagedKey {
+  id: string;
+}
+
+export type ManagedKeyDeleteResult =
+  | { kind: "deleted"; id: string }
+  | { kind: "not_deleted" }
+  | { kind: "audit_conflict" };
+
 interface ManagedKeyInsert {
   name: string;
   key_prefix: string;
@@ -110,6 +119,7 @@ export interface ManagedKeyStore {
     changes: ManagedKeyChanges,
     options?: { onlyActive?: boolean },
   ): Promise<ManagedKeyRow | null>;
+  deleteUnusedRevoked(id: string): Promise<ManagedKeyDeleteResult>;
 }
 
 export type ManagedKeyWithSecret = ManagedKeyView & { secret: string };
@@ -352,6 +362,35 @@ function revoked(): AgentApiError {
   );
 }
 
+function notRevokedForDeletion(): AgentApiError {
+  return new AgentApiError(
+    409,
+    "API_KEY_NOT_REVOKED",
+    "Only revoked API keys can be deleted.",
+  );
+}
+
+function wasUsed(): AgentApiError {
+  return new AgentApiError(
+    409,
+    "API_KEY_WAS_USED",
+    "Previously used API keys cannot be deleted.",
+  );
+}
+
+function hasAuditHistory(): AgentApiError {
+  return new AgentApiError(
+    409,
+    "API_KEY_HAS_AUDIT_HISTORY",
+    "API keys with audit history cannot be deleted.",
+  );
+}
+
+function assertDeleteEligible(row: ManagedKeyRow): void {
+  if (row.revoked_at === null) throw notRevokedForDeletion();
+  if (row.last_used_at !== null) throw wasUsed();
+}
+
 export async function listManagedKeys(
   store: ManagedKeyStore,
 ): Promise<ManagedKeyView[]> {
@@ -444,6 +483,26 @@ export async function revokeManagedKey(
   throw new Error("API key revocation failed.");
 }
 
+export async function deleteManagedKey(
+  store: ManagedKeyStore,
+  id: string,
+): Promise<DeletedManagedKey> {
+  validateId(id);
+  const canonicalId = id.toLowerCase();
+  const existing = await store.get(canonicalId);
+  if (!existing) throw notFound();
+  assertDeleteEligible(checkedRow(existing));
+
+  const result = await store.deleteUnusedRevoked(canonicalId);
+  if (result.kind === "deleted") return { id: result.id };
+  if (result.kind === "audit_conflict") throw hasAuditHistory();
+
+  const current = await store.get(canonicalId);
+  if (!current) throw notFound();
+  assertDeleteEligible(checkedRow(current));
+  throw new Error("API key deletion failed.");
+}
+
 export function createSupabaseManagedKeyStore(
   client: SupabaseClient,
 ): ManagedKeyStore {
@@ -502,6 +561,28 @@ export function createSupabaseManagedKeyStore(
         .maybeSingle();
       if (error) throw queryError();
       return data === null ? null : checkedRow(data);
+    },
+
+    async deleteUnusedRevoked(id) {
+      const { data, error } = await client
+        .from("api_keys")
+        .delete()
+        .eq("id", id)
+        .not("revoked_at", "is", null)
+        .is("last_used_at", null)
+        .select("id")
+        .maybeSingle();
+      if (error?.code === "23503") return { kind: "audit_conflict" };
+      if (error) throw queryError();
+      if (data === null) return { kind: "not_deleted" };
+      if (
+        !isRecord(data)
+        || Object.keys(data).length !== 1
+        || data.id !== id
+      ) {
+        throw queryError();
+      }
+      return { kind: "deleted", id };
     },
   };
 }

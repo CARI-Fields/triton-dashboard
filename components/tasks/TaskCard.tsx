@@ -147,17 +147,15 @@ export default function TaskCard({
   return (
     <article className="task-card">
       <div className="task-card-head">
-        <div className="task-card-heading">
-          <span
-            className={`task-card-type ${type ? "" : "is-empty"}`}
-            title={type?.name ?? "No type"}
-          >
-            {type?.name ?? "No type"}
-          </span>
-          <Link href={`/task/${task.id}`} className="task-card-title">
-            {task.title}
-          </Link>
-        </div>
+        <span
+          className={`task-card-type ${type ? "" : "is-empty"}`}
+          title={type?.name ?? "No type"}
+        >
+          {type?.name ?? "No type"}
+        </span>
+        <Link href={`/task/${task.id}`} className="task-card-title">
+          {task.title}
+        </Link>
         <div className="task-card-menu" ref={actionsRef}>
           <button
             ref={triggerRef}

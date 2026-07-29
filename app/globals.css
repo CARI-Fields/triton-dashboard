@@ -1713,19 +1713,17 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   background: var(--surface-hover);
 }
 .task-card-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-.task-card-heading {
   display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: flex-start;
+  column-gap: 8px;
+  row-gap: 4px;
 }
 .task-card-title {
+  grid-column: 1 / -1;
+  grid-row: 2;
   min-width: 0;
-  flex: 1;
   color: var(--text-primary);
   font-size: 13.5px;
   font-weight: 625;
@@ -1737,6 +1735,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .task-card-menu {
   position: relative;
+  grid-column: 2;
+  grid-row: 1;
   margin: -3px -5px 0 0;
 }
 .task-actions-trigger {
@@ -1784,8 +1784,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   color: var(--status-blocked-foreground);
 }
 .task-card-type {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
   max-width: min(112px, 40%);
-  flex: 0 1 auto;
   overflow: hidden;
   padding: 1px 6px;
   border-radius: 4px;
@@ -1802,7 +1804,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .task-card-type.is-empty {
   background: var(--surface-hover);
-  color: var(--text-tertiary);
+  color: var(--status-todo-foreground);
 }
 .task-card-tags {
   display: flex;
@@ -1819,8 +1821,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .task-card-owners {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   min-width: 0;
+  overflow: hidden;
 }
 .task-card-owners .owner-avatar + .owner-avatar {
   margin-left: -6px;
@@ -1854,7 +1858,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .task-card-updated {
   display: block;
   margin: 0;
-  color: var(--text-tertiary);
+  color: var(--status-todo-foreground);
   font-family: var(--mono);
   font-size: 10px;
   white-space: nowrap;

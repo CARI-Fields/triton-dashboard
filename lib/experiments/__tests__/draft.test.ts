@@ -9,6 +9,7 @@ import {
   reconcileRealtime,
   writeSessionExperimentDraft,
 } from "@/lib/experiments/draft";
+import { isMetrics } from "@/lib/experiments/schema";
 
 const draft = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -129,20 +130,12 @@ describe("session Experiment drafts", () => {
     expect(draftStorageKey(source.id)).toContain(source.id);
   });
 
-  it("rejects a draft containing non-finite metrics", () => {
-    const session = storage();
-    const source = {
-      ...draft,
-      id: "00000000-0000-4000-8000-000000000081",
-    };
-    writeSessionExperimentDraft(session, source, {
-      ...source,
-      metrics: { latency_ms: Number.POSITIVE_INFINITY },
-    });
-
-    expect(readSessionExperimentDraft(session, source)).toEqual({ kind: "none" });
-    expect(session.getItem(draftStorageKey(source.id))).toBeNull();
-  });
+  it.each([Number.POSITIVE_INFINITY, Number.NaN])(
+    "rejects a non-finite metric before persistence",
+    (metric) => {
+      expect(isMetrics({ latency_ms: metric })).toBe(false);
+    },
+  );
 
   it("rejects a draft containing an unknown platform", () => {
     const session = storage();

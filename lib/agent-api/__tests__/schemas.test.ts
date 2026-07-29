@@ -37,6 +37,23 @@ const environmentSpec = {
   precision_policy: "fp32",
 };
 
+class TaskPatchBody {
+  changes = { notes: "notes" };
+}
+
+class ExperimentCreateBody {
+  name = "Experiment";
+}
+
+class CustomConfig {}
+
+const cyclicConfig: Record<string, unknown> = {};
+cyclicConfig.self = cyclicConfig;
+
+const sparseSkills = new Array<string>(1);
+const sparseDatasets = new Array<(typeof dataSpec.datasets)[number]>(1);
+const toolsWithExtra = Object.assign(["benchmark"], { extra: "hidden" });
+
 function expectCode(action: () => unknown, code: string): void {
   expect(action).toThrowError(expect.objectContaining({ code }));
 }
@@ -132,6 +149,10 @@ describe("Task PATCH schema", () => {
     expectCode(() => parseTaskPatch({ changes: {} }), "EMPTY_PATCH");
   });
 
+  it("rejects a custom-class Task patch body", () => {
+    expectCode(() => parseTaskPatch(new TaskPatchBody()), "INVALID_BODY");
+  });
+
   it.each([
     [{ title: 1 }, "INVALID_FIELD"],
     [{ status: "paused" }, "INVALID_FIELD"],
@@ -205,6 +226,74 @@ describe("Experiment PATCH schema", () => {
     expectCode(() => parseExperimentPatch({ changes: {} }), "EMPTY_PATCH");
   });
 
+  it("trims a writable Experiment name", () => {
+    expect(parseExperimentPatch({
+      changes: { name: "  Agent experiment  " },
+    })).toEqual({ name: "Agent experiment" });
+  });
+
+  it("accepts Experiment names at the inclusive trimmed boundaries", () => {
+    expect(parseExperimentPatch({ changes: { name: " x " } }))
+      .toEqual({ name: "x" });
+    expect(parseExperimentPatch({
+      changes: { name: ` ${"x".repeat(200)} ` },
+    })).toEqual({ name: "x".repeat(200) });
+  });
+
+  it.each(["   ", "x".repeat(201)])(
+    "rejects an invalid writable Experiment name",
+    (name) => {
+      expect(() => parseExperimentPatch({ changes: { name } })).toThrowError(
+        expect.objectContaining({
+          status: 422,
+          code: "INVALID_FIELD",
+          details: { field: "name" },
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ["Map", new Map()],
+    ["Set", new Set()],
+    ["Date", new Date("2026-07-28T00:00:00.000Z")],
+    ["custom class", new CustomConfig()],
+  ])("rejects a %s as a non-JSON config object", (_label, config) => {
+    expectCode(
+      () => parseExperimentPatch({ changes: { config } }),
+      "INVALID_BODY",
+    );
+  });
+
+  it.each([
+    ["undefined", undefined],
+    ["function", () => "value"],
+    ["symbol", Symbol("value")],
+    ["cycle", cyclicConfig],
+  ])("rejects a non-JSON %s config value", (_label, value) => {
+    expectCode(
+      () => parseExperimentPatch({ changes: { config: { value } } }),
+      "INVALID_BODY",
+    );
+  });
+
+  it.each([
+    ["sparse skills", {
+      object_spec: { ...objectSpec, skills: sparseSkills },
+    }],
+    ["sparse datasets", {
+      data_spec: { datasets: sparseDatasets },
+    }],
+    ["extra array properties", {
+      object_spec: { ...objectSpec, tools: toolsWithExtra },
+    }],
+  ])("rejects %s in nested Experiment specs", (_label, changes) => {
+    expectCode(
+      () => parseExperimentPatch({ changes }),
+      "INVALID_BODY",
+    );
+  });
+
   it.each([
     { name: null },
     { status: "queued" },
@@ -252,6 +341,13 @@ describe("Experiment create schema", () => {
     expectCode(
       () => parseExperimentCreate({ name: "Agent experiment", surprise: true }),
       "UNKNOWN_FIELD",
+    );
+  });
+
+  it("rejects a custom-class Experiment create body", () => {
+    expectCode(
+      () => parseExperimentCreate(new ExperimentCreateBody()),
+      "INVALID_BODY",
     );
   });
 

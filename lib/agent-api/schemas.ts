@@ -137,12 +137,110 @@ export interface ExperimentCreate {
   name: string;
 }
 
+type JsonDomainIssue = "invalid_shape" | "non_finite_number" | null;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function mergeJsonDomainIssues(
+  current: JsonDomainIssue,
+  next: JsonDomainIssue,
+): JsonDomainIssue {
+  if (current === "invalid_shape" || next === "invalid_shape") {
+    return "invalid_shape";
+  }
+  if (current === "non_finite_number" || next === "non_finite_number") {
+    return "non_finite_number";
+  }
+  return null;
+}
+
+function inspectJsonDomainValue(
+  value: unknown,
+  ancestors: WeakSet<object>,
+): JsonDomainIssue {
+  if (
+    value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+  ) {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? null : "non_finite_number";
+  }
+  if (typeof value !== "object") return "invalid_shape";
+  if (ancestors.has(value)) return "invalid_shape";
+
+  ancestors.add(value);
+  try {
+    let issue: JsonDomainIssue = null;
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) {
+        return "invalid_shape";
+      }
+      const keys = Reflect.ownKeys(value);
+      if (keys.length !== value.length + 1 || !keys.includes("length")) {
+        return "invalid_shape";
+      }
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (
+          !descriptor
+          || !descriptor.enumerable
+          || !("value" in descriptor)
+        ) {
+          return "invalid_shape";
+        }
+        issue = mergeJsonDomainIssues(
+          issue,
+          inspectJsonDomainValue(descriptor.value, ancestors),
+        );
+        if (issue === "invalid_shape") return issue;
+      }
+      return issue;
+    }
+
+    if (!isPlainObject(value)) return "invalid_shape";
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string") return "invalid_shape";
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        !descriptor
+        || !descriptor.enumerable
+        || !("value" in descriptor)
+      ) {
+        return "invalid_shape";
+      }
+      issue = mergeJsonDomainIssues(
+        issue,
+        inspectJsonDomainValue(descriptor.value, ancestors),
+      );
+      if (issue === "invalid_shape") return issue;
+    }
+    return issue;
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function inspectJsonDomain(value: unknown): JsonDomainIssue {
+  try {
+    return inspectJsonDomainValue(value, new WeakSet());
+  } catch {
+    return "invalid_shape";
+  }
 }
 
 function hasOnlyFields(
@@ -247,6 +345,10 @@ export async function readJsonObject(
 }
 
 export function parseTaskPatch(body: unknown): TaskPatch {
+  const jsonDomainIssue = inspectJsonDomain(body);
+  if (jsonDomainIssue === "invalid_shape") {
+    return invalidBody("PATCH body must contain only JSON values.");
+  }
   const changes = parsePatchEnvelope(body);
   const parsed: TaskPatch = {};
 
@@ -278,10 +380,17 @@ export function parseTaskPatch(body: unknown): TaskPatch {
         break;
     }
   }
+  if (jsonDomainIssue !== null) {
+    return invalidBody("PATCH body must contain only finite JSON numbers.");
+  }
   return parsed;
 }
 
 export function parseExperimentPatch(body: unknown): ExperimentPatch {
+  const jsonDomainIssue = inspectJsonDomain(body);
+  if (jsonDomainIssue === "invalid_shape") {
+    return invalidBody("PATCH body must contain only JSON values.");
+  }
   const changes = parsePatchEnvelope(body);
   const parsed: ExperimentPatch = {};
 
@@ -294,7 +403,10 @@ export function parseExperimentPatch(body: unknown): ExperimentPatch {
     switch (field) {
       case "name":
         if (typeof value !== "string") invalidField(field);
-        parsed.name = value;
+        parsed.name = value.trim();
+        if (parsed.name.length < 1 || parsed.name.length > 200) {
+          invalidField(field);
+        }
         break;
       case "status":
         if (
@@ -383,10 +495,19 @@ export function parseExperimentPatch(body: unknown): ExperimentPatch {
         break;
     }
   }
+  if (jsonDomainIssue !== null) {
+    return invalidBody("PATCH body must contain only finite JSON numbers.");
+  }
   return parsed;
 }
 
 export function parseExperimentCreate(body: unknown): ExperimentCreate {
+  const jsonDomainIssue = inspectJsonDomain(body);
+  if (jsonDomainIssue === "invalid_shape") {
+    return invalidBody(
+      "Experiment create body must contain only JSON values.",
+    );
+  }
   if (!isRecord(body)) {
     return invalidBody("Experiment create body must be a JSON object.");
   }
@@ -417,6 +538,11 @@ export function parseExperimentCreate(body: unknown): ExperimentCreate {
   const name = body.name.trim();
   if (name.length < 1 || name.length > 200) {
     return invalidField("name");
+  }
+  if (jsonDomainIssue !== null) {
+    return invalidBody(
+      "Experiment create body must contain only finite JSON numbers.",
+    );
   }
   return { name };
 }

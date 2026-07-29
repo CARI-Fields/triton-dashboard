@@ -502,6 +502,60 @@ describe("workspace visual contracts", () => {
       .toMatch(/max-height\s*:\s*none/);
   });
 
+  it("gives detail titles the full row and keeps metadata and controls centered in normal flow", () => {
+    const taskHeader = ruleBody(globals, ".task-detail-page .page-header");
+    expect(taskHeader).toMatch(/position\s*:\s*relative/);
+    expect(taskHeader).toMatch(/display\s*:\s*block/);
+
+    const taskActions = ruleBody(
+      globals,
+      ".task-detail-page .page-actions",
+    );
+    expect(taskActions).toMatch(/position\s*:\s*absolute/);
+    expect(taskActions).toMatch(/right\s*:\s*0/);
+
+    const taskTitle = ruleBody(
+      globals,
+      ".task-detail-page .page-header h1",
+    );
+    expect(taskTitle).toMatch(/width\s*:\s*100%/);
+    expect(taskTitle).toMatch(/max-width\s*:\s*none/);
+    expect(taskTitle).toMatch(/text-wrap\s*:\s*wrap/);
+
+    const taskMetadata = ruleBody(globals, ".task-properties");
+    expect(taskMetadata).toMatch(/width\s*:\s*min\(880px,\s*100%\)/);
+    expect(taskMetadata).toMatch(/margin\s*:\s*[^;]*auto/);
+
+    const css = workspaceCss();
+    const experimentTitle = ruleBody(
+      css,
+      ".experiment-detail-page .page-header h1",
+    );
+    expect(experimentTitle).toMatch(/width\s*:\s*100%/);
+    expect(experimentTitle).toMatch(/max-width\s*:\s*none/);
+    expect(experimentTitle).toMatch(/text-wrap\s*:\s*wrap/);
+
+    const experimentMetadata = ruleBody(css, ".experiment-properties");
+    expect(experimentMetadata).toMatch(
+      /width\s*:\s*min\(880px,\s*100%\)/,
+    );
+    expect(experimentMetadata).toMatch(/margin\s*:\s*[^;]*auto/);
+
+    const anchors = ruleBody(css, ".section-anchors");
+    expect(anchors).toMatch(/position\s*:\s*static/);
+    expect(anchors).toMatch(/width\s*:\s*min\(880px,\s*100%\)/);
+    expect(anchors).toMatch(/margin\s*:\s*[^;]*auto/);
+    expect(anchors).not.toMatch(/\btop\s*:/);
+    expect(anchors).not.toMatch(/\bz-index\s*:/);
+
+    const saveBar = ruleBody(css, ".experiment-save-bar");
+    expect(saveBar).toMatch(/position\s*:\s*static/);
+    expect(saveBar).toMatch(/width\s*:\s*min\(880px,\s*100%\)/);
+    expect(saveBar).toMatch(/margin\s*:\s*[^;]*auto/);
+    expect(saveBar).not.toMatch(/\bbottom\s*:/);
+    expect(saveBar).not.toMatch(/\bz-index\s*:/);
+  });
+
   it("pins the desktop Task Board and gives every column a hidden independent scrollbar", () => {
     const documentRoot = ruleBody(globals, "html, body");
     expect(documentRoot).toMatch(/height\s*:\s*100%/);

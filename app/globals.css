@@ -2353,12 +2353,34 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   margin-bottom: 10px;
 }
 .task-detail-page .page-header {
+  position: relative;
+  display: block;
   min-height: 142px;
   padding-block: 22px 24px;
 }
+.task-detail-page .page-header-copy {
+  width: 100%;
+  min-width: 0;
+}
+.task-detail-page .page-header .eyebrow {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-right: 184px;
+}
 .task-detail-page .page-header h1 {
+  width: 100%;
+  max-width: none;
   font-size: clamp(30px, 3.2vw, 42px);
   letter-spacing: -0.025em;
+  text-wrap: wrap;
+}
+.task-detail-page .page-actions {
+  position: absolute;
+  top: 22px;
+  right: 0;
+  align-items: center;
 }
 .task-detail-page .page-header h1 .editable {
   display: inline-block;
@@ -2432,8 +2454,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 
 .task-properties {
-  max-width: 760px;
-  margin: 8px 0 12px;
+  width: min(880px, 100%);
+  max-width: none;
+  margin: 18px auto 22px;
   padding: 0;
   border-block: 1px solid var(--border);
 }
@@ -2966,7 +2989,19 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
     padding: 24px 18px 64px;
   }
   .task-detail-page .page-header {
+    position: static;
+    display: flex;
     min-height: 0;
+  }
+  .task-detail-page .page-header .eyebrow {
+    min-height: 0;
+    margin-bottom: 14px;
+    padding-right: 0;
+  }
+  .task-detail-page .page-actions {
+    position: static;
+    width: 100%;
+    justify-content: flex-start;
   }
   .task-property {
     grid-template-columns: 88px minmax(0, 1fr);

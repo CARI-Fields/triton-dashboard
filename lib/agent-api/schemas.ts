@@ -138,6 +138,9 @@ export interface ExperimentCreate {
 }
 
 type JsonDomainIssue = "invalid_shape" | "non_finite_number" | null;
+type JsonInspectionFrame =
+  | { kind: "enter"; value: unknown }
+  | { kind: "exit"; value: object };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -153,49 +156,66 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-function mergeJsonDomainIssues(
-  current: JsonDomainIssue,
-  next: JsonDomainIssue,
-): JsonDomainIssue {
-  if (current === "invalid_shape" || next === "invalid_shape") {
-    return "invalid_shape";
-  }
-  if (current === "non_finite_number" || next === "non_finite_number") {
-    return "non_finite_number";
-  }
-  return null;
-}
-
-function inspectJsonDomainValue(
-  value: unknown,
-  ancestors: WeakSet<object>,
-): JsonDomainIssue {
-  if (
-    value === null
-    || typeof value === "string"
-    || typeof value === "boolean"
-  ) {
-    return null;
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? null : "non_finite_number";
-  }
-  if (typeof value !== "object") return "invalid_shape";
-  if (ancestors.has(value)) return "invalid_shape";
-
-  ancestors.add(value);
+function inspectJsonDomain(value: unknown): JsonDomainIssue {
+  const ancestors = new WeakSet<object>();
+  const stack: JsonInspectionFrame[] = [{ kind: "enter", value }];
+  let issue: JsonDomainIssue = null;
   try {
-    let issue: JsonDomainIssue = null;
-    if (Array.isArray(value)) {
-      if (Object.getPrototypeOf(value) !== Array.prototype) {
+    while (stack.length > 0) {
+      const frame = stack.pop()!;
+      if (frame.kind === "exit") {
+        ancestors.delete(frame.value);
+        continue;
+      }
+
+      const current = frame.value;
+      if (
+        current === null
+        || typeof current === "string"
+        || typeof current === "boolean"
+      ) {
+        continue;
+      }
+      if (typeof current === "number") {
+        if (!Number.isFinite(current)) issue = "non_finite_number";
+        continue;
+      }
+      if (typeof current !== "object" || ancestors.has(current)) {
         return "invalid_shape";
       }
-      const keys = Reflect.ownKeys(value);
-      if (keys.length !== value.length + 1 || !keys.includes("length")) {
-        return "invalid_shape";
+
+      ancestors.add(current);
+      stack.push({ kind: "exit", value: current });
+
+      if (Array.isArray(current)) {
+        if (Object.getPrototypeOf(current) !== Array.prototype) {
+          return "invalid_shape";
+        }
+        const keys = Reflect.ownKeys(current);
+        if (keys.length !== current.length + 1 || !keys.includes("length")) {
+          return "invalid_shape";
+        }
+        for (let index = 0; index < current.length; index += 1) {
+          const descriptor = Object.getOwnPropertyDescriptor(
+            current,
+            String(index),
+          );
+          if (
+            !descriptor
+            || !descriptor.enumerable
+            || !("value" in descriptor)
+          ) {
+            return "invalid_shape";
+          }
+          stack.push({ kind: "enter", value: descriptor.value });
+        }
+        continue;
       }
-      for (let index = 0; index < value.length; index += 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+
+      if (!isPlainObject(current)) return "invalid_shape";
+      for (const key of Reflect.ownKeys(current)) {
+        if (typeof key !== "string") return "invalid_shape";
+        const descriptor = Object.getOwnPropertyDescriptor(current, key);
         if (
           !descriptor
           || !descriptor.enumerable
@@ -203,41 +223,10 @@ function inspectJsonDomainValue(
         ) {
           return "invalid_shape";
         }
-        issue = mergeJsonDomainIssues(
-          issue,
-          inspectJsonDomainValue(descriptor.value, ancestors),
-        );
-        if (issue === "invalid_shape") return issue;
+        stack.push({ kind: "enter", value: descriptor.value });
       }
-      return issue;
-    }
-
-    if (!isPlainObject(value)) return "invalid_shape";
-    for (const key of Reflect.ownKeys(value)) {
-      if (typeof key !== "string") return "invalid_shape";
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (
-        !descriptor
-        || !descriptor.enumerable
-        || !("value" in descriptor)
-      ) {
-        return "invalid_shape";
-      }
-      issue = mergeJsonDomainIssues(
-        issue,
-        inspectJsonDomainValue(descriptor.value, ancestors),
-      );
-      if (issue === "invalid_shape") return issue;
     }
     return issue;
-  } finally {
-    ancestors.delete(value);
-  }
-}
-
-function inspectJsonDomain(value: unknown): JsonDomainIssue {
-  try {
-    return inspectJsonDomainValue(value, new WeakSet());
   } catch {
     return "invalid_shape";
   }
@@ -269,6 +258,14 @@ function invalidField(field: string): never {
     false,
     { field },
   );
+}
+
+function cloneJsonField<T>(field: string, value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return invalidField(field);
+  }
 }
 
 function validateFieldName(
@@ -431,7 +428,7 @@ export function parseExperimentPatch(body: unknown): ExperimentPatch {
         ) {
           invalidField(field);
         }
-        parsed.data_spec = structuredClone(value);
+        parsed.data_spec = cloneJsonField(field, value);
         break;
       case "object_spec":
         if (
@@ -440,7 +437,7 @@ export function parseExperimentPatch(body: unknown): ExperimentPatch {
         ) {
           invalidField(field);
         }
-        parsed.object_spec = structuredClone(value);
+        parsed.object_spec = cloneJsonField(field, value);
         break;
       case "environment_spec":
         if (
@@ -449,11 +446,11 @@ export function parseExperimentPatch(body: unknown): ExperimentPatch {
         ) {
           invalidField(field);
         }
-        parsed.environment_spec = structuredClone(value);
+        parsed.environment_spec = cloneJsonField(field, value);
         break;
       case "config":
         if (!isConfig(value)) invalidField(field);
-        parsed.config = structuredClone(value);
+        parsed.config = cloneJsonField(field, value);
         break;
       case "notes":
         if (typeof value !== "string") invalidField(field);
@@ -461,7 +458,7 @@ export function parseExperimentPatch(body: unknown): ExperimentPatch {
         break;
       case "metrics":
         if (!isMetrics(value)) invalidField(field);
-        parsed.metrics = structuredClone(value);
+        parsed.metrics = cloneJsonField(field, value);
         break;
       case "featured_metric_keys":
         if (!isStringArray(value)) invalidField(field);

@@ -54,6 +54,14 @@ const sparseSkills = new Array<string>(1);
 const sparseDatasets = new Array<(typeof dataSpec.datasets)[number]>(1);
 const toolsWithExtra = Object.assign(["benchmark"], { extra: "hidden" });
 
+function deepPatchJson(field: string): string {
+  const depth = 6_500;
+  const nested = '{"nested":'.repeat(depth)
+    + "null"
+    + "}".repeat(depth);
+  return `{"changes":{"${field}":${nested}}}`;
+}
+
 function expectCode(action: () => unknown, code: string): void {
   expect(action).toThrowError(expect.objectContaining({ code }));
 }
@@ -104,6 +112,24 @@ describe("readJsonObject", () => {
         status: 400,
         code: "INVALID_BODY",
       });
+    },
+  );
+
+  it.each([
+    ["an unknown field", "surprise", "UNKNOWN_FIELD"],
+    ["an invalid allowed field", "notes", "INVALID_FIELD"],
+  ])(
+    "preserves the 422 classification for deeply nested JSON in %s",
+    async (_label, field, code) => {
+      const request = new Request("https://example.test", {
+        method: "PATCH",
+        body: deepPatchJson(field),
+      });
+      const body = await readJsonObject(request);
+
+      expect(() => parseTaskPatch(body)).toThrowError(
+        expect.objectContaining({ status: 422, code }),
+      );
     },
   );
 });
@@ -292,6 +318,31 @@ describe("Experiment PATCH schema", () => {
       () => parseExperimentPatch({ changes }),
       "INVALID_BODY",
     );
+  });
+
+  it("allows a shared non-cyclic value along separate object paths", () => {
+    const shared = ["triton"];
+    const spec = {
+      ...objectSpec,
+      skills: shared,
+      tools: shared,
+    };
+
+    expect(parseExperimentPatch({
+      changes: { object_spec: spec },
+    })).toEqual({ object_spec: spec });
+  });
+
+  it("maps structured clone failures to a field-specific API error", () => {
+    const config = new Proxy({ batch_size: 8 }, {});
+
+    expect(() => parseExperimentPatch({
+      changes: { config },
+    })).toThrowError(expect.objectContaining({
+      status: 422,
+      code: "INVALID_FIELD",
+      details: { field: "config" },
+    }));
   });
 
   it.each([

@@ -8,7 +8,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY_PREFIX_PATTERN = /^tb_live_[A-Za-z0-9_-]{8}$/;
 const RAW_SECRET_PATTERN =
-  /^tb_live_([A-Za-z0-9_-]{8})_([A-Za-z0-9_-]{43})$/;
+  /^tb_live_([A-Za-z0-9_-]{8})_([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$/;
 const RFC3339_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const VALID_SCOPES = new Set<string>(API_SCOPES);

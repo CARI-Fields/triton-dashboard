@@ -26,6 +26,7 @@ const INTERNAL_PREFIX_MISMATCH =
   "tb_live_CCCCCCCC_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const VIEW_PREFIX_MISMATCH =
   "tb_live_BAECAwQF_BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const CANONICAL_LAST_CHARACTERS = "AEIMQUYcgkosw048";
 
 describe("Admin key response DTO validators", () => {
   it("accepts only the exact ManagedKeyView response shape", () => {
@@ -72,6 +73,33 @@ describe("Admin key response DTO validators", () => {
       secret: SECRET,
       key_digest: "digest-leak-marker",
     })).toBe(false);
+  });
+
+  it("accepts only canonical base64url encodings of 32-byte secrets", () => {
+    for (const [value, expectedLast] of [
+      ...CANONICAL_LAST_CHARACTERS,
+    ].entries()) {
+      const bytes = new Uint8Array(32);
+      bytes[31] = value;
+      const suffix = btoa(String.fromCharCode(...bytes))
+        .replaceAll("+", "-")
+        .replaceAll("/", "_")
+        .replace(/=+$/, "");
+      expect(suffix).toBe(`${"A".repeat(42)}${expectedLast}`);
+      expect(isManagedKeyWithSecret({
+        ...VIEW,
+        key_prefix: "tb_live_AAAAAAAA",
+        secret: `tb_live_AAAAAAAA_${suffix}`,
+      })).toBe(true);
+    }
+
+    for (const invalidLast of ["9", "B", "-", "_"]) {
+      expect(isManagedKeyWithSecret({
+        ...VIEW,
+        key_prefix: "tb_live_AAAAAAAA",
+        secret: `tb_live_AAAAAAAA_${"A".repeat(42)}${invalidLast}`,
+      })).toBe(false);
+    }
   });
 
   it("validates every item in a ManagedKeyView array", () => {

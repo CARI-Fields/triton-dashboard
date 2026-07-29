@@ -352,3 +352,71 @@
   deprecation notice.
 - Next build still emits the existing multiple-lockfile workspace-root
   warning.
+
+## Fix Round 5
+
+### Review fixes
+
+- Tightened the 43-character generated-secret suffix to canonical unpadded
+  base64url for exactly 32 bytes. The final sextet is restricted to
+  `[AEIMQUYcgkosw048]`, whose low two padding bits are zero; the existing
+  internal prefix and DTO `key_prefix` equality checks remain in force. This
+  uses only a browser/Node-compatible regular expression and adds no runtime
+  dependency or permissive decode-only check.
+- Added actual 32-byte vector coverage for all 16 valid final characters.
+  Each vector contains 31 zero bytes and a final byte from 0 through 15 and is
+  independently encoded in the test. Neighboring noncanonical aliases ending
+  in `9`, `B`, `-`, and `_` are rejected even though they decode to the same
+  bytes under permissive decoders.
+- Added create and rotate response regressions for well-shaped but
+  noncanonical secrets. Create uses the safe operation fallback without
+  rendering the credential; rotate treats the malformed 2xx as uncertain,
+  latches recovery, and never exposes the candidate secret.
+- Reworked AuthGate's initial session read into an async
+  `try`/`catch`/`finally` lifecycle with an active guard. Synchronous throws,
+  rejected promises, and resolved Auth errors all finish loading with no
+  session and the fixed `Could not verify your session. Sign in again.`
+  message. Native error and token text are never rendered.
+- The active guard prevents late initial resolve/reject work from mutating
+  state after unmount, and the rejection is always consumed. Auth-state
+  transitions clear the old verification error when a new session arrives, so
+  later logout/login screens do not retain it. Normal initial sessions still
+  render the real child.
+
+### TDD evidence
+
+1. Canonical suffix RED: the direct validator accepted noncanonical final
+   sextets, and create/rotate rendered candidates ending in `_` and `9`.
+   The targeted run failed 3/60. Restricting the final character made the
+   DTO/UI run pass 60/60.
+2. AuthGate RED: 4/7 real-component tests failed for synchronous throw,
+   rejected promise, resolved Auth error, and stale transition error; Vitest
+   also reported two unhandled rejections, including one after unmount.
+   Async containment and the active guard made 7/7 pass with no unhandled
+   errors.
+3. The AuthGate suite directly renders a protected child and exercises valid
+   initial auth plus signed-in, logout, signed-out, login, and signed-in
+   transitions without replacing AuthGate itself.
+
+### Fresh verification
+
+- Focused Task 6/Fix Round 5 tests: 7 files, 91/91 passed, preserving all prior
+  81 focused tests plus ten final-round regressions.
+- Full Vitest suite: 35 files, 499/499 passed.
+- `npx tsc --noEmit`: exit 0.
+- Next.js 16.2.10 production build: exit 0; the Admin page and four Admin API
+  routes were generated.
+- Supabase rollback-only schema regression: 20/20 passed.
+- `git diff --check`: exit 0.
+- Production `auth.getSession()` audit found four call sites and no
+  uncontained synchronous throw or rejected-promise path.
+- Production secret, browser persistence, Authorization logging, runtime
+  Node-only base64 usage, and debug scans: clean.
+- `progress.md` remains unchanged.
+
+### Concerns
+
+- Vitest still emits the repository's existing `vite-tsconfig-paths`
+  deprecation notice.
+- Next build still emits the existing multiple-lockfile workspace-root
+  warning.

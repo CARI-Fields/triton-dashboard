@@ -5,6 +5,9 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { TEAM_EMAIL } from "@/lib/auth";
 
+const SESSION_VERIFICATION_ERROR =
+  "Could not verify your session. Sign in again.";
+
 /**
  * Gate that requires the shared team password before rendering anything.
  * Real security comes from the database RLS (see supabase/migration-auth.sql):
@@ -19,19 +22,44 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    let active = true;
     if (!supabase) {
       setReady(true);
       return;
     }
     const client = supabase;
-    client.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setReady(true);
-    });
+    const readInitialSession = async () => {
+      try {
+        const { data, error: sessionError } =
+          await client.auth.getSession();
+        if (!active) return;
+        if (sessionError) {
+          setSession(null);
+          setError(SESSION_VERIFICATION_ERROR);
+          return;
+        }
+        setSession(data.session);
+        if (data.session) setError(null);
+      } catch {
+        if (!active) return;
+        setSession(null);
+        setError(SESSION_VERIFICATION_ERROR);
+      } finally {
+        if (active) setReady(true);
+      }
+    };
+    void readInitialSession();
     const {
       data: { subscription },
-    } = client.auth.onAuthStateChange((_event, s) => setSession(s));
-    return () => subscription.unsubscribe();
+    } = client.auth.onAuthStateChange((_event, nextSession) => {
+      if (!active) return;
+      setSession(nextSession);
+      if (nextSession) setError(null);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   async function login(e: React.FormEvent) {

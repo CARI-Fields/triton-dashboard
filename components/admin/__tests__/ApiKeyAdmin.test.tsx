@@ -46,9 +46,13 @@ const CREATE_SECRET =
   "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const INTERNAL_PREFIX_MISMATCH_SECRET =
   "tb_live_CCCCCCCC_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const NON_CANONICAL_CREATE_SECRET =
+  "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh_";
 const ROTATE_PREFIX = "tb_live_BAECAwQF";
 const ROTATE_SECRET =
   "tb_live_BAECAwQF_BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const NON_CANONICAL_ROTATE_SECRET =
+  "tb_live_BAECAwQF_BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9";
 const ROTATED_VIEW: ManagedKeyView = {
   ...VIEW,
   key_prefix: ROTATE_PREFIX,
@@ -742,6 +746,30 @@ describe("ApiKeyAdmin", () => {
     }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("treats a noncanonical rotation secret as uncertain and hides it", async () => {
+    const fetchMock = installFetch();
+    fetchMock
+      .mockImplementationOnce(async () => envelope([VIEW]))
+      .mockImplementationOnce(async () => envelope({
+        ...ROTATED_VIEW,
+        secret: NON_CANONICAL_ROTATE_SECRET,
+      }));
+    render(<ApiKeyAdmin />);
+    await screen.findByRole("article", { name: "Bruce experiments" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/new secret cannot be recovered/i);
+    expect(alert.textContent).not.toContain(NON_CANONICAL_ROTATE_SECRET);
+    expect(screen.queryByText(NON_CANONICAL_ROTATE_SECRET)).toBeNull();
+    expect((screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("keeps a structured rotation 409 as a known failure", async () => {
     const fetchMock = installFetch();
     fetchMock
@@ -1287,6 +1315,26 @@ describe("ApiKeyAdmin", () => {
     expect(alert.textContent).toContain("Could not create the API key.");
     expect(alert.textContent).not.toContain(INTERNAL_PREFIX_MISMATCH_SECRET);
     expect(screen.queryByText(INTERNAL_PREFIX_MISMATCH_SECRET)).toBeNull();
+    expect(screen.queryByRole("article")).toBeNull();
+  });
+
+  it("rejects a noncanonical generated secret after create", async () => {
+    const fetchMock = installFetch([]);
+    fetchMock
+      .mockImplementationOnce(async () => envelope([]))
+      .mockImplementationOnce(async () => envelope({
+        ...VIEW,
+        secret: NON_CANONICAL_CREATE_SECRET,
+      }, 201));
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fillCreateDraft();
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not create the API key.");
+    expect(alert.textContent).not.toContain(NON_CANONICAL_CREATE_SECRET);
+    expect(screen.queryByText(NON_CANONICAL_CREATE_SECRET)).toBeNull();
     expect(screen.queryByRole("article")).toBeNull();
   });
 

@@ -187,9 +187,13 @@ describe("updated cursor", () => {
     expect(decodeUpdatedCursor(encoded)).toEqual(cursor);
   });
 
-  it("preserves a valid fractional timestamp with a numeric offset", () => {
+  it.each([
+    "2026-07-28T15:31:22.123456+05:30",
+    "2026-07-28T15:31:22.123456789+15:59",
+    "2026-07-28T15:31:22.123456789-15:59",
+  ])("preserves a valid fractional timestamp with numeric offset %s", (updatedAt) => {
     const cursor = {
-      updated_at: "2026-07-28T15:31:22.123456+05:30",
+      updated_at: updatedAt,
       id: TASK_ID,
     };
     const encoded = encodeUpdatedCursor(cursor);
@@ -219,6 +223,15 @@ describe("updated cursor", () => {
       updated_at: "2026-02-30T12:00:00.000Z",
       id: TASK_ID,
     })).toString("base64url"),
+    ...[
+      "2026-07-28T15:31:22+16:00",
+      "2026-07-28T15:31:22-16:00",
+      "2026-07-28T15:31:22+23:59",
+      "2026-07-28T15:31:22-23:59",
+    ].map((updated_at) => Buffer.from(JSON.stringify({
+      updated_at,
+      id: TASK_ID,
+    })).toString("base64url")),
     Buffer.from(JSON.stringify({
       updated_at: UPDATED_AT,
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".toUpperCase(),
@@ -273,8 +286,11 @@ describe("read filter parsing", () => {
     });
   });
 
-  it("preserves a valid numeric-offset updated_after filter", () => {
-    const updatedAfter = "2026-07-28T15:31:22.123456-04:00";
+  it.each([
+    "2026-07-28T15:31:22.123456-04:00",
+    "2026-07-28T15:31:22.123456789+15:59",
+    "2026-07-28T15:31:22.123456789-15:59",
+  ])("preserves valid numeric-offset updated_after %s", (updatedAfter) => {
     const request = new Request(
       "https://board.test/api/agent/v1/tasks"
       + `?updated_after=${encodeURIComponent(updatedAfter)}`,
@@ -293,6 +309,10 @@ describe("read filter parsing", () => {
     "?status=complete",
     "?updated_after=yesterday",
     "?updated_after=2026-02-30T12%3A00%3A00.000Z",
+    "?updated_after=2026-07-28T15%3A31%3A22%2B16%3A00",
+    "?updated_after=2026-07-28T15%3A31%3A22-16%3A00",
+    "?updated_after=2026-07-28T15%3A31%3A22%2B23%3A59",
+    "?updated_after=2026-07-28T15%3A31%3A22-23%3A59",
     "?limit=0",
     "?limit=101",
     "?limit=050",

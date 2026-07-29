@@ -19,7 +19,7 @@ export function isRfc3339Timestamp(value: unknown): value is string {
     hour > 23
     || minute > 59
     || second > 59
-    || offsetHour > 23
+    || offsetHour > 15
     || offsetMinute > 59
   ) {
     return false;

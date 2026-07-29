@@ -285,6 +285,10 @@ describe("Task PATCH route", () => {
     [`"${OLD_ETAG}", "${UPDATED_AT}"`, "MISSING_IF_MATCH"],
     ['"not-a-timestamp"', "MISSING_IF_MATCH"],
     ['"2026-02-30T12:00:00.000Z"', "MISSING_IF_MATCH"],
+    ['"2026-07-29T11:00:00+16:00"', "MISSING_IF_MATCH"],
+    ['"2026-07-29T11:00:00-16:00"', "MISSING_IF_MATCH"],
+    ['"2026-07-29T11:00:00+23:59"', "MISSING_IF_MATCH"],
+    ['"2026-07-29T11:00:00-23:59"', "MISSING_IF_MATCH"],
   ])("rejects invalid If-Match %s before reading JSON", async (value, code) => {
     const headers: Record<string, string> = value === undefined
       ? {}
@@ -308,6 +312,9 @@ describe("Task PATCH route", () => {
   it.each([
     "2026-07-29T11:00:00Z",
     "2026-07-29T11:00:00.123456Z",
+    "2026-07-29T11:00:00+00:00",
+    "2026-07-29T11:00:00.123456789+15:59",
+    "2026-07-29T11:00:00.123456789-15:59",
     "2026-07-29T11:00:00.123456-04:00",
   ])("forwards valid If-Match %s unchanged to Task RPC", async (ifMatch) => {
     const response = await taskRoute.PATCH(
@@ -1017,6 +1024,10 @@ describe("Experiment PATCH route", () => {
   it.each([
     '"not-a-timestamp"',
     '"2026-02-30T12:00:00.000Z"',
+    '"2026-07-29T11:00:00+16:00"',
+    '"2026-07-29T11:00:00-16:00"',
+    '"2026-07-29T11:00:00+23:59"',
+    '"2026-07-29T11:00:00-23:59"',
   ])(
     "rejects invalid Experiment If-Match %s without RPC",
     async (ifMatch) => {
@@ -1045,6 +1056,9 @@ describe("Experiment PATCH route", () => {
   it.each([
     "2026-07-29T11:00:00Z",
     "2026-07-29T11:00:00.123456Z",
+    "2026-07-29T11:00:00+00:00",
+    "2026-07-29T11:00:00.123456789+15:59",
+    "2026-07-29T11:00:00.123456789-15:59",
     "2026-07-29T11:00:00.123456+05:30",
   ])(
     "forwards valid If-Match %s unchanged to Experiment RPC",

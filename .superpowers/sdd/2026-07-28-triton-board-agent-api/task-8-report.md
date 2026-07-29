@@ -358,3 +358,97 @@ Security scans found no new CORS, secret/debug logging, direct resource write,
 or DELETE surface. Only the existing Admin-key validators retain separate
 date-time parsing because Fix Round 1 intentionally changes the Task 7 read
 and Task 8 If-Match boundary only.
+
+## Fix Round 2 — Enforce PostgreSQL Timestamp Offset Limits
+
+### Root Cause and Database Reproduction
+
+The shared timestamp validator accepted numeric offsets through `±23:59`.
+That is syntactically valid RFC 3339 and accepted by the JavaScript date
+parser, but it exceeds PostgreSQL's `timestamptz` displacement range. Those
+values could therefore pass the Task 7 read filters or Task 8 If-Match
+boundary and fail later in PostgreSQL/PostgREST with `22009`.
+
+The local Supabase PostgreSQL 17.6 instance reproduced the exact boundary:
+
+```text
+'2026-07-29T11:00:00+15:59'::timestamptz
+accepted
+
+'2026-07-29T11:00:00+16:00'::timestamptz
+ERROR: time zone displacement out of range
+```
+
+The minimal production fix changes the shared validator's offset-hour limit
+from 23 to 15. Offset minutes remain limited to 59, so the maximum accepted
+numeric displacement is `±15:59`.
+
+### RED
+
+Boundary regressions were added before the production change:
+
+```bash
+npm test -- \
+  lib/agent-api/__tests__/responses.test.ts \
+  lib/agent-api/__tests__/read-repository.test.ts \
+  app/api/agent/v1/__tests__/write-routes.test.ts
+```
+
+```text
+Test Files 3 failed (3)
+Tests 20 failed | 157 passed (177)
+```
+
+All 20 failures were the intended missing boundary:
+
+- response parsing accepted `±16:00` and `±23:59`;
+- cursor decoding and `updated_after` parsing accepted the same four values;
+- Task and Experiment PATCH returned 200 and reached their mutation adapters
+  for the same four invalid If-Match values.
+
+### GREEN and Preserved Behavior
+
+After the single-line production fix:
+
+```text
+Test Files 3 passed (3)
+Tests 177 passed (177)
+```
+
+The focused suite proves:
+
+- `+15:59` and `-15:59` are accepted and forwarded byte-for-byte unchanged
+  through response parsing, both PATCH routes, cursors, and filters;
+- `+16:00`, `-16:00`, `+23:59`, and `-23:59` produce stable public 400s;
+- invalid Task and Experiment If-Match values are rejected before reading the
+  request body or calling the mutation adapter;
+- `Z`, `+00:00`, ordinary offsets, zero and 1–9 fractional digits, calendar
+  validation, and stale 412 behavior remain covered.
+
+### Verification
+
+```text
+npm test
+Test Files 39 passed (39)
+Tests 709 passed (709)
+
+npx tsc --noEmit
+exit 0
+
+npm run build
+exit 0
+Next.js 16.2.10 compiled successfully
+
+npx supabase test db --local supabase/tests/0008_agent_api_mutations.sql
+Files=1, Tests=16
+Result: PASS
+
+git diff --check
+exit 0
+```
+
+The Supabase changelog and PostgreSQL 17 date/time documentation were checked;
+no additional schema or API change applies to this input-boundary fix.
+Security and scope scans found no new CORS, secret/debug logging, direct write,
+or DELETE surface. The only production change is the shared numeric-offset
+hour limit.

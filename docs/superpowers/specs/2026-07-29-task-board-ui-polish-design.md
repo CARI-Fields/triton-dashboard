@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-29
 
-**Status:** Approved in conversation; awaiting written spec review
+**Status:** Approved; implementation planning complete
 
 **Branch:** `feat/task-board-ui-polish`
 

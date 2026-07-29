@@ -67,12 +67,13 @@ export function etagFor(updatedAt: string): string {
 
 export function parseIfMatch(request: Request): string {
   const value = request.headers.get("if-match");
-  if (!value?.startsWith('"') || !value.endsWith('"')) {
+  const match = value?.match(/^"([^",]+)"$/);
+  if (!match) {
     throw new AgentApiError(
       400,
       "MISSING_IF_MATCH",
       "PATCH requires a quoted If-Match value.",
     );
   }
-  return value.slice(1, -1);
+  return match[1];
 }

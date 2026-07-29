@@ -12,6 +12,7 @@ export default function Navbar() {
     pathname === "/experiments" || pathname.startsWith("/experiments/")
   ) && !compareActive;
   const analyticsActive = pathname === "/analytics";
+  const apiKeysActive = pathname === "/admin/api-keys";
 
   const current = (active: boolean) => active ? "page" as const : undefined;
 
@@ -59,6 +60,13 @@ export default function Navbar() {
             aria-current={current(analyticsActive)}
           >
             Analytics
+          </Link>
+          <Link
+            href="/admin/api-keys"
+            className={`nav-btn ${apiKeysActive ? "active" : ""}`}
+            aria-current={current(apiKeysActive)}
+          >
+            API Keys
           </Link>
         </div>
         <span className="navbar-spacer" />

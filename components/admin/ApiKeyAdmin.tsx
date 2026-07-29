@@ -1,0 +1,703 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  API_SCOPES,
+  type ApiScope,
+} from "@/lib/agent-api/types";
+import type {
+  ManagedKeyInput,
+  ManagedKeyView,
+  ManagedKeyWithSecret,
+} from "@/lib/agent-api/admin-keys";
+
+interface MemberOption {
+  id: string;
+  name: string;
+}
+
+interface ApiEnvelope<T> {
+  data?: T;
+  error?: { message?: string };
+}
+
+interface KeyDraft {
+  name: string;
+  member_id: string;
+  scopes: ApiScope[];
+  expires_at: string;
+}
+
+const EMPTY_DRAFT: KeyDraft = {
+  name: "",
+  member_id: "",
+  scopes: [],
+  expires_at: "",
+};
+
+function errorMessage(reason: unknown, fallback: string): string {
+  return reason instanceof Error && reason.message.trim()
+    ? reason.message
+    : fallback;
+}
+
+async function readEnvelope<T>(
+  response: Response,
+  fallback: string,
+): Promise<T> {
+  let body: ApiEnvelope<T>;
+  try {
+    body = await response.json() as ApiEnvelope<T>;
+  } catch {
+    throw new Error(fallback);
+  }
+  if (!response.ok || body.data === undefined) {
+    throw new Error(
+      typeof body.error?.message === "string"
+        ? body.error.message
+        : fallback,
+    );
+  }
+  return body.data;
+}
+
+function expiryForApi(value: string): string | null {
+  if (!value) return null;
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.valueOf())) {
+    throw new Error("Expiry must be a valid date and time.");
+  }
+  return timestamp.toISOString();
+}
+
+function expiryForInput(value: string | null): string {
+  if (value === null) return "";
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.valueOf())) return "";
+  const local = new Date(timestamp.valueOf() - timestamp.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function formatDate(value: string): string {
+  return new Date(value).toLocaleString();
+}
+
+function withoutSecret(result: ManagedKeyWithSecret): ManagedKeyView {
+  const { secret: _discardedSecret, ...view } = result;
+  return view;
+}
+
+export default function ApiKeyAdmin() {
+  const [keys, setKeys] = useState<ManagedKeyView[]>([]);
+  const [members, setMembers] = useState<MemberOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [createDraft, setCreateDraft] = useState<KeyDraft>(EMPTY_DRAFT);
+  const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<KeyDraft>(EMPTY_DRAFT);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [oneTimeSecret, setOneTimeSecret] = useState<{
+    value: string;
+    source: "created" | "rotated";
+  } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const mounted = useRef(false);
+  const loadGeneration = useRef(0);
+  const loadAbort = useRef<AbortController | null>(null);
+
+  const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
+    loadAbort.current?.abort();
+    const controller = new AbortController();
+    loadAbort.current = controller;
+    setLoading(true);
+    setError(null);
+
+    if (!isSupabaseConfigured || !supabase) {
+      if (mounted.current && generation === loadGeneration.current) {
+        setLoading(false);
+        setError("Connect Supabase before managing API keys.");
+      }
+      return;
+    }
+
+    try {
+      const client = supabase;
+      const sessionPromise = client.auth.getSession();
+      const membersPromise = client
+        .from("members")
+        .select("id,name")
+        .order("position");
+      const sessionResult = await sessionPromise;
+      const token = sessionResult.data.session?.access_token;
+      if (sessionResult.error || !token) {
+        throw new Error("Your session has expired. Sign in again.");
+      }
+      const responsePromise = fetch("/api/admin/v1/api-keys", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const [membersResult, response] = await Promise.all([
+        membersPromise,
+        responsePromise,
+      ]);
+      if (membersResult.error) {
+        throw new Error("Could not load Members.");
+      }
+      const loaded = await readEnvelope<ManagedKeyView[]>(
+        response,
+        "Could not load API keys.",
+      );
+      if (!mounted.current || generation !== loadGeneration.current) return;
+      setMembers((membersResult.data ?? []) as MemberOption[]);
+      setKeys(loaded);
+    } catch (reason) {
+      if (
+        !mounted.current
+        || generation !== loadGeneration.current
+        || (reason instanceof DOMException && reason.name === "AbortError")
+      ) {
+        return;
+      }
+      setError(errorMessage(reason, "Could not load API keys."));
+    } finally {
+      if (mounted.current && generation === loadGeneration.current) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return () => {
+      mounted.current = false;
+      loadGeneration.current += 1;
+      loadAbort.current?.abort();
+    };
+  }, [load]);
+
+  async function adminRequest<T>(
+    path: string,
+    init: RequestInit,
+    fallback: string,
+  ): Promise<T> {
+    if (!supabase) throw new Error("Connect Supabase first.");
+    const { data, error: sessionError } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (sessionError || !token) {
+      throw new Error("Your session has expired. Sign in again.");
+    }
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    if (init.body !== undefined) headers.set("Content-Type", "application/json");
+    const response = await fetch(path, {
+      ...init,
+      headers,
+      cache: "no-store",
+    });
+    return readEnvelope<T>(response, fallback);
+  }
+
+  function toggleScope(
+    draft: KeyDraft,
+    setDraft: (next: KeyDraft) => void,
+    scope: ApiScope,
+  ) {
+    const scopes = draft.scopes.includes(scope)
+      ? draft.scopes.filter((value) => value !== scope)
+      : API_SCOPES.filter(
+        (value) => value === scope || draft.scopes.includes(value),
+      );
+    setDraft({ ...draft, scopes: [...scopes] });
+  }
+
+  async function createKey(event: React.FormEvent) {
+    event.preventDefault();
+    if (creating || !createDraft.name.trim() || !createDraft.member_id) return;
+    setCreating(true);
+    setError(null);
+    setOneTimeSecret(null);
+    setCopied(false);
+    try {
+      const input: ManagedKeyInput = {
+        name: createDraft.name.trim(),
+        member_id: createDraft.member_id,
+        scopes: [...createDraft.scopes],
+        expires_at: expiryForApi(createDraft.expires_at),
+      };
+      const created = await adminRequest<ManagedKeyWithSecret>(
+        "/api/admin/v1/api-keys",
+        { method: "POST", body: JSON.stringify(input) },
+        "Could not create the API key.",
+      );
+      if (!mounted.current) return;
+      const view = withoutSecret(created);
+      setKeys((current) => [
+        view,
+        ...current.filter((key) => key.id !== view.id),
+      ]);
+      setCreateDraft(EMPTY_DRAFT);
+      setOneTimeSecret({ value: created.secret, source: "created" });
+    } catch (reason) {
+      if (mounted.current) {
+        setError(errorMessage(reason, "Could not create the API key."));
+      }
+    } finally {
+      if (mounted.current) setCreating(false);
+    }
+  }
+
+  function beginEdit(key: ManagedKeyView) {
+    setEditingId(key.id);
+    setEditDraft({
+      name: key.name,
+      member_id: key.member?.id ?? "",
+      scopes: [...key.scopes],
+      expires_at: expiryForInput(key.expires_at),
+    });
+  }
+
+  async function saveEdit(event: React.FormEvent, key: ManagedKeyView) {
+    event.preventDefault();
+    if (
+      creating
+      ||
+      pendingId !== null
+      || !editDraft.name.trim()
+      || !editDraft.member_id
+    ) {
+      return;
+    }
+    setPendingId(key.id);
+    setError(null);
+    try {
+      const changes: ManagedKeyInput = {
+        name: editDraft.name.trim(),
+        member_id: editDraft.member_id,
+        scopes: [...editDraft.scopes],
+        expires_at: expiryForApi(editDraft.expires_at),
+      };
+      const updated = await adminRequest<ManagedKeyView>(
+        `/api/admin/v1/api-keys/${key.id}`,
+        { method: "PATCH", body: JSON.stringify(changes) },
+        "Could not update the API key.",
+      );
+      if (!mounted.current) return;
+      setKeys((current) => current.map(
+        (candidate) => candidate.id === updated.id ? updated : candidate,
+      ));
+      setEditingId(null);
+    } catch (reason) {
+      if (mounted.current) {
+        setError(errorMessage(reason, "Could not update the API key."));
+      }
+    } finally {
+      if (mounted.current) setPendingId(null);
+    }
+  }
+
+  async function rotateKey(key: ManagedKeyView) {
+    if (creating || pendingId !== null || key.revoked_at !== null) return;
+    setPendingId(key.id);
+    setError(null);
+    setOneTimeSecret(null);
+    setCopied(false);
+    try {
+      const rotated = await adminRequest<ManagedKeyWithSecret>(
+        `/api/admin/v1/api-keys/${key.id}/rotate`,
+        { method: "POST" },
+        "Could not rotate the API key.",
+      );
+      if (!mounted.current) return;
+      const view = withoutSecret(rotated);
+      setKeys((current) => current.map(
+        (candidate) => candidate.id === view.id ? view : candidate,
+      ));
+      setOneTimeSecret({ value: rotated.secret, source: "rotated" });
+    } catch (reason) {
+      if (mounted.current) {
+        setError(errorMessage(reason, "Could not rotate the API key."));
+      }
+    } finally {
+      if (mounted.current) setPendingId(null);
+    }
+  }
+
+  async function revokeKey(key: ManagedKeyView) {
+    if (creating || pendingId !== null || key.revoked_at !== null) return;
+    setPendingId(key.id);
+    setError(null);
+    try {
+      const revoked = await adminRequest<ManagedKeyView>(
+        `/api/admin/v1/api-keys/${key.id}/revoke`,
+        { method: "POST" },
+        "Could not revoke the API key.",
+      );
+      if (!mounted.current) return;
+      setKeys((current) => current.map(
+        (candidate) => candidate.id === revoked.id ? revoked : candidate,
+      ));
+    } catch (reason) {
+      if (mounted.current) {
+        setError(errorMessage(reason, "Could not revoke the API key."));
+      }
+    } finally {
+      if (mounted.current) setPendingId(null);
+    }
+  }
+
+  async function copySecret() {
+    if (!oneTimeSecret) return;
+    try {
+      await navigator.clipboard.writeText(oneTimeSecret.value);
+      if (mounted.current) setCopied(true);
+    } catch {
+      if (mounted.current) setError("Could not copy the secret.");
+    }
+  }
+
+  function renderScopeFields(
+    draft: KeyDraft,
+    setDraft: (next: KeyDraft) => void,
+    labelPrefix = "",
+  ) {
+    return (
+      <div className="api-key-scopes">
+        {API_SCOPES.map((scope) => (
+          <label key={scope}>
+            <input
+              type="checkbox"
+              checked={draft.scopes.includes(scope)}
+              onChange={() => toggleScope(draft, setDraft, scope)}
+              aria-label={labelPrefix ? `${labelPrefix}${scope}` : scope}
+            />
+            <span>{scope}</span>
+          </label>
+        ))}
+      </div>
+    );
+  }
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="wrap">
+        <p className="state-note">
+          Connect Supabase before managing API keys.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="wrap api-key-admin">
+      <p className="eyebrow">Admin</p>
+      <h1>Agent API Keys</h1>
+      <p className="lede">
+        Create scoped credentials for existing team Members. New secrets are
+        shown once and cannot be recovered later.
+      </p>
+
+      {error && (
+        <div className="error-banner api-key-error" role="alert">
+          <span>{error}</span>
+          {!loading && (
+            <button className="btn" type="button" onClick={() => void load()}>
+              Retry list
+            </button>
+          )}
+        </div>
+      )}
+
+      <section className="panel api-key-create" aria-labelledby="create-key-title">
+        <h2 id="create-key-title">Create API key</h2>
+        <form onSubmit={createKey}>
+          <div className="api-key-form-grid">
+            <label>
+              <span>Key name</span>
+              <input
+                value={createDraft.name}
+                maxLength={100}
+                required
+                onChange={(event) => setCreateDraft({
+                  ...createDraft,
+                  name: event.target.value,
+                })}
+              />
+            </label>
+            <label>
+              <span>Member</span>
+              <select
+                value={createDraft.member_id}
+                required
+                onChange={(event) => setCreateDraft({
+                  ...createDraft,
+                  member_id: event.target.value,
+                })}
+              >
+                <option value="">Select a Member</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Expires at (optional)</span>
+              <input
+                type="datetime-local"
+                value={createDraft.expires_at}
+                onChange={(event) => setCreateDraft({
+                  ...createDraft,
+                  expires_at: event.target.value,
+                })}
+              />
+            </label>
+          </div>
+          <fieldset>
+            <legend>Scopes</legend>
+            {renderScopeFields(createDraft, setCreateDraft)}
+          </fieldset>
+          <button
+            className="btn primary"
+            type="submit"
+            disabled={
+              creating
+              || pendingId !== null
+              || !createDraft.name.trim()
+              || !createDraft.member_id
+            }
+          >
+            {creating ? "Creating…" : "Create API key"}
+          </button>
+        </form>
+      </section>
+
+      {oneTimeSecret && (
+        <section
+          className="api-key-secret"
+          role="status"
+          aria-label="One-time API key secret"
+        >
+          <div>
+            <strong>Copy this secret now</strong>
+            <p>
+              This {oneTimeSecret.source === "created" ? "new" : "rotated"} key
+              secret will not be shown again.
+            </p>
+          </div>
+          <code>{oneTimeSecret.value}</code>
+          <div className="api-key-actions">
+            <button className="btn primary" type="button" onClick={copySecret}>
+              {copied ? "Copied" : "Copy secret"}
+            </button>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                setOneTimeSecret(null);
+                setCopied(false);
+              }}
+            >
+              Dismiss secret
+            </button>
+          </div>
+        </section>
+      )}
+
+      <div className="section-label">
+        Managed keys<span className="rule" />
+      </div>
+      {loading ? (
+        <p className="state-note">Loading API keys…</p>
+      ) : keys.length === 0 ? (
+        <div className="empty">No API keys yet.</div>
+      ) : (
+        <div className="api-key-list">
+          {keys.map((key) => {
+            const busy = pendingId === key.id;
+            const controlsBusy = creating || pendingId !== null;
+            return (
+              <article
+                className="panel api-key-card"
+                key={key.id}
+                aria-label={key.name}
+              >
+                <div className="api-key-card-head">
+                  <div>
+                    <h2>{key.name}</h2>
+                    <code>{key.key_prefix}</code>
+                  </div>
+                  <span className={`api-key-status ${
+                    key.revoked_at === null ? "active" : "revoked"
+                  }`}>
+                    {key.revoked_at === null ? "Active" : "Revoked"}
+                  </span>
+                </div>
+
+                {editingId === key.id ? (
+                  <form
+                    className="api-key-edit"
+                    onSubmit={(event) => void saveEdit(event, key)}
+                  >
+                    <div className="api-key-form-grid">
+                      <label>
+                        <span>Key name</span>
+                        <input
+                          aria-label={`Key name for ${key.name}`}
+                          value={editDraft.name}
+                          maxLength={100}
+                          required
+                          onChange={(event) => setEditDraft({
+                            ...editDraft,
+                            name: event.target.value,
+                          })}
+                        />
+                      </label>
+                      <label>
+                        <span>Member</span>
+                        <select
+                          aria-label={`Member for ${key.name}`}
+                          value={editDraft.member_id}
+                          required
+                          onChange={(event) => setEditDraft({
+                            ...editDraft,
+                            member_id: event.target.value,
+                          })}
+                        >
+                          <option value="">Select a Member</option>
+                          {members.map((member) => (
+                            <option key={member.id} value={member.id}>
+                              {member.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Expires at (optional)</span>
+                        <input
+                          type="datetime-local"
+                          aria-label={`Expires at for ${key.name}`}
+                          value={editDraft.expires_at}
+                          onChange={(event) => setEditDraft({
+                            ...editDraft,
+                            expires_at: event.target.value,
+                          })}
+                        />
+                      </label>
+                    </div>
+                    <fieldset>
+                      <legend>Scopes</legend>
+                      {renderScopeFields(
+                        editDraft,
+                        setEditDraft,
+                        `Edit scope for ${key.name}: `,
+                      )}
+                    </fieldset>
+                    <div className="api-key-actions">
+                      <button
+                        className="btn primary"
+                        type="submit"
+                        disabled={controlsBusy}
+                      >
+                        {busy ? "Saving…" : "Save key changes"}
+                      </button>
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={controlsBusy}
+                        onClick={() => setEditingId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <dl className="api-key-meta">
+                      <div>
+                        <dt>Member</dt>
+                        <dd>{key.member?.name ?? "Deleted Member"}</dd>
+                      </div>
+                      <div>
+                        <dt>Expiry</dt>
+                        <dd>
+                          {key.expires_at === null
+                            ? "Never expires"
+                            : formatDate(key.expires_at)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Last used</dt>
+                        <dd>
+                          {key.last_used_at === null
+                            ? "Never used"
+                            : formatDate(key.last_used_at)}
+                        </dd>
+                      </div>
+                      {key.revoked_at !== null && (
+                        <div>
+                          <dt>Revoked</dt>
+                          <dd>{formatDate(key.revoked_at)}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    <div className="api-key-scope-list" aria-label="Scopes">
+                      {key.scopes.length === 0
+                        ? <span className="muted">No scopes</span>
+                        : key.scopes.map((scope) => (
+                          <code key={scope}>{scope}</code>
+                        ))}
+                    </div>
+                    <div className="api-key-actions">
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={controlsBusy}
+                        aria-label={`Edit ${key.name}`}
+                        onClick={() => beginEdit(key)}
+                      >
+                        Edit
+                      </button>
+                      {key.revoked_at === null && (
+                        <>
+                          <button
+                            className="btn"
+                            type="button"
+                            disabled={controlsBusy}
+                            aria-label={`Rotate ${key.name}`}
+                            onClick={() => void rotateKey(key)}
+                          >
+                            {busy ? "Working…" : "Rotate"}
+                          </button>
+                          <button
+                            className="btn api-key-revoke"
+                            type="button"
+                            disabled={controlsBusy}
+                            aria-label={`Revoke ${key.name}`}
+                            onClick={() => void revokeKey(key)}
+                          >
+                            {busy ? "Working…" : "Revoke"}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

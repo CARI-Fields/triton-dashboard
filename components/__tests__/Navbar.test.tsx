@@ -15,6 +15,7 @@ const navigationCases = [
   { pathname: "/experiments/123", active: "Experiments" },
   { pathname: "/experiments/compare", active: "Compare" },
   { pathname: "/analytics", active: "Analytics" },
+  { pathname: "/admin/api-keys", active: "API Keys" },
 ] as const;
 
 describe("Navbar", () => {
@@ -30,6 +31,8 @@ describe("Navbar", () => {
     expect(screen.getByRole("link", { name: "Experiments" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Compare" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Analytics" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "API Keys" })
+      .getAttribute("href")).toBe("/admin/api-keys");
   });
 
   for (const { pathname, active } of navigationCases) {

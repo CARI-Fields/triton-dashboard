@@ -537,6 +537,12 @@ describe("Board", () => {
       "Scroll horizontally",
     );
     expect(boardRegion.tabIndex).toBe(0);
+    const todoColumn = screen.getByRole("heading", { name: "To do" })
+      .closest(".task-column") as HTMLElement;
+    expect(
+      within(todoColumn).getByRole("region", { name: "To do task list" })
+        .tabIndex,
+    ).toBe(0);
   });
 
   it("implements keyboard activation and relationships for the view tabs", async () => {
@@ -546,6 +552,9 @@ describe("Board", () => {
     const typesTab = screen.getByRole("tab", { name: "Types" });
     const teamTab = screen.getByRole("tab", { name: "Team" });
     const panel = screen.getByRole("tabpanel");
+    const boardPage = screen.getByRole("heading", { name: "Task Board" })
+      .closest(".board-page") as HTMLElement;
+    expect(boardPage.dataset.view).toBe("board");
     expect(boardTab.getAttribute("aria-controls")).toBe(panel.id);
     expect(panel.getAttribute("aria-labelledby")).toBe(boardTab.id);
     expect(boardTab.tabIndex).toBe(0);
@@ -555,6 +564,7 @@ describe("Board", () => {
     fireEvent.keyDown(boardTab, { key: "ArrowRight" });
     expect(document.activeElement).toBe(typesTab);
     expect(typesTab.getAttribute("aria-selected")).toBe("true");
+    expect(boardPage.dataset.view).toBe("types");
     expect(screen.getByRole("columnheader", { name: "Task count" }))
       .toBeDefined();
     expect(panel.getAttribute("aria-labelledby")).toBe(typesTab.id);

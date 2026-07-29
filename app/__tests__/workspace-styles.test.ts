@@ -467,6 +467,70 @@ describe("workspace visual contracts", () => {
       .toMatch(/max-height\s*:\s*none/);
   });
 
+  it("pins the desktop Task Board and gives every column a hidden independent scrollbar", () => {
+    const documentRoot = ruleBody(globals, "html, body");
+    expect(documentRoot).toMatch(/height\s*:\s*100%/);
+    expect(documentRoot).toMatch(/overflow\s*:\s*hidden/);
+
+    const boardHost = ruleBody(
+      globals,
+      '.app-content:has(.board-page[data-view="board"])',
+    );
+    expect(boardHost).toMatch(/overflow\s*:\s*hidden/);
+    expect(boardHost).toMatch(/scrollbar-gutter\s*:\s*auto/);
+
+    const boardPage = ruleBody(
+      globals,
+      '.board-page[data-view="board"]',
+    );
+    expect(boardPage).toMatch(
+      /grid-template-rows\s*:\s*auto\s+auto\s+minmax\(0,\s*1fr\)/,
+    );
+    expect(boardPage).toMatch(/height\s*:\s*100%/);
+    expect(boardPage).toMatch(/min-height\s*:\s*0/);
+    expect(boardPage).toMatch(/overflow\s*:\s*hidden/);
+
+    const panel = ruleBody(
+      globals,
+      '.board-page[data-view="board"] .board-view-panel',
+    );
+    expect(panel).toMatch(/display\s*:\s*flex/);
+    expect(panel).toMatch(/min-height\s*:\s*0/);
+    expect(panel).toMatch(/overflow\s*:\s*hidden/);
+
+    const boardScroller = ruleBody(globals, ".task-board-scroll");
+    expect(boardScroller).toMatch(/overflow-x\s*:\s*auto/);
+    expect(boardScroller).toMatch(/overflow-y\s*:\s*hidden/);
+    expect(boardScroller).toMatch(/scrollbar-width\s*:\s*none/);
+    expect(boardScroller).toMatch(/scrollbar-gutter\s*:\s*auto/);
+    expect(ruleBody(globals, ".task-board-scroll::-webkit-scrollbar"))
+      .toMatch(/display\s*:\s*none/);
+
+    const column = ruleBody(
+      globals,
+      '.board-page[data-view="board"] .task-column',
+    );
+    expect(column).toMatch(
+      /grid-template-rows\s*:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/,
+    );
+    expect(column).toMatch(/overflow\s*:\s*hidden/);
+
+    const cards = ruleBody(
+      globals,
+      '.board-page[data-view="board"] .task-column-cards',
+    );
+    expect(cards).toMatch(/min-height\s*:\s*0/);
+    expect(cards).toMatch(/overflow-y\s*:\s*auto/);
+    expect(cards).toMatch(/overscroll-behavior-y\s*:\s*contain/);
+    expect(cards).toMatch(/scrollbar-width\s*:\s*none/);
+    expect(
+      ruleBody(
+        globals,
+        '.board-page[data-view="board"] .task-column-cards::-webkit-scrollbar',
+      ),
+    ).toMatch(/display\s*:\s*none/);
+  });
+
   it("keeps Drawer content in one scrollable body row with a stable footer row", () => {
     const panel = ruleBody(globals, ".drawer-panel");
     expect(panel).toMatch(
@@ -576,6 +640,9 @@ describe("workspace visual contracts", () => {
     expect(ruleBody(mobile, ".app-shell")).toMatch(/overflow\s*:\s*visible/);
     expect(ruleBody(mobile, ".app-content")).toMatch(/height\s*:\s*auto/);
     expect(ruleBody(mobile, ".app-content")).toMatch(/overflow-y\s*:\s*visible/);
+    expect(mobile).toMatch(
+      /html,\s*body\s*\{[\s\S]*?height\s*:\s*auto[\s\S]*?overflow\s*:\s*visible/,
+    );
     expect(ruleBody(mobile, ".mobile-app-bar")).toMatch(/display\s*:\s*flex/);
     const mobileBrand = ruleBody(mobile, ".mobile-app-bar .brand");
     expect(mobileBrand).toMatch(/justify-content\s*:\s*flex-start/);

@@ -147,8 +147,12 @@ async function readEnvelope<T>(
 function expiryForApi(
   value: ExpiryChoice,
   currentExpiresAt: string | null,
+  mode: "create" | "edit",
 ): string | null {
-  if (value === "keep") return currentExpiresAt;
+  if (value === "keep") {
+    if (mode === "create") throw new Error("Expiry option is invalid.");
+    return currentExpiresAt;
+  }
   const preset = EXPIRY_PRESETS.find(
     (candidate) => candidate.value === value,
   );
@@ -519,7 +523,7 @@ export default function ApiKeyAdmin() {
         name: createDraft.name.trim(),
         member_id: createDraft.member_id,
         scopes: [...createDraft.scopes],
-        expires_at: expiryForApi(createDraft.expiry, null),
+        expires_at: expiryForApi(createDraft.expiry, null, "create"),
       };
       const created = await adminRequest<ManagedKeyWithSecret>(
         "/api/admin/v1/api-keys",
@@ -580,7 +584,7 @@ export default function ApiKeyAdmin() {
         name: editDraft.name.trim(),
         member_id: editDraft.member_id,
         scopes: [...editDraft.scopes],
-        expires_at: expiryForApi(editDraft.expiry, key.expires_at),
+        expires_at: expiryForApi(editDraft.expiry, key.expires_at, "edit"),
       };
       const updated = await adminRequest<ManagedKeyView>(
         `/api/admin/v1/api-keys/${key.id}`,

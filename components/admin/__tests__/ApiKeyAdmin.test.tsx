@@ -329,6 +329,31 @@ describe("ApiKeyAdmin", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects the edit-only keep expiry before creating a key", async () => {
+    const fetchMock = installFetch([]);
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fillCreateDraft();
+
+    const select = screen.getByLabelText(
+      "Expires after",
+    ) as HTMLSelectElement;
+    const keep = document.createElement("option");
+    keep.value = "keep";
+    keep.textContent = "Keep current expiration";
+    select.append(keep);
+    fireEvent.change(select, {
+      target: { value: "keep" },
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Create API key",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Expiry option is invalid.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the current expiry when an edit does not choose a new duration", async () => {
     const originalExpiry = "2026-08-15T16:30:00.000Z";
     const fetchMock = installFetch([{

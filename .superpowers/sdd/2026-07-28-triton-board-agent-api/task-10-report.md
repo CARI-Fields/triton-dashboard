@@ -71,3 +71,20 @@ A fresh-context validation agent received only the Skill path and a mocked 412 s
 - rejected delete, batch, Owner, assignee, parent, and system-field changes.
 
 No real request or credential was used.
+
+## Fix round 1 — conditional PATCH and POST recipes
+
+Evaluation RED: a fresh Skill user treated the original linear “GET current resource” step as universal and incorrectly concluded that Attachment POST required `board:read` plus `attachments:write`. The implemented POST routes actually require only their endpoint-specific write scope and live Task collaboration; they do not require a preflight GET.
+
+Added a focused artifact test before editing the Skill. The focused run produced 18 passes and the new assertion failed because the Skill did not distinguish `For PATCH:` from `For POST:`.
+
+Evaluation GREEN: kept the Skill at 29 lines and replaced only the universal write sequence:
+
+- GET/read now uses the exact relative endpoint, documented filters, and required read scope.
+- PATCH now performs GET, retains the quoted ETag, computes the smallest change, and uses `If-Match`.
+- POST now uses the exact known parent/path/input and one stable `Idempotency-Key` with the endpoint-specific write scope while the server checks live Task collaboration.
+- The Skill states that POST does not require `board:read` or a preflight GET, treats a successful POST response as sufficient verification, and makes GET verification optional when `board:read` is available.
+
+A follow-up consistency assertion first failed because the conditional section said “write recipe” and omitted read-only use; the one-line GET/read recipe made it GREEN without changing the POST fix.
+
+The focused suite then passed 19/19. Full verification passed 42 Vitest files / 815 tests, `tsc --noEmit`, `py_compile`, official `quick_validate.py`, client `--help`, and `git diff --check`. The controller will perform the fresh re-evaluation; no context-carrying forward test was launched from this fix round.

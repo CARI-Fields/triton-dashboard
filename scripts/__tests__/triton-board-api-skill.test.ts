@@ -136,6 +136,20 @@ describe("Triton Board API skill artifacts", () => {
     expect(skill).not.toContain("README");
   });
 
+  it("separates PATCH preflight from POST prerequisites and verification", () => {
+    const skill = readFileSync(skillPath, "utf8");
+    expect(skill).toContain("matching operation recipe");
+    expect(skill).toContain("For GET/read:");
+    expect(skill).toContain("For PATCH:");
+    expect(skill).toContain("For POST:");
+    expect(skill).toContain(
+      "POST does not require `board:read` or a preflight GET",
+    );
+    expect(skill).toContain(
+      "Optional GET verification requires `board:read`",
+    );
+  });
+
   it("defines only actual Agent API routes and no destructive operation", () => {
     const openapi = readFileSync(openapiPath, "utf8");
     expect(openapi).toContain("openapi: 3.1.0");

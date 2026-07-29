@@ -5,14 +5,15 @@ description: Use when an AI agent needs to inspect, create, or update Triton Boa
 
 # Triton Board API
 
-Use the bundled safe client and the following sequence:
+Use the bundled safe client:
 
 1. Require `TRITON_BOARD_API_URL` and `TRITON_BOARD_API_KEY`. Set the URL to the full `/api/agent/v1` base.
 2. Call `python3 scripts/triton_board_api.py capabilities`.
-3. GET current resource and retain its quoted ETag.
-4. Compute the smallest allowed change.
-5. PATCH with `If-Match`, or POST once with one stable `Idempotency-Key`.
-6. Verify the response or GET again.
+3. Follow the matching operation recipe:
+   - For GET/read: use the exact relative endpoint path, documented filters, and required read scope; use the successful response as the result.
+   - For PATCH: GET current resource, retain its quoted ETag, compute the smallest allowed change, and PATCH with `If-Match`.
+   - For POST: use the exact known parent, relative endpoint path, and strict input with the endpoint-specific write scope; let the server check live Task collaboration, and POST once with one stable `Idempotency-Key`. POST does not require `board:read` or a preflight GET.
+4. Verify the write response. A successful POST response is sufficient. Optional GET verification requires `board:read`.
 
 Run `python3 scripts/triton_board_api.py --help` for client syntax. Prefer this client so the raw Key stays in the environment instead of shell arguments. Read [references/openapi.yaml](references/openapi.yaml) only when endpoint, scope, filter, field, or response details are needed.
 

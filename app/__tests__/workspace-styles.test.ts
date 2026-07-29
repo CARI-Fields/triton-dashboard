@@ -65,6 +65,28 @@ function contrastRatio(first: Rgb, second: Rgb): number {
 }
 
 describe("workspace visual contracts", () => {
+  it("uses whitespace instead of decorative Task Detail dividers", () => {
+    const properties = ruleBody(globals, ".task-properties");
+    expect(properties).toMatch(/border\s*:\s*0/);
+    expect(properties).not.toMatch(/border-block\s*:\s*1px/);
+
+    const property = ruleBody(globals, ".task-property");
+    expect(property).toMatch(/border\s*:\s*0/);
+    expect(property).not.toMatch(/border-bottom\s*:\s*1px/);
+
+    const sections = ruleBody(
+      globals,
+      ".task-detail-page .record-section,\n"
+        + ".task-detail-page .task-experiments-section",
+    );
+    expect(sections).toMatch(/margin\s*:\s*40px\s+0\s+0/);
+    expect(sections).toMatch(/padding\s*:\s*0/);
+    expect(sections).toMatch(/border\s*:\s*0/);
+
+    expect(ruleBody(globals, ".task-detail-page .attachment-gallery"))
+      .toMatch(/border-top\s*:\s*0/);
+  });
+
   it("uses a compact two-line Type-first heading and one metadata row", () => {
     const heading = ruleBody(globals, ".task-card-heading");
     expect(heading).toMatch(/display\s*:\s*grid/);

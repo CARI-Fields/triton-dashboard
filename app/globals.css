@@ -2507,9 +2507,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .task-properties {
   width: min(880px, 100%);
   max-width: none;
-  margin: 18px auto 22px;
+  margin: 18px auto 0;
   padding: 0;
-  border-block: 1px solid var(--border);
+  border: 0;
 }
 .task-property {
   display: grid;
@@ -2517,14 +2517,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   align-items: center;
   gap: 18px;
   min-width: 0;
-  min-height: 50px;
+  min-height: 48px;
   margin: 0;
-  padding: 8px 2px;
+  padding: 7px 2px;
   border: 0;
-  border-bottom: 1px solid var(--border);
-}
-.task-property:last-child {
-  border-bottom: 0;
 }
 .task-property > label,
 .task-property > legend,
@@ -2604,9 +2600,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .task-detail-page .record-section,
 .task-detail-page .task-experiments-section {
-  padding: 28px 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 0;
+  margin: 40px 0 0;
+  padding: 0;
+  border: 0;
 }
 .task-detail-page .record-section > h2,
 .task-detail-page .detail-section-head h2 {

@@ -446,6 +446,10 @@ export default function TaskDetail({ id }: { id: string }) {
     const refreshDeletedTask = (payload: RealtimePayload) => {
       if (payload.old?.id === visit.id) refresh();
     };
+    const refreshTaskAssignee = (payload: RealtimePayload) => {
+      const changedTaskId = payload.new?.task_id ?? payload.old?.task_id;
+      if (changedTaskId === visit.id) refresh();
+    };
     const refreshDeletedExperiment = (payload: RealtimePayload) => {
       const deletedId = payload.old?.id;
       if (
@@ -509,8 +513,12 @@ export default function TaskDetail({ id }: { id: string }) {
           event: "*",
           schema: "public",
           table: "task_assignees",
-          filter: `task_id=eq.${visit.id}`,
         },
+        refreshTaskAssignee,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "members" },
         refresh,
       )
       .on(

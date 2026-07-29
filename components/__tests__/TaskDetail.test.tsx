@@ -340,10 +340,10 @@ function trigger(
       return false;
     }
     if (!candidate.config.filter) return true;
+    if (eventType === "DELETE") return false;
     const match = /^([^=]+)=eq\.(.*)$/.exec(candidate.config.filter);
     if (!match) throw new Error(`Unsupported filter: ${candidate.config.filter}`);
-    const row = eventType === "DELETE" ? old : next;
-    return String(row[match[1]]) === match[2];
+    return String(next[match[1]]) === match[2];
   });
   if (handlers.length === 0) return;
   act(() => {
@@ -975,8 +975,8 @@ describe("TaskDetail orchestration", () => {
         event: "*",
         schema: "public",
         table: "task_assignees",
-        filter: `task_id=eq.${taskA.id}`,
       },
+      { event: "*", schema: "public", table: "members" },
       {
         event: "INSERT",
         schema: "public",
@@ -1017,6 +1017,73 @@ describe("TaskDetail orchestration", () => {
     expect(supabaseState.fromCalls.filter(
       (table) => table === "tasks",
     )).toHaveLength(taskQueries);
+  });
+
+  it("reloads only when a deleted UUID assignment belongs to this Task", async () => {
+    const assignedTask = { ...taskA, assignees: ["Alice"] };
+    enqueueLoad(assignedTask, [], [], [member, alice]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Unassign Alice" });
+
+    const taskQueries = () => supabaseState.fromCalls.filter(
+      (table) => table === "tasks",
+    ).length;
+    const initialQueries = taskQueries();
+    trigger(
+      `task-${taskA.id}`,
+      "task_assignees",
+      "DELETE",
+      {},
+      { task_id: taskB.id, member_id: alice.id },
+    );
+    expect(taskQueries()).toBe(initialQueries);
+
+    enqueueLoad(taskA, [], [], [member, alice]);
+    trigger(
+      `task-${taskA.id}`,
+      "task_assignees",
+      "DELETE",
+      {},
+      { task_id: taskA.id, member_id: alice.id },
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Unassign Alice" }))
+        .toBeNull();
+    });
+    expect(taskQueries()).toBe(initialQueries + 1);
+  });
+
+  it("reloads nested assignee names and picker members after a Member update", async () => {
+    const assignedTask = { ...taskA, assignees: ["Alice"] };
+    enqueueLoad(assignedTask, [], [], [member, alice]);
+    const view = render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Unassign Alice" });
+
+    const renamedAlice = {
+      ...alice,
+      name: "Alicia",
+      initials: "AC",
+    };
+    enqueueLoad(
+      { ...assignedTask, assignees: ["Alicia"] },
+      [],
+      [],
+      [member, renamedAlice],
+    );
+    trigger(
+      `task-${taskA.id}`,
+      "members",
+      "UPDATE",
+      { id: alice.id, name: "Alicia" },
+    );
+
+    expect(await screen.findByRole("button", { name: "Unassign Alicia" }))
+      .toBeDefined();
+    expect(screen.queryByRole("button", { name: "Unassign Alice" })).toBeNull();
+
+    view.unmount();
+    expect(supabaseState.removeChannel).toHaveBeenCalledTimes(1);
   });
 
   it("ignores unrelated DELETE payloads but detects current Task and Experiment deletion", async () => {

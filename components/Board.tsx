@@ -34,6 +34,10 @@ function avatarText(name: string, members: Member[]): string {
   return m?.initials || initialsFromName(name);
 }
 
+function errorMessage(caught: unknown): string {
+  return caught instanceof Error ? caught.message : "The request failed.";
+}
+
 function nextPosition(items: { position: number }[]): number {
   return items.length ? Math.max(...items.map((i) => i.position)) + 1 : 0;
 }
@@ -624,20 +628,24 @@ export default function Board() {
       if (!supabase) return;
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
-      const member = members.find((candidate) => candidate.name === name);
-      if (!member) throw new Error(`Unknown member: ${name}`);
-      const had = task.assignees.includes(name);
-      if (had) {
-        await unassignTaskMember(supabase, taskId, member.id);
-      } else {
-        await assignTaskMember(supabase, taskId, member.id);
+      try {
+        const member = members.find((candidate) => candidate.name === name);
+        if (!member) throw new Error(`Unknown member: ${name}`);
+        const had = task.assignees.includes(name);
+        if (had) {
+          await unassignTaskMember(supabase, taskId, member.id);
+        } else {
+          await assignTaskMember(supabase, taskId, member.id);
+        }
+        recordActivity(
+          taskId,
+          `${had ? "Unassigned" : "Assigned"} ${name}`,
+          "assign",
+        );
+        reload();
+      } catch (caught) {
+        setErrorMsg(`Could not update Task assignment. ${errorMessage(caught)}`);
       }
-      recordActivity(
-        taskId,
-        `${had ? "Unassigned" : "Assigned"} ${name}`,
-        "assign",
-      );
-      reload();
     },
     [members, recordActivity, tasks, reload]
   );
@@ -660,26 +668,32 @@ export default function Board() {
       if (!supabase) return;
       const n = name.trim();
       if (!n) return;
-      let member = members.find((candidate) => candidate.name === n);
-      if (!member) {
-        const { data, error } = await supabase
-          .from("members")
-          .insert({
-            name: n,
-            initials: initialsFromName(n),
-            position: nextPosition(members),
-          })
-          .select("*")
-          .single();
-        if (error) throw new Error(error.message);
-        member = data as Member;
+      try {
+        let member = members.find((candidate) => candidate.name === n);
+        if (!member) {
+          const { data, error } = await supabase
+            .from("members")
+            .insert({
+              name: n,
+              initials: initialsFromName(n),
+              position: nextPosition(members),
+            })
+            .select("*")
+            .single();
+          if (error) throw new Error(error.message);
+          member = data as Member;
+        }
+        const task = tasks.find((t) => t.id === taskId);
+        if (task && !task.assignees.includes(n)) {
+          await assignTaskMember(supabase, taskId, member.id);
+          recordActivity(taskId, `Assigned ${n}`, "assign");
+        }
+        reload();
+      } catch (caught) {
+        setErrorMsg(
+          `Could not add and assign teammate. ${errorMessage(caught)}`,
+        );
       }
-      const task = tasks.find((t) => t.id === taskId);
-      if (task && !task.assignees.includes(n)) {
-        await assignTaskMember(supabase, taskId, member.id);
-        recordActivity(taskId, `Assigned ${n}`, "assign");
-      }
-      reload();
     },
     [members, recordActivity, tasks, reload]
   );

@@ -480,7 +480,7 @@ export default function Board() {
   if (!isSupabaseConfigured) return <SetupScreen />;
 
   return (
-    <div className="board-page">
+    <div className="board-page" data-view={view}>
       <PageHeader
         eyebrow="Research Workspace"
         title="Task Board"
@@ -580,7 +580,8 @@ export default function Board() {
         ) : !hasSuccessfulSnapshot ? null : view === "board" ? (
           <>
             <p id="task-board-scroll-help" className="sr-only">
-              Scroll horizontally to reach every Task Board column.
+              Scroll horizontally to reach every Task Board column. Each
+              column has its own vertically scrollable task list.
             </p>
             <div
               className="task-board-scroll"

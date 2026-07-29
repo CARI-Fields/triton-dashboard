@@ -82,7 +82,13 @@
   --status-blocked-foreground: #f0a6aa;
 }
 
-html, body { min-height: 100%; padding: 0; margin: 0; }
+html, body {
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+}
 
 body {
   font-family: var(--sans);
@@ -1394,10 +1400,17 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 
 .task-board-scroll {
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-inline: contain;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
   border-bottom: 1px solid var(--border);
+  -webkit-overflow-scrolling: touch;
+}
+.task-board-scroll::-webkit-scrollbar {
+  display: none;
 }
 .task-board-scroll:focus-visible {
   outline: none;
@@ -1696,6 +1709,69 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   color: var(--text-tertiary);
   font-family: var(--mono);
   font-size: 10.5px;
+}
+
+@media (min-width: 768px) {
+  .app-content:has(.board-page[data-view="board"]) {
+    overflow: hidden;
+    scrollbar-gutter: auto;
+  }
+  .board-page[data-view="board"] {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+  .board-page[data-view="board"] .board-view-tabs,
+  .board-page[data-view="board"] .board-toolbar {
+    position: static;
+  }
+  .board-page[data-view="board"] .board-view-panel {
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+    flex-direction: column;
+  }
+  .board-page[data-view="board"] .board-toolbar,
+  .board-page[data-view="board"] .board-error-banner,
+  .board-page[data-view="board"] .board-sync-note {
+    flex: 0 0 auto;
+  }
+  .board-page[data-view="board"] .task-board-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  .board-page[data-view="board"] .task-board {
+    height: 100%;
+    min-height: 0;
+  }
+  .board-page[data-view="board"] .task-column {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .board-page[data-view="board"] .task-column-cards {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .board-page[data-view="board"] .task-column-cards::-webkit-scrollbar {
+    display: none;
+  }
+  .board-page[data-view="board"] .task-column-cards:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: 6px;
+  }
+  .board-page[data-view="board"] .board-sync-note {
+    margin-bottom: 14px;
+  }
 }
 
 /* ---------- Board tables and team ---------- */
@@ -2546,7 +2622,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
     border-top: 1px solid var(--border-strong);
     border-left: 0;
   }
-  .task-board-scroll,
+  .task-board-scroll {
+    overflow-x: auto;
+    scrollbar-gutter: auto;
+  }
   .experiment-table-scroll,
   .compare-table-scroll {
     overflow-x: auto;
@@ -2607,6 +2686,11 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 
 @media (max-width: 767px) {
+  html,
+  body {
+    height: auto;
+    overflow: visible;
+  }
   .app-shell {
     display: block;
     min-height: 100dvh;

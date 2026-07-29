@@ -88,7 +88,12 @@ export default function TaskBoardView({
             <h2>{group.name}</h2>
             <span className="task-count">{group.tasks.length}</span>
           </div>
-          <div className="task-column-cards">
+          <div
+            className="task-column-cards"
+            role="region"
+            aria-label={`${group.name} task list`}
+            tabIndex={0}
+          >
             {group.tasks.map((task) => (
               <TaskCard
                 key={task.id}

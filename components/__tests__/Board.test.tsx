@@ -576,6 +576,9 @@ describe("Board", () => {
     expect(screen.getByRole("heading", { name: "Done" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Blocked" })).toBeDefined();
     expect(screen.queryByRole("heading", { name: "SFT" })).toBeNull();
+    expect(screen.getByRole("button", { name: "New task" })).toBeDefined();
+    expect(screen.queryByText(/Live updates enabled/i)).toBeNull();
+    expect(screen.queryByText(/authoritative rows refreshed/i)).toBeNull();
     expect(screen.getByRole("tab", { name: "Types" })).toBeDefined();
     for (const view of ["Board", "Types", "Ownership", "Team"]) {
       expect(screen.getByRole("tab", { name: view })).toBeDefined();
@@ -633,12 +636,14 @@ describe("Board", () => {
     expect(boardTab.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("groups by Status or Type, including No type, and carries column defaults", async () => {
+  it("groups by Status or Type and keeps one global creation entry point", async () => {
     await renderLoadedBoard();
 
-    fireEvent.click(screen.getByRole("button", { name: "Add task to Blocked" }));
+    expect(screen.queryByRole("button", { name: /^Add task to / })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
     expect(screen.getByRole("dialog", { name: "Create task" })).toBeDefined();
-    expect(screen.getByLabelText("Status")).toHaveProperty("value", "blocked");
+    expect(screen.getByLabelText("Status")).toHaveProperty("value", "todo");
+    expect(screen.getByLabelText("Type")).toHaveProperty("value", "");
     fireEvent.click(screen.getByRole("button", { name: "Close create task" }));
 
     fireEvent.change(screen.getByLabelText("Group by"), {
@@ -651,12 +656,7 @@ describe("Board", () => {
       screen.getByRole("link", { name: "Triage shared failures" })
         .closest(".task-card")?.textContent,
     ).toContain("Blocked");
-
-    fireEvent.click(screen.getByRole("button", { name: "Add task to Research" }));
-    expect(screen.getByLabelText("Type")).toHaveProperty(
-      "value",
-      "type-research",
-    );
+    expect(screen.queryByRole("button", { name: /^Add task to / })).toBeNull();
   });
 
   it("renders complete cards with a detail link and accessible quick-edit/delete controls", async () => {
@@ -889,7 +889,8 @@ describe("Board", () => {
     supabaseState.tables.tasks = [];
     supabaseState.tables.members = [];
     render(<Board />);
-    await screen.findByRole("button", { name: "Add task to To do" });
+    await screen.findByRole("heading", { name: "To do" });
+    expect(screen.getByRole("button", { name: "New task" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("tab", { name: "Types" }));
     expect(screen.getByText("No types yet.")).toBeDefined();

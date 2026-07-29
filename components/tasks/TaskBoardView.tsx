@@ -17,10 +17,6 @@ export interface TaskBoardViewProps {
   types: TaskType[];
   members: Member[];
   groupBy: GroupBy;
-  onOpenCreate(defaults: {
-    status?: Status;
-    typeId?: string | null;
-  }): void;
   onPatchTask(id: string, patch: TaskPatch): Promise<void>;
   onDeleteTask(id: string): Promise<void>;
 }
@@ -38,7 +34,6 @@ export default function TaskBoardView({
   types,
   members,
   groupBy,
-  onOpenCreate,
   onPatchTask,
   onDeleteTask,
 }: TaskBoardViewProps) {
@@ -107,19 +102,6 @@ export default function TaskBoardView({
               />
             ))}
           </div>
-          <button
-            type="button"
-            className="column-add-task"
-            aria-label={`Add task to ${group.name}`}
-            onClick={() => onOpenCreate(
-              groupBy === "status"
-                ? { status: group.status }
-                : { typeId: group.typeId ?? null },
-            )}
-          >
-            <span aria-hidden="true">+</span>
-            Add task
-          </button>
         </section>
       ))}
     </div>

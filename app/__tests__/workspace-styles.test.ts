@@ -628,8 +628,13 @@ describe("workspace visual contracts", () => {
       '.board-page[data-view="board"] .task-column',
     );
     expect(column).toMatch(
+      /grid-template-rows\s*:\s*auto\s+minmax\(0,\s*1fr\)/,
+    );
+    expect(column).not.toMatch(
       /grid-template-rows\s*:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/,
     );
+    expect(globals).not.toMatch(/\.column-add-task\s*\{/);
+    expect(globals).not.toMatch(/\.board-sync-note\s*\{/);
     expect(column).toMatch(/overflow\s*:\s*hidden/);
 
     const cards = ruleBody(

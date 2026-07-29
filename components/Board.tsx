@@ -4,7 +4,6 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -494,14 +493,6 @@ export default function Board() {
     }
   }, [exposeMutationError, reload]);
 
-  const lastUpdated = useMemo(() => {
-    const latest = tasks.reduce<number | null>((current, task) => {
-      const timestamp = new Date(task.updated_at).getTime();
-      if (Number.isNaN(timestamp)) return current;
-      return current === null ? timestamp : Math.max(current, timestamp);
-    }, null);
-    return latest === null ? null : new Date(latest).toISOString();
-  }, [tasks]);
   const errorMsg = mutationErrorMsg ?? loadErrorMsg;
 
   function handleViewTabKeyDown(
@@ -643,10 +634,6 @@ export default function Board() {
                 types={types}
                 members={members}
                 groupBy={groupBy}
-                onOpenCreate={(defaults) => {
-                  setCreateDefaults(defaults);
-                  setCreateOpen(true);
-                }}
                 onPatchTask={patchTask}
                 onDeleteTask={deleteTask}
               />
@@ -667,13 +654,6 @@ export default function Board() {
             onRemoveMember={removeMember}
           />
         )}
-
-        {lastUpdated ? (
-          <p className="board-sync-note">
-            Live updates enabled · authoritative rows refreshed after every
-            change
-          </p>
-        ) : null}
       </div>
 
       <AddTaskDrawer

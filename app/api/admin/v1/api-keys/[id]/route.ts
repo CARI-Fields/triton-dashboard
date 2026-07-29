@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   createSupabaseManagedKeyStore,
+  deleteManagedKey,
   patchManagedKey,
   type ManagedKeyPatch,
 } from "@/lib/agent-api/admin-keys";
@@ -26,6 +27,21 @@ export async function PATCH(
       await patchManagedKey(store, id, changes),
       requestId,
     );
+  } catch (reason) {
+    return errorResponse(reason, requestId);
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const requestId = `req_${randomUUID()}`;
+  try {
+    await authenticateAdmin(request);
+    const { id } = await params;
+    const store = createSupabaseManagedKeyStore(getServerSupabase());
+    return successResponse(await deleteManagedKey(store, id), requestId);
   } catch (reason) {
     return errorResponse(reason, requestId);
   }

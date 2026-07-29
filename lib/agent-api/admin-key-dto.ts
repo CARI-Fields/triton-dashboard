@@ -1,5 +1,6 @@
 import { API_SCOPES, type ApiScope } from "@/lib/agent-api/types";
 import type {
+  DeletedManagedKey,
   ManagedKeyView,
   ManagedKeyWithSecret,
 } from "@/lib/agent-api/admin-keys";
@@ -24,6 +25,7 @@ const VIEW_KEYS = [
   "created_at",
 ] as const;
 const VIEW_WITH_SECRET_KEYS = [...VIEW_KEYS, "secret"] as const;
+const DELETED_KEY_KEYS = ["id"] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object"
@@ -126,6 +128,15 @@ export function isManagedKeyWithSecret(
     && hasExactKeys(value, VIEW_WITH_SECRET_KEYS)
     && hasValidViewFields(value)
     && hasValidGeneratedSecret(value);
+}
+
+export function isDeletedManagedKey(
+  value: unknown,
+): value is DeletedManagedKey {
+  return isPlainObject(value)
+    && hasExactKeys(value, DELETED_KEY_KEYS)
+    && typeof value.id === "string"
+    && UUID_PATTERN.test(value.id);
 }
 
 export function isManagedKeyViewArray(

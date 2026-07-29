@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isDeletedManagedKey,
   isManagedKeyView,
   isManagedKeyViewArray,
   isManagedKeyWithSecret,
@@ -29,6 +30,19 @@ const VIEW_PREFIX_MISMATCH =
 const CANONICAL_LAST_CHARACTERS = "AEIMQUYcgkosw048";
 
 describe("Admin key response DTO validators", () => {
+  it("accepts only the exact deleted-key id response", () => {
+    expect(isDeletedManagedKey({ id: VIEW.id })).toBe(true);
+    for (const value of [
+      null,
+      {},
+      { id: "not-a-uuid" },
+      { id: VIEW.id, key_digest: "digest-leak-marker" },
+      { id: VIEW.id, secret: SECRET },
+    ]) {
+      expect(isDeletedManagedKey(value)).toBe(false);
+    }
+  });
+
   it("accepts only the exact ManagedKeyView response shape", () => {
     expect(isManagedKeyView(VIEW)).toBe(true);
     expect(isManagedKeyView({ ...VIEW, member: null })).toBe(true);

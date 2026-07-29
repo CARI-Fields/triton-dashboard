@@ -1,9 +1,57 @@
-grant insert, update, delete on
+do $fixture$
+declare
+  relation_name text;
+  column_list text;
+begin
+  foreach relation_name in array array[
+    'tasks',
+    'experiments',
+    'activity',
+    'attachments'
+  ]
+  loop
+    select string_agg(
+      quote_ident(attribute.attname),
+      ', ' order by attribute.attnum
+    )
+    into column_list
+    from pg_attribute as attribute
+    join pg_class as relation
+      on relation.oid = attribute.attrelid
+    join pg_namespace as namespace
+      on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and relation.relname = relation_name
+      and attribute.attnum > 0
+      and not attribute.attisdropped;
+
+    execute format(
+      'revoke insert (%s), update (%s) on table public.%I from service_role',
+      column_list,
+      column_list,
+      relation_name
+    );
+  end loop;
+end
+$fixture$;
+
+revoke select, insert, update, delete on table
+  public.tasks,
+  public.experiments,
+  public.activity,
+  public.attachments
+from service_role;
+
+revoke usage, select, update
+  on sequence public.experiments_experiment_no_seq
+  from service_role;
+
+grant select, insert, update on table
   public.tasks,
   public.experiments,
   public.activity,
   public.attachments
 to service_role;
 
-grant select on sequence public.experiments_experiment_no_seq
+grant usage, select on sequence public.experiments_experiment_no_seq
   to service_role;

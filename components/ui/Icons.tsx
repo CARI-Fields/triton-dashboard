@@ -14,7 +14,9 @@ export type IconName =
   | "more"
   | "menu"
   | "close"
-  | "search";
+  | "search"
+  | "chevron-left"
+  | "chevron-right";
 
 const ICON_PATHS: Record<IconName, ReactNode> = {
   board: (
@@ -74,6 +76,8 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
       <path d="m16 16 4 4" />
     </>
   ),
+  "chevron-left": <path d="m15 5-7 7 7 7" />,
+  "chevron-right": <path d="m9 5 7 7-7 7" />,
 };
 
 export function Icon({

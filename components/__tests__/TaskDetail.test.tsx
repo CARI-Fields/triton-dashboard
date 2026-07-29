@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -411,7 +412,7 @@ describe("TaskDetail orchestration", () => {
     });
   });
 
-  it("renders a document record with a dedicated Activity rail", async () => {
+  it("renders a full-width record with Activity closed in a right-side drawer", async () => {
     enqueueLoad(taskA);
 
     const { container } = render(<TaskDetail id={taskA.id} />);
@@ -426,37 +427,48 @@ describe("TaskDetail orchestration", () => {
     expect(screen.getByRole("heading", { name: "Description" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Experiments" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Attachments" })).toBeDefined();
-    expect(screen.getByRole("complementary", { name: "Task activity" }))
-      .toBeDefined();
-    const activityContent = container.querySelector(
-      "#task-activity-content",
-    ) as HTMLElement;
-    expect(activityContent.getAttribute("tabindex")).toBe("0");
-    expect(screen.getByRole("heading", { name: "Activity" })).toBeDefined();
-    const hideActivity = screen.getByRole("button", {
-      name: "Hide activity",
-    });
-    expect(hideActivity.getAttribute("aria-expanded")).toBe("true");
-    expect(hideActivity.getAttribute("aria-controls"))
-      .toBe("task-activity-content");
-    const timelineInput = screen.getByLabelText("Add a note to the timeline");
-    fireEvent.change(timelineInput, { target: { value: "Preserve this note" } });
-
-    fireEvent.click(hideActivity);
-    expect(
-      container.querySelector(".task-detail-page")?.getAttribute(
-        "data-activity-collapsed",
-      ),
-    ).toBe("true");
-    expect(activityContent.style.display).toBe("none");
+    const taskPage = container.querySelector(".task-detail-page");
+    expect(taskPage?.getAttribute("data-activity-open")).toBe("false");
+    expect(screen.queryByRole("dialog", { name: "Task activity" })).toBeNull();
     const showActivity = screen.getByRole("button", {
       name: "Show activity",
     });
     expect(showActivity.getAttribute("aria-expanded")).toBe("false");
+    expect(showActivity.getAttribute("aria-controls"))
+      .toBe("task-activity-drawer");
 
+    showActivity.focus();
     fireEvent.click(showActivity);
+    const activityDialog = screen.getByRole("dialog", {
+      name: "Task activity",
+    });
+    expect(taskPage?.getAttribute("data-activity-open")).toBe("true");
     expect(screen.getByRole("heading", { name: "Activity" })).toBeDefined();
+    const activityContent = activityDialog.querySelector(
+      ".activity-drawer-scroll",
+    ) as HTMLElement;
+    expect(activityContent.getAttribute("tabindex")).toBe("0");
+    const timelineInput = within(activityDialog).getByLabelText(
+      "Add a note to the timeline",
+    );
+    fireEvent.change(timelineInput, { target: { value: "Preserve this note" } });
+
+    const closeActivity = within(activityDialog).getByRole("button", {
+      name: "Close activity",
+    });
+    fireEvent.click(closeActivity);
+    expect(taskPage?.getAttribute("data-activity-open")).toBe("false");
+    expect(screen.queryByRole("dialog", { name: "Task activity" })).toBeNull();
+
+    showActivity.focus();
+    fireEvent.click(showActivity);
+    expect(screen.getByRole("dialog", { name: "Task activity" })).toBeDefined();
     expect(timelineInput).toHaveProperty("value", "Preserve this note");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Task activity" })).toBeNull();
+      expect(document.activeElement).toBe(showActivity);
+    });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(screen.queryByRole("menuitem")).toBeNull();
     expect(screen.queryByText("Module")).toBeNull();
@@ -1294,6 +1306,7 @@ describe("TaskDetail orchestration", () => {
     const pendingInsert = deferred<QueryResult>();
     enqueue("activity", pendingInsert.promise);
     enqueue("activity", pendingInsert.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Show activity" }));
     const input = screen.getByLabelText("Add a note to the timeline");
     fireEvent.change(input, { target: { value: "One note" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -1311,6 +1324,7 @@ describe("TaskDetail orchestration", () => {
     await screen.findByRole("button", { name: "Task A" });
 
     enqueue("activity", failure("Timeline insert denied."));
+    fireEvent.click(screen.getByRole("button", { name: "Show activity" }));
     fireEvent.change(screen.getByLabelText("Add a note to the timeline"), {
       target: { value: "Keep this draft" },
     });

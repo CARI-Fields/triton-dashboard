@@ -40,11 +40,8 @@ export default function WorkspaceSkeleton({
         {variant === "record" ? (
           <div className="skeleton-record">
             <div>
-              {Array.from({ length: 8 }, (_, row) => <i key={row} />)}
+              {Array.from({ length: 13 }, (_, row) => <i key={row} />)}
             </div>
-            <aside>
-              {Array.from({ length: 5 }, (_, row) => <i key={row} />)}
-            </aside>
           </div>
         ) : null}
         {variant === "analytics" ? (

@@ -12,6 +12,8 @@ import { useRouter } from "next/navigation";
 import type { Experiment } from "@/lib/types";
 import { fmtDate } from "@/lib/time";
 import MarkdownField from "@/components/MarkdownField";
+import ActivityDrawer from "@/components/ui/ActivityDrawer";
+import { Icon } from "@/components/ui/Icons";
 import PageHeader from "@/components/ui/PageHeader";
 import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import {
@@ -217,6 +219,8 @@ export default function ExperimentDetail({ id }: { id: string }) {
   const [deleting, setDeleting] = useState(false);
   const [reloadingLatest, setReloadingLatest] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const activityTriggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     draftRef.current = draft;
@@ -534,6 +538,7 @@ export default function ExperimentDetail({ id }: { id: string }) {
     setDeleting(false);
     setReloadingLatest(false);
     setDuplicateOpen(false);
+    setActivityOpen(false);
     void loadInitial(visit);
     const unsubscribe = watchExperiment(
       id,
@@ -848,8 +853,16 @@ export default function ExperimentDetail({ id }: { id: string }) {
   const taskHref = bundle.task ? `/task/${bundle.task.id}` : "/experiments";
 
   return (
-    <div className="record-page experiment-detail-page">
-      <div className="record-main experiment-main-column">
+    <div
+      className="record-page experiment-detail-page"
+      data-activity-open={activityOpen}
+    >
+      <div
+        className="record-main experiment-main-column experiment-detail-scroll-region"
+        role="region"
+        aria-label="Experiment details"
+        tabIndex={0}
+      >
         <Link href={taskHref} className="back-link">
           ← {bundle.task?.title ?? "Experiments"}
         </Link>
@@ -948,6 +961,18 @@ export default function ExperimentDetail({ id }: { id: string }) {
                 onClick={() => setDuplicateOpen(true)}
               >
                 Duplicate
+              </button>
+              <button
+                ref={activityTriggerRef}
+                type="button"
+                className="btn activity-drawer-trigger"
+                aria-controls="experiment-activity-drawer"
+                aria-expanded={activityOpen}
+                aria-label={activityOpen ? "Hide activity" : "Show activity"}
+                onClick={() => setActivityOpen(true)}
+              >
+                <Icon name="activity" size={16} />
+                Activity
               </button>
               <ExperimentActionMenu
                 key={draft.id}
@@ -1187,11 +1212,20 @@ export default function ExperimentDetail({ id }: { id: string }) {
         </div>
       </div>
 
-      <ExperimentTimeline
-        experiment={server}
-        activity={bundle.activity}
-        onChanged={() => void loadRelated(visitRef.current)}
-      />
+      <ActivityDrawer
+        open={activityOpen}
+        panelId="experiment-activity-drawer"
+        label="Experiment activity"
+        className="experiment-activity-drawer"
+        onClose={() => setActivityOpen(false)}
+        returnFocusRef={activityTriggerRef}
+      >
+        <ExperimentTimeline
+          experiment={server}
+          activity={bundle.activity}
+          onChanged={() => void loadRelated(visitRef.current)}
+        />
+      </ActivityDrawer>
 
       <DuplicateExperimentDialog
         open={duplicateOpen}

@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Activity as ReactActivity,
   useCallback,
   useEffect,
   useMemo,
@@ -11,6 +10,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import MarkdownField from "@/components/MarkdownField";
+import ActivityDrawer from "@/components/ui/ActivityDrawer";
 import { Icon } from "@/components/ui/Icons";
 import PageHeader from "@/components/ui/PageHeader";
 import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
@@ -252,6 +252,7 @@ export default function TaskDetail({ id }: { id: string }) {
   const activityIdsRef = useRef(new Set<string>());
   const timelineSubmissionRef = useRef<TimelineSubmission | null>(null);
   const deleteSubmissionRef = useRef<DeleteSubmission | null>(null);
+  const activityTriggerRef = useRef<HTMLButtonElement>(null);
 
   const [loadedGeneration, setLoadedGeneration] = useState<number | null>(null);
   const [task, setTask] = useState<TaskModel | null>(null);
@@ -260,7 +261,7 @@ export default function TaskDetail({ id }: { id: string }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
-  const [activityOpen, setActivityOpen] = useState(true);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [draftNote, setDraftNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -452,6 +453,7 @@ export default function TaskDetail({ id }: { id: string }) {
     setMembers([]);
     setAttachments([]);
     setActivity([]);
+    setActivityOpen(false);
     setDraftNote("");
     setLoading(true);
     setNotFound(false);
@@ -1163,7 +1165,7 @@ export default function TaskDetail({ id }: { id: string }) {
   return (
     <div
       className="record-page task-detail-page"
-      data-activity-collapsed={!activityOpen}
+      data-activity-open={activityOpen}
     >
       <div
         className="record-main task-detail-scroll-region"
@@ -1211,19 +1213,33 @@ export default function TaskDetail({ id }: { id: string }) {
             </span>
           )}
           actions={(
-            <details className="action-menu">
-              <summary aria-label="More task actions">•••</summary>
-              <div className="action-menu-panel">
-                <button
-                  type="button"
-                  className="danger-subtle"
-                  disabled={deleting}
-                  onClick={() => void removeTask()}
-                >
-                  {deleting ? "Deleting…" : "Delete task"}
-                </button>
-              </div>
-            </details>
+            <>
+              <button
+                ref={activityTriggerRef}
+                type="button"
+                className="btn activity-drawer-trigger"
+                aria-controls="task-activity-drawer"
+                aria-expanded={activityOpen}
+                aria-label={activityOpen ? "Hide activity" : "Show activity"}
+                onClick={() => setActivityOpen(true)}
+              >
+                <Icon name="activity" size={16} />
+                Activity
+              </button>
+              <details className="action-menu">
+                <summary aria-label="More task actions">•••</summary>
+                <div className="action-menu-panel">
+                  <button
+                    type="button"
+                    className="danger-subtle"
+                    disabled={deleting}
+                    onClick={() => void removeTask()}
+                  >
+                    {deleting ? "Deleting…" : "Delete task"}
+                  </button>
+                </div>
+              </details>
+            </>
           )}
         />
 
@@ -1278,83 +1294,64 @@ export default function TaskDetail({ id }: { id: string }) {
         </section>
       </div>
 
-      <aside
-        className="activity-rail task-activity-panel"
-        aria-label="Task activity"
+      <ActivityDrawer
+        open={activityOpen}
+        panelId="task-activity-drawer"
+        label="Task activity"
+        className="task-activity-drawer"
+        onClose={() => setActivityOpen(false)}
+        returnFocusRef={activityTriggerRef}
       >
-        <div className="activity-rail-header">
-          {activityOpen ? <h2>Activity</h2> : null}
-          <button
-            type="button"
-            className="activity-rail-toggle"
-            aria-controls="task-activity-content"
-            aria-expanded={activityOpen}
-            aria-label={activityOpen ? "Hide activity" : "Show activity"}
-            title={activityOpen ? "Hide activity" : "Show activity"}
-            onClick={() => setActivityOpen((current) => !current)}
-          >
-            <Icon
-              name={activityOpen ? "chevron-right" : "chevron-left"}
-              size={16}
+        <div className="task-activity-content">
+          <div className="timeline-add">
+            <input
+              value={draftNote}
+              placeholder="Add a note to the timeline…"
+              onChange={(event) => setDraftNote(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void addTimelineNote();
+              }}
+              aria-label="Add a note to the timeline"
             />
-          </button>
-        </div>
-        <ReactActivity mode={activityOpen ? "visible" : "hidden"}>
-          <div
-            className="activity-rail-content task-activity-scroll-region"
-            id="task-activity-content"
-            tabIndex={0}
-          >
-            <div className="timeline-add">
-              <input
-                value={draftNote}
-                placeholder="Add a note to the timeline…"
-                onChange={(event) => setDraftNote(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void addTimelineNote();
-                }}
-                aria-label="Add a note to the timeline"
-              />
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => void addTimelineNote()}
-                disabled={notePending}
-              >
-                {notePending ? "Adding…" : "Add note"}
-              </button>
-            </div>
-            {activity.length === 0 ? (
-              <p className="muted">No activity yet.</p>
-            ) : (
-              <div className="timeline">
-                {activity.map((event, index) => (
-                  <div className="tl-row" key={event.id}>
-                    <div className="tl-rail">
-                      <span
-                        className="tl-dot"
-                        style={{
-                          background:
-                            KIND_COLOR[event.kind] ?? "var(--status-todo)",
-                        }}
-                      />
-                      {index < activity.length - 1 ? (
-                        <span className="tl-line" />
-                      ) : null}
-                    </div>
-                    <div className="tl-body">
-                      <div className="tl-text">{event.text}</div>
-                      <div className="tl-time">
-                        {relTime(event.created_at)} · {fmtDate(event.created_at)}
-                      </div>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => void addTimelineNote()}
+              disabled={notePending}
+            >
+              {notePending ? "Adding…" : "Add note"}
+            </button>
+          </div>
+          {activity.length === 0 ? (
+            <p className="muted">No activity yet.</p>
+          ) : (
+            <div className="timeline">
+              {activity.map((event, index) => (
+                <div className="tl-row" key={event.id}>
+                  <div className="tl-rail">
+                    <span
+                      className="tl-dot"
+                      style={{
+                        background:
+                          KIND_COLOR[event.kind] ?? "var(--status-todo)",
+                      }}
+                    />
+                    {index < activity.length - 1 ? (
+                      <span className="tl-line" />
+                    ) : null}
+                  </div>
+                  <div className="tl-body">
+                    <div className="tl-text">{event.text}</div>
+                    <div className="tl-time">
+                      {relTime(event.created_at)} · {fmtDate(event.created_at)}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </ReactActivity>
-      </aside>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </ActivityDrawer>
     </div>
   );
 }

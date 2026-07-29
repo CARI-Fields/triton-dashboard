@@ -394,8 +394,23 @@ const DOMAIN_ERRORS: Record<
   ),
 };
 
-function throwRpcError(error: unknown): void {
+function hasTrustedRpcErrorCode(error: unknown): boolean {
+  if (!isRecord(error) || typeof error.code !== "string") return false;
+  return /^[A-Z0-9]{5}$/.test(error.code)
+    || /^PGRST[0-9]{3}$/.test(error.code);
+}
+
+function throwRpcError(error: unknown, status: unknown): void {
   if (!error) return;
+  if (
+    typeof status !== "number"
+    || !Number.isInteger(status)
+    || status < 400
+    || status > 599
+    || !hasTrustedRpcErrorCode(error)
+  ) {
+    throw new Error("Agent API mutation RPC outcome is ambiguous.");
+  }
   const message = isRecord(error) && typeof error.message === "string"
     ? error.message
     : "";
@@ -426,7 +441,7 @@ export function createMutationRepository(client: SupabaseClient) {
     async patchTask(input: PatchTaskInput): Promise<
       MutationResult<TaskMutationDto>
     > {
-      const { data, error } = await client.rpc("agent_api_patch_task", {
+      const { data, error, status } = await client.rpc("agent_api_patch_task", {
         p_api_key_id: input.context.apiKeyId,
         p_member_id: input.context.memberId,
         p_task_id: input.taskId,
@@ -434,14 +449,14 @@ export function createMutationRepository(client: SupabaseClient) {
         p_changes: input.changes,
         p_request_id: input.requestId,
       });
-      throwRpcError(error);
+      throwRpcError(error, status);
       return mutationResult(data, taskDto);
     },
 
     async createExperiment(input: CreateExperimentInput): Promise<
       MutationResult<ExperimentMutationDto>
     > {
-      const { data, error } = await client.rpc(
+      const { data, error, status } = await client.rpc(
         "agent_api_create_experiment",
         {
           p_api_key_id: input.context.apiKeyId,
@@ -453,14 +468,14 @@ export function createMutationRepository(client: SupabaseClient) {
           p_request_id: input.requestId,
         },
       );
-      throwRpcError(error);
+      throwRpcError(error, status);
       return mutationResult(data, experimentDto);
     },
 
     async patchExperiment(input: PatchExperimentInput): Promise<
       MutationResult<ExperimentMutationDto>
     > {
-      const { data, error } = await client.rpc(
+      const { data, error, status } = await client.rpc(
         "agent_api_patch_experiment",
         {
           p_api_key_id: input.context.apiKeyId,
@@ -471,14 +486,14 @@ export function createMutationRepository(client: SupabaseClient) {
           p_request_id: input.requestId,
         },
       );
-      throwRpcError(error);
+      throwRpcError(error, status);
       return mutationResult(data, experimentDto);
     },
 
     async createActivity(input: CreateActivityInput): Promise<
       MutationResult<ActivityMutationDto>
     > {
-      const { data, error } = await client.rpc(
+      const { data, error, status } = await client.rpc(
         "agent_api_create_activity",
         {
           p_api_key_id: input.context.apiKeyId,
@@ -490,14 +505,14 @@ export function createMutationRepository(client: SupabaseClient) {
           p_request_id: input.requestId,
         },
       );
-      throwRpcError(error);
+      throwRpcError(error, status);
       return mutationResult(data, activityDto);
     },
 
     async createAttachment(input: CreateAttachmentInput): Promise<
       MutationResult<AttachmentMutationDto>
     > {
-      const { data, error } = await client.rpc(
+      const { data, error, status } = await client.rpc(
         "agent_api_create_attachment",
         {
           p_api_key_id: input.context.apiKeyId,
@@ -511,14 +526,14 @@ export function createMutationRepository(client: SupabaseClient) {
           p_request_id: input.requestId,
         },
       );
-      throwRpcError(error);
+      throwRpcError(error, status);
       return mutationResult(data, attachmentDto);
     },
 
     async patchAttachment(input: PatchAttachmentInput): Promise<
       MutationResult<AttachmentMutationDto>
     > {
-      const { data, error } = await client.rpc(
+      const { data, error, status } = await client.rpc(
         "agent_api_patch_attachment",
         {
           p_api_key_id: input.context.apiKeyId,
@@ -529,7 +544,7 @@ export function createMutationRepository(client: SupabaseClient) {
           p_request_id: input.requestId,
         },
       );
-      throwRpcError(error);
+      throwRpcError(error, status);
       return mutationResult(data, attachmentDto);
     },
   };

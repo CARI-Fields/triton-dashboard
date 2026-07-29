@@ -394,6 +394,8 @@ describe("Agent API mutation RPC repository", () => {
           details: `SUPABASE_SECRET_KEY=sb_secret_${message}`,
           hint: "internal",
         },
+        status: 400,
+        statusText: "Bad Request",
       });
 
       await expect(repository.patchTask({
@@ -413,7 +415,11 @@ describe("Agent API mutation RPC repository", () => {
       error: {
         message: "VERSION_CONFLICT: leaked database detail",
         code: "P0001",
+        details: "internal",
+        hint: null,
       },
+      status: 400,
+      statusText: "Bad Request",
     });
 
     await expect(repository.patchTask({

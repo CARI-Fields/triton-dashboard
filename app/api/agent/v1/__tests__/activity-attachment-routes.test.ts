@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentApiError } from "@/lib/agent-api/errors";
 import type { AgentContext, ApiScope } from "@/lib/agent-api/types";
@@ -183,6 +185,42 @@ function uploadForm(
   return { form, file };
 }
 
+function nativeMultipartRequest(
+  parts: Array<{
+    name: string;
+    value: string;
+    filename?: string;
+    contentType?: string;
+  }>,
+): Request {
+  const boundary = "triton-board-native-boundary";
+  const encoded = parts.map((part) => {
+    const filename = part.filename === undefined
+      ? ""
+      : `; filename="${part.filename}"`;
+    const contentType = part.contentType === undefined
+      ? ""
+      : `Content-Type: ${part.contentType}\r\n`;
+    return `--${boundary}\r\n`
+      + `Content-Disposition: form-data; name="${part.name}"${filename}\r\n`
+      + contentType
+      + "\r\n"
+      + part.value
+      + "\r\n";
+  }).join("") + `--${boundary}--\r\n`;
+  return new Request(
+    `https://board.test/api/agent/v1/experiments/${EXPERIMENT_ID}/attachments`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Idempotency-Key": IDEMPOTENCY_KEY,
+      },
+      body: encoded,
+    },
+  );
+}
+
 async function body(response: Response) {
   return response.json() as Promise<Record<string, unknown>>;
 }
@@ -364,6 +402,69 @@ describe("Attachment POST route", () => {
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
+  it("decodes and uploads a native multipart Request without a formData spy", async () => {
+    const request = nativeMultipartRequest([
+      {
+        name: "file",
+        filename: "ignored-client-name.svg",
+        contentType: "image/png",
+        value: "\x01\x02\x03\x04",
+      },
+      { name: "caption", value: "  Native profile  " },
+    ]);
+    const decoded = await request.clone().formData();
+    expect(decoded.getAll("file")).toHaveLength(1);
+    const response = await attachmentCreateRoute.POST(request, {
+      params: Promise.resolve({ id: EXPERIMENT_ID }),
+    });
+    expect(response.status).toBe(201);
+    expect(new Uint8Array(storage.upload.mock.calls[0][1] as ArrayBuffer))
+      .toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(createAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "Native profile" }),
+    );
+  });
+
+  it.each([
+    {
+      label: "duplicate native files",
+      parts: [
+        {
+          name: "file",
+          filename: "one.png",
+          contentType: "image/png",
+          value: "one",
+        },
+        {
+          name: "file",
+          filename: "two.png",
+          contentType: "image/png",
+          value: "two",
+        },
+      ],
+    },
+    {
+      label: "protected native path",
+      parts: [
+        {
+          name: "file",
+          filename: "one.png",
+          contentType: "image/png",
+          value: "one",
+        },
+        { name: "path", value: "client/path.png" },
+      ],
+    },
+  ])("rejects $label after native multipart decoding", async ({ parts }) => {
+    const response = await attachmentCreateRoute.POST(
+      nativeMultipartRequest(parts),
+      { params: Promise.resolve({ id: EXPERIMENT_ID }) },
+    );
+    expect(response.status).toBe(422);
+    expect(storage.upload).not.toHaveBeenCalled();
+    expect(createAttachment).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["image/png", "png"],
     ["image/jpeg", "jpg"],
@@ -479,6 +580,25 @@ describe("Attachment POST route", () => {
     vi.mocked(createAttachment)
       .mockRejectedValueOnce(new Error("Agent API mutation RPC failed."))
       .mockRejectedValueOnce(new Error("Agent API mutation RPC failed."));
+    const response = await attachmentCreateRoute.POST(
+      multipartRequest(uploadForm().form),
+      { params: Promise.resolve({ id: EXPERIMENT_ID }) },
+    );
+    expect(createAttachment).toHaveBeenCalledTimes(2);
+    expect(storage.remove).not.toHaveBeenCalled();
+    expect(response.status).toBe(500);
+  });
+
+  it("does not cleanup when the retry is definite after an ambiguous first attempt", async () => {
+    vi.mocked(createAttachment)
+      .mockRejectedValueOnce(new Error(
+        "Agent API mutation RPC outcome is ambiguous.",
+      ))
+      .mockRejectedValueOnce(new AgentApiError(
+        403,
+        "TASK_SCOPE_FORBIDDEN",
+        "The Agent no longer has access to this Task.",
+      ));
     const response = await attachmentCreateRoute.POST(
       multipartRequest(uploadForm().form),
       { params: Promise.resolve({ id: EXPERIMENT_ID }) },

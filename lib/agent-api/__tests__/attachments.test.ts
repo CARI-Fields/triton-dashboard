@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { AgentApiError } from "@/lib/agent-api/errors";
 import type { AgentContext } from "@/lib/agent-api/types";
 import { parseCanonicalIdempotencyKey } from "@/lib/agent-api/headers";
 import {
@@ -464,7 +465,14 @@ describe("Activity and Attachment mutation adapters", () => {
     const fixture = repository();
     fixture.rpc.mockResolvedValue({
       data: null,
-      error: { code: "23503", message: "foreign key violation" },
+      error: {
+        code: "23503",
+        message: "foreign key violation",
+        details: "Key is not present.",
+        hint: null,
+      },
+      status: 409,
+      statusText: "Conflict",
     });
     await expect(fixture.repository.createAttachment({
       context,
@@ -476,5 +484,82 @@ describe("Activity and Attachment mutation adapters", () => {
       requestHash: REQUEST_HASH,
       requestId: REQUEST_ID,
     })).rejects.toBeInstanceOf(MutationRpcRejectedError);
+  });
+
+  it.each([
+    {
+      label: "fetch rejection",
+      response: {
+        data: null,
+        error: {
+          code: "",
+          message: "TypeError: fetch failed",
+          details: "network failure",
+          hint: "",
+        },
+        status: 0,
+        statusText: "",
+      },
+    },
+    {
+      label: "malformed successful response",
+      response: {
+        data: null,
+        error: { message: "<html>not json</html>" },
+        status: 200,
+        statusText: "OK",
+      },
+    },
+    {
+      label: "domain-like fetch rejection",
+      response: {
+        data: null,
+        error: {
+          code: "",
+          message: "TASK_SCOPE_FORBIDDEN",
+          details: "transport",
+          hint: "",
+        },
+        status: 0,
+        statusText: "",
+      },
+    },
+    {
+      label: "domain-like malformed 2xx",
+      response: {
+        data: null,
+        error: {
+          code: "P0001",
+          message: "TASK_SCOPE_FORBIDDEN",
+          details: "untrusted success body",
+          hint: "",
+        },
+        status: 200,
+        statusText: "OK",
+      },
+    },
+  ])("treats $label as ambiguous", async ({ response }) => {
+    const fixture = repository();
+    fixture.rpc.mockResolvedValue(response);
+    let reason: unknown;
+    try {
+      await fixture.repository.createAttachment({
+        context,
+        experimentId: EXPERIMENT_ID,
+        path: "generated.png",
+        url: "https://storage.test/generated.png",
+        caption: "Profile",
+        idempotencyKey: IDEMPOTENCY_KEY,
+        requestHash: REQUEST_HASH,
+        requestId: REQUEST_ID,
+      });
+    } catch (caught) {
+      reason = caught;
+    }
+    expect(reason).toEqual(new Error(
+      "Agent API mutation RPC outcome is ambiguous.",
+    ));
+    expect(reason).not.toBeInstanceOf(MutationRpcRejectedError);
+    expect(reason).not.toBeInstanceOf(AgentApiError);
   });
 });

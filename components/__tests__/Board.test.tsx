@@ -345,6 +345,56 @@ describe("Board UUID assignment errors", () => {
     expect(screen.queryByText(/first assignment denied/)).toBeNull();
   });
 
+  it("clears an old action error when a status mutation succeeds", async () => {
+    enqueueBoardLoad();
+    enqueue("task_assignees", failure("assignment denied before status change"));
+    render(<Board />);
+    await openAssigneePicker();
+
+    fireEvent.click(
+      within(screen.getByRole("menu"))
+        .getByRole("button", { name: /Alice$/ }),
+    );
+    expect(await screen.findByText(/assignment denied before status change/))
+      .toBeDefined();
+
+    enqueue("tasks", ok(null));
+    enqueueBoardLoad({ ...task, status: "done" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), {
+      target: { value: "done" },
+    });
+
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("combobox", { name: "Status" }) as HTMLSelectElement)
+          .value,
+      ).toBe("done");
+    });
+    expect(screen.queryByText(/assignment denied before status change/))
+      .toBeNull();
+  });
+
+  it("shows a newer load failure instead of an older action error", async () => {
+    enqueueBoardLoad();
+    enqueue("task_assignees", failure("older assignment denied"));
+    render(<Board />);
+    await openAssigneePicker();
+
+    fireEvent.click(
+      within(screen.getByRole("menu"))
+        .getByRole("button", { name: /Alice$/ }),
+    );
+    expect(await screen.findByText(/older assignment denied/)).toBeDefined();
+
+    enqueue("modules", failure("newer board reload denied"));
+    enqueue("tasks", ok([taskRow(task, [alice])]));
+    enqueue("members", ok([alice]));
+    triggerRealtime("members", "UPDATE", alice);
+
+    expect(await screen.findByText(/newer board reload denied/)).toBeDefined();
+    expect(screen.queryByText(/older assignment denied/)).toBeNull();
+  });
+
   it("reloads after a successful UUID assignment", async () => {
     enqueueBoardLoad();
     enqueue("task_assignees", ok(null));

@@ -38,6 +38,11 @@ function errorMessage(caught: unknown): string {
   return caught instanceof Error ? caught.message : "The request failed.";
 }
 
+interface BoardError {
+  source: "load" | "action";
+  message: string;
+}
+
 function nextPosition(items: { position: number }[]): number {
   return items.length ? Math.max(...items.map((i) => i.position)) + 1 : 0;
 }
@@ -471,11 +476,10 @@ export default function Board() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadErrorMsg, setLoadErrorMsg] = useState<string | null>(null);
-  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
+  const [currentError, setCurrentError] = useState<BoardError | null>(null);
   const [newMember, setNewMember] = useState("");
   const [pickerId, setPickerId] = useState<string | null>(null);
-  const errorMsg = actionErrorMsg ?? loadErrorMsg;
+  const errorMsg = currentError?.message ?? null;
 
   const recordActivity = useCallback((
     taskId: string,
@@ -485,14 +489,20 @@ export default function Board() {
     void logActivity(taskId, text, kind)
       .then((activityError) => {
         if (activityError) {
-          setActionErrorMsg(`Could not record activity. ${activityError}`);
+          setCurrentError({
+            source: "action",
+            message: `Could not record activity. ${activityError}`,
+          });
         }
       })
       .catch((caught: unknown) => {
         const message = caught instanceof Error
           ? caught.message
           : "The request failed.";
-        setActionErrorMsg(`Could not record activity. ${message}`);
+        setCurrentError({
+          source: "action",
+          message: `Could not record activity. ${message}`,
+        });
       });
   }, []);
 
@@ -508,14 +518,14 @@ export default function Board() {
     ]);
     const firstError = m.error || t.error || mem.error;
     if (firstError) {
-      setLoadErrorMsg(firstError.message);
+      setCurrentError({ source: "load", message: firstError.message });
     } else {
       setModules((m.data ?? []) as Module[]);
       setTasks(
         ((t.data ?? []) as unknown as TaskRelationRow[]).map(normalizeTaskRow),
       );
       setMembers((mem.data ?? []) as Member[]);
-      setLoadErrorMsg(null);
+      setCurrentError((error) => error?.source === "load" ? null : error);
     }
     setLoading(false);
   }, []);
@@ -547,6 +557,7 @@ export default function Board() {
   const addModule = useCallback(
     async (kind: Module["kind"]) => {
       if (!supabase) return;
+      setCurrentError(null);
       const siblings = modules.filter((m) => m.kind === kind);
       await supabase
         .from("modules")
@@ -559,6 +570,7 @@ export default function Board() {
   const patchModule = useCallback(
     async (id: string, patch: Partial<Module>) => {
       if (!supabase) return;
+      setCurrentError(null);
       await supabase.from("modules").update(patch).eq("id", id);
       reload();
     },
@@ -569,6 +581,7 @@ export default function Board() {
     async (id: string, name: string) => {
       if (!supabase) return;
       if (!window.confirm(`Delete module "${name}" and all its tasks?`)) return;
+      setCurrentError(null);
       await supabase.from("modules").delete().eq("id", id);
       reload();
     },
@@ -578,6 +591,7 @@ export default function Board() {
   const addTask = useCallback(
     async (moduleId: string) => {
       if (!supabase) return;
+      setCurrentError(null);
       const siblings = tasks.filter((t) => t.module_id === moduleId);
       // Pin new tasks to the top of the column, and open the assignee picker
       // right away so the task can be assigned without another click.
@@ -604,6 +618,7 @@ export default function Board() {
   const patchTask = useCallback(
     async (id: string, patch: Partial<Task>) => {
       if (!supabase) return;
+      setCurrentError(null);
       await supabase.from("tasks").update(patch).eq("id", id);
       if (patch.status) {
         recordActivity(id, `Status set to ${statusLabel(patch.status)}`, "status");
@@ -619,6 +634,7 @@ export default function Board() {
   const deleteTask = useCallback(
     async (id: string) => {
       if (!supabase) return;
+      setCurrentError(null);
       await supabase.from("tasks").delete().eq("id", id);
       reload();
     },
@@ -630,7 +646,7 @@ export default function Board() {
       if (!supabase) return;
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
-      setActionErrorMsg(null);
+      setCurrentError(null);
       try {
         const member = members.find((candidate) => candidate.name === name);
         if (!member) throw new Error(`Unknown member: ${name}`);
@@ -647,9 +663,10 @@ export default function Board() {
         );
         reload();
       } catch (caught) {
-        setActionErrorMsg(
-          `Could not update Task assignment. ${errorMessage(caught)}`,
-        );
+        setCurrentError({
+          source: "action",
+          message: `Could not update Task assignment. ${errorMessage(caught)}`,
+        });
       }
     },
     [members, recordActivity, tasks, reload]
@@ -660,6 +677,7 @@ export default function Board() {
       if (!supabase) return;
       const n = name.trim();
       if (!n || members.some((m) => m.name === n)) return;
+      setCurrentError(null);
       await supabase
         .from("members")
         .insert({ name: n, initials: initialsFromName(n), position: nextPosition(members) });
@@ -673,7 +691,7 @@ export default function Board() {
       if (!supabase) return;
       const n = name.trim();
       if (!n) return;
-      setActionErrorMsg(null);
+      setCurrentError(null);
       try {
         let member = members.find((candidate) => candidate.name === n);
         if (!member) {
@@ -696,9 +714,10 @@ export default function Board() {
         }
         reload();
       } catch (caught) {
-        setActionErrorMsg(
-          `Could not add and assign teammate. ${errorMessage(caught)}`,
-        );
+        setCurrentError({
+          source: "action",
+          message: `Could not add and assign teammate. ${errorMessage(caught)}`,
+        });
       }
     },
     [members, recordActivity, tasks, reload]
@@ -708,6 +727,7 @@ export default function Board() {
     async (member: Member) => {
       if (!supabase) return;
       if (!window.confirm(`Remove ${member.name} from the team?`)) return;
+      setCurrentError(null);
       await supabase.from("members").delete().eq("id", member.id);
       reload();
     },

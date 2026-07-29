@@ -1,0 +1,1884 @@
+openapi: 3.1.0
+info:
+  title: Triton Board Agent API
+  version: 1.0.0
+  description: |
+    Safe, single-resource access for AI agents. The API has no delete or batch
+    operation. PATCH is optimistic-concurrency protected; every data-creating
+    POST is idempotent.
+servers:
+  - url: /api/agent/v1
+    description: Exact Agent API base path. Set TRITON_BOARD_API_URL to the deployment origin plus this path.
+security:
+  - AgentApiKey: []
+tags:
+  - name: Discovery
+  - name: Board reads
+  - name: Tasks
+  - name: Experiments
+  - name: Attachments
+  - name: Audit
+paths:
+  /capabilities:
+    get:
+      tags: [Discovery]
+      operationId: getCapabilities
+      summary: Inspect the authenticated Key identity, scopes, and fixed limits.
+      description: Requires authentication but no scope.
+      responses:
+        "200":
+          description: Current capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilitiesSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /board:
+    get:
+      tags: [Board reads]
+      operationId: getBoardSummary
+      summary: Get exact Board counts grouped by status.
+      x-required-scope: board:read
+      responses:
+        "200":
+          description: Board summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardSummarySuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /modules:
+    get:
+      tags: [Board reads]
+      operationId: listModules
+      summary: List all Modules in Board order.
+      x-required-scope: board:read
+      responses:
+        "200":
+          description: Module list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModulesSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /members:
+    get:
+      tags: [Board reads]
+      operationId: listMembers
+      summary: List all Members in Board order.
+      x-required-scope: board:read
+      responses:
+        "200":
+          description: Member list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembersSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /tasks:
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: Filter and cursor-page Tasks.
+      x-required-scope: board:read
+      parameters:
+        - $ref: "#/components/parameters/TaskModuleId"
+        - $ref: "#/components/parameters/TaskAssigneeId"
+        - $ref: "#/components/parameters/TaskStatus"
+        - $ref: "#/components/parameters/UpdatedAfter"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Descending updated_at/id page. Pass next_cursor unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskPageSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /tasks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: Get one Task and its assignee Member UUIDs.
+      x-required-scope: board:read
+      responses:
+        "200":
+          description: Task with a quoted updated_at ETag.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      tags: [Tasks]
+      operationId: patchTask
+      summary: Apply a minimal Task field change.
+      description: Requires the Key's Member to be assigned to the Task.
+      x-required-scope: tasks:write
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskPatchEnvelope"
+      responses:
+        "200":
+          description: Updated Task mutation DTO. Assignees are read via GET.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskMutationSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "412":
+          $ref: "#/components/responses/VersionConflict"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /tasks/{id}/activity:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+    get:
+      tags: [Tasks]
+      operationId: listTaskActivity
+      summary: List a Task's activity newest first.
+      x-required-scope: board:read
+      responses:
+        "200":
+          description: Activity list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivitiesSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Tasks]
+      operationId: appendTaskActivity
+      summary: Append one comment Activity.
+      description: Requires the Key's Member to be assigned to the Task.
+      x-required-scope: activity:append
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityCreate"
+      responses:
+        "200":
+          description: Idempotent replay of the original result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityReplayedSuccess"
+        "201":
+          description: Activity created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityCreatedSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /tasks/{id}/experiments:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+    post:
+      tags: [Experiments]
+      operationId: createTaskExperiment
+      summary: Create a planned Experiment under one Task.
+      description: |
+        The body accepts only name. The URL supplies task_id; the server fixes
+        owner_id to the Key's Member and status to planned.
+      x-required-scope: experiments:write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExperimentCreate"
+      responses:
+        "200":
+          description: Idempotent replay of the original result.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExperimentReplayedSuccess"
+        "201":
+          description: Experiment created.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExperimentCreatedSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /experiments:
+    get:
+      tags: [Experiments]
+      operationId: listExperiments
+      summary: Filter and cursor-page Experiments.
+      x-required-scope: board:read
+      parameters:
+        - $ref: "#/components/parameters/ExperimentTaskId"
+        - $ref: "#/components/parameters/ExperimentOwnerId"
+        - $ref: "#/components/parameters/ExperimentStatus"
+        - $ref: "#/components/parameters/UpdatedAfter"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Descending updated_at/id page. Pass next_cursor unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExperimentPageSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /experiments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+    get:
+      tags: [Experiments]
+      operationId: getExperiment
+      summary: Get an Experiment, Task/Owner display data, and Attachments.
+      x-required-scope: board:read
+      responses:
+        "200":
+          description: Experiment detail with a quoted updated_at ETag.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExperimentDetailSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      tags: [Experiments]
+      operationId: patchExperiment
+      summary: Apply a minimal Experiment field change.
+      description: |
+        Requires collaboration on the parent Task. Workflow and same-Task
+        baseline constraints are validated before the atomic mutation.
+      x-required-scope: experiments:write
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExperimentPatchEnvelope"
+      responses:
+        "200":
+          description: Updated Experiment mutation DTO.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExperimentMutationSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "412":
+          $ref: "#/components/responses/VersionConflict"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /experiments/{id}/attachments:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+    post:
+      tags: [Attachments]
+      operationId: createExperimentAttachment
+      summary: Upload one image Attachment to an Experiment.
+      description: |
+        Requires collaboration on the parent Task. Accept exactly one file and
+        at most one caption. Allowed file media types are image/png, image/jpeg,
+        image/webp, and image/gif; size must be 1 byte through 10 MiB.
+      x-required-scope: attachments:write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/AttachmentCreateForm"
+            encoding:
+              file:
+                contentType: image/png, image/jpeg, image/webp, image/gif
+      responses:
+        "200":
+          description: Idempotent replay of the original Attachment.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentReplayedSuccess"
+        "201":
+          description: Attachment created.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentCreatedSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /attachments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ResourceId"
+    patch:
+      tags: [Attachments]
+      operationId: patchAttachment
+      summary: Replace one Attachment caption.
+      description: Requires collaboration on the parent Task.
+      x-required-scope: attachments:write
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachmentPatchEnvelope"
+      responses:
+        "200":
+          description: Updated Attachment.
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "412":
+          $ref: "#/components/responses/VersionConflict"
+        "413":
+          $ref: "#/components/responses/BodyTooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /audit:
+    get:
+      tags: [Audit]
+      operationId: listAudit
+      summary: List Agent API audit entries for currently collaborated Tasks.
+      description: |
+        Snapshots are allowlisted by resource type. Recovery uses before_state,
+        then a fresh GET and an ordinary concurrency-safe PATCH.
+      x-required-scope: audit:read
+      responses:
+        "200":
+          description: Audit entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  securitySchemes:
+    AgentApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: Triton Board API Key
+      description: Read TRITON_BOARD_API_KEY from the environment; never place it in a URL, body, or log.
+  parameters:
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Exact quoted RFC 3339 updated_at ETag from the latest GET.
+      schema:
+        $ref: "#/components/schemas/QuotedETag"
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Canonical lowercase UUID. Reuse it for retries of the same logical POST;
+        using it with a different method, path, body, caption, MIME, or file digest returns 409.
+      schema:
+        type: string
+        format: uuid
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    TaskModuleId:
+      name: module_id
+      in: query
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    TaskAssigneeId:
+      name: assignee_id
+      in: query
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    TaskStatus:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/TaskStatus"
+    ExperimentTaskId:
+      name: task_id
+      in: query
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ExperimentOwnerId:
+      name: owner_id
+      in: query
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ExperimentStatus:
+      name: status
+      in: query
+      schema:
+        $ref: "#/components/schemas/ExperimentStatus"
+    UpdatedAfter:
+      name: updated_after
+      in: query
+      description: Strict RFC 3339 timestamp accepted by PostgreSQL timestamptz.
+      schema:
+        $ref: "#/components/schemas/Timestamp"
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque canonical base64url cursor returned as next_cursor.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9_-]+$"
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+  headers:
+    ETag:
+      description: Quoted updated_at value to send unchanged as If-Match.
+      schema:
+        $ref: "#/components/schemas/QuotedETag"
+    RetryAfter:
+      description: Seconds to wait before considering a new write.
+      schema:
+        type: integer
+        const: 60
+  responses:
+    BadRequest:
+      description: Invalid query, UUID, JSON, request envelope, If-Match, Idempotency-Key, or multipart form.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing, malformed, unknown, expired, revoked, or orphaned API Key.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Missing scope or current Task collaboration.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    IdempotencyConflict:
+      description: The Key already used this Idempotency-Key for a different normalized request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    VersionConflict:
+      description: The resource changed after the ETag was read. GET and compare target fields before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BodyTooLarge:
+      description: A JSON request body exceeded 256 KiB.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unprocessable:
+      description: |
+        Unknown, protected, invalid, empty, or workflow-invalid fields,
+        including an unsupported, empty, or greater-than-10-MiB Attachment file.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: The Key reached 30 successful new writes in the preceding 60 seconds.
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Internal or dependency failure. The error envelope never exposes backend secrets.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    Timestamp:
+      type: string
+      format: date-time
+      description: A real Gregorian date in server-supported years 0100 through 9999, with strict time and offset bounds.
+      pattern: '^(?:(?:0[1-9]\d{2}|[1-9]\d{3})-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|02-(?:0[1-9]|1\d|2[0-8]))|(?:(?:0[48]|[2468][048]|[13579][26])00|(?:0[1-9]|[1-9]\d)(?:0[48]|[2468][048]|[13579][26]))-02-29)T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:0\d|1[0-5]):[0-5]\d)$'
+    QuotedETag:
+      type: string
+      description: The exact Timestamp grammar wrapped in one pair of double quotes.
+      pattern: '^"(?:(?:0[1-9]\d{2}|[1-9]\d{3})-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|02-(?:0[1-9]|1\d|2[0-8]))|(?:(?:0[48]|[2468][048]|[13579][26])00|(?:0[1-9]|[1-9]\d)(?:0[48]|[2468][048]|[13579][26]))-02-29)T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:0\d|1[0-5]):[0-5]\d)"$'
+    NullableTimestamp:
+      oneOf:
+        - $ref: "#/components/schemas/Timestamp"
+        - type: "null"
+    NullableUuid:
+      oneOf:
+        - $ref: "#/components/schemas/Uuid"
+        - type: "null"
+    DateOnly:
+      type: string
+      format: date
+      description: A real Gregorian calendar date in server-supported years 0100 through 9999.
+      pattern: '^(?:(?:0[1-9]\d{2}|[1-9]\d{3})-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|02-(?:0[1-9]|1\d|2[0-8]))|(?:(?:0[48]|[2468][048]|[13579][26])00|(?:0[1-9]|[1-9]\d)(?:0[48]|[2468][048]|[13579][26]))-02-29)$'
+    NullableDateOnly:
+      oneOf:
+        - $ref: "#/components/schemas/DateOnly"
+        - type: "null"
+    TaskStatus:
+      type: string
+      enum: [todo, in_progress, done, blocked]
+    TaskPriority:
+      type: string
+      enum: [low, medium, high, urgent]
+    ExperimentStatus:
+      type: string
+      enum: [planned, running, analyzing, completed, blocked, cancelled]
+    DecisionOutcome:
+      oneOf:
+        - type: string
+          enum: [reference, accepted, rejected, inconclusive]
+        - type: "null"
+    Scope:
+      type: string
+      enum:
+        - board:read
+        - tasks:write
+        - experiments:write
+        - attachments:write
+        - activity:append
+        - audit:read
+    SuccessMeta:
+      type: object
+      additionalProperties: false
+      required: [request_id]
+      properties:
+        request_id:
+          type: string
+          pattern: "^req_"
+    CreatedMeta:
+      type: object
+      additionalProperties: false
+      required: [request_id, idempotency_replayed]
+      properties:
+        request_id:
+          type: string
+          pattern: "^req_"
+        idempotency_replayed:
+          type: boolean
+          const: false
+    ReplayedMeta:
+      type: object
+      additionalProperties: false
+      required: [request_id, idempotency_replayed]
+      properties:
+        request_id:
+          type: string
+          pattern: "^req_"
+        idempotency_replayed:
+          type: boolean
+          const: true
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, request_id, retryable]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            request_id:
+              type: string
+              pattern: "^req_"
+            retryable:
+              type: boolean
+            details:
+              type: object
+              additionalProperties: true
+    Capabilities:
+      type: object
+      additionalProperties: false
+      required: [key_prefix, member, scopes, expires_at, limits]
+      properties:
+        key_prefix:
+          type: string
+        member:
+          type: object
+          additionalProperties: false
+          required: [id, name]
+          properties:
+            id:
+              $ref: "#/components/schemas/Uuid"
+            name:
+              type: string
+        scopes:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Scope"
+        expires_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        limits:
+          type: object
+          additionalProperties: false
+          required:
+            - default_page_size
+            - max_page_size
+            - max_json_body_bytes
+            - max_attachment_bytes
+            - successful_writes_per_60_seconds
+          properties:
+            default_page_size:
+              type: integer
+              const: 50
+            max_page_size:
+              type: integer
+              const: 100
+            max_json_body_bytes:
+              type: integer
+              const: 262144
+            max_attachment_bytes:
+              type: integer
+              const: 10485760
+            successful_writes_per_60_seconds:
+              type: integer
+              const: 30
+    Module:
+      type: object
+      additionalProperties: false
+      required: [id, name, kind, objective, position, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [pipeline, foundation]
+        objective:
+          type: string
+        position:
+          type: number
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+    Member:
+      type: object
+      additionalProperties: false
+      required: [id, name, initials, position, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        name:
+          type: string
+        initials:
+          type: string
+        position:
+          type: number
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+    TaskMutation:
+      type: object
+      required: [id, module_id, title, status, notes, tags, priority, due_date, position, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        module_id:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        title:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        notes:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        due_date:
+          $ref: "#/components/schemas/NullableDateOnly"
+        position:
+          type: number
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+    Task:
+      allOf:
+        - $ref: "#/components/schemas/TaskMutation"
+        - type: object
+          required: [assignees]
+          properties:
+            assignees:
+              type: array
+              items:
+                type: string
+      unevaluatedProperties: false
+    StrictTaskMutation:
+      allOf:
+        - $ref: "#/components/schemas/TaskMutation"
+      unevaluatedProperties: false
+    TaskPatchEnvelope:
+      type: object
+      additionalProperties: false
+      required: [changes]
+      properties:
+        changes:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            title:
+              type: string
+            status:
+              $ref: "#/components/schemas/TaskStatus"
+            notes:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+            priority:
+              $ref: "#/components/schemas/TaskPriority"
+            due_date:
+              $ref: "#/components/schemas/NullableDateOnly"
+            position:
+              type: number
+    DatasetSpec:
+      type: object
+      additionalProperties: false
+      required: [role, name, split, revision, task_count, samples_per_task]
+      properties:
+        role:
+          type: string
+          enum: [training, evaluation]
+        name:
+          type: string
+        split:
+          type: string
+        revision:
+          type: string
+        task_count:
+          oneOf:
+            - type: number
+            - type: "null"
+        samples_per_task:
+          oneOf:
+            - type: number
+            - type: "null"
+    DataSpec:
+      type: object
+      additionalProperties: false
+      required: [datasets]
+      properties:
+        datasets:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetSpec"
+    ObjectSpec:
+      type: object
+      additionalProperties: false
+      required: [model, harness, parent_harness, prompt, prompt_change, skills, tools]
+      properties:
+        model:
+          type: string
+        harness:
+          type: string
+        parent_harness:
+          type: string
+        prompt:
+          type: string
+        prompt_change:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+        tools:
+          type: array
+          items:
+            type: string
+    EnvironmentSpec:
+      type: object
+      additionalProperties: false
+      required: [platform, server, devices, hardware, evaluator, revision, precision_policy]
+      properties:
+        platform:
+          type: string
+          enum: ["", npu, gpu]
+        server:
+          type: string
+        devices:
+          type: array
+          items:
+            type: string
+        hardware:
+          type: string
+        evaluator:
+          type: string
+        revision:
+          type: string
+        precision_policy:
+          type: string
+    Config:
+      type: object
+      additionalProperties:
+        oneOf:
+          - type: string
+          - type: number
+          - type: boolean
+          - type: "null"
+    Metrics:
+      type: object
+      additionalProperties:
+        type: number
+    Experiment:
+      type: object
+      required:
+        - id
+        - experiment_no
+        - task_id
+        - owner_id
+        - name
+        - status
+        - baseline_experiment_id
+        - data_spec
+        - object_spec
+        - environment_spec
+        - config
+        - notes
+        - metrics
+        - featured_metric_keys
+        - result_summary
+        - decision_outcome
+        - decision_notes
+        - position
+        - started_at
+        - completed_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        experiment_no:
+          type: number
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        owner_id:
+          $ref: "#/components/schemas/NullableUuid"
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ExperimentStatus"
+        baseline_experiment_id:
+          $ref: "#/components/schemas/NullableUuid"
+        data_spec:
+          $ref: "#/components/schemas/DataSpec"
+        object_spec:
+          $ref: "#/components/schemas/ObjectSpec"
+        environment_spec:
+          $ref: "#/components/schemas/EnvironmentSpec"
+        config:
+          $ref: "#/components/schemas/Config"
+        notes:
+          type: string
+        metrics:
+          $ref: "#/components/schemas/Metrics"
+        featured_metric_keys:
+          type: array
+          items:
+            type: string
+        result_summary:
+          type: string
+        decision_outcome:
+          $ref: "#/components/schemas/DecisionOutcome"
+        decision_notes:
+          type: string
+        position:
+          type: number
+        started_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        completed_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+    ExperimentMutation:
+      allOf:
+        - $ref: "#/components/schemas/Experiment"
+      unevaluatedProperties: false
+    TaskReference:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [id, title]
+          properties:
+            id:
+              $ref: "#/components/schemas/Uuid"
+            title:
+              type: string
+        - type: "null"
+    NullableMember:
+      oneOf:
+        - $ref: "#/components/schemas/Member"
+        - type: "null"
+    ExperimentListRow:
+      allOf:
+        - $ref: "#/components/schemas/Experiment"
+        - type: object
+          required: [task, owner]
+          properties:
+            task:
+              $ref: "#/components/schemas/TaskReference"
+            owner:
+              $ref: "#/components/schemas/NullableMember"
+      unevaluatedProperties: false
+    ExperimentDetail:
+      allOf:
+        - $ref: "#/components/schemas/Experiment"
+        - type: object
+          required: [task, owner, attachments]
+          properties:
+            task:
+              $ref: "#/components/schemas/TaskReference"
+            owner:
+              $ref: "#/components/schemas/NullableMember"
+            attachments:
+              type: array
+              items:
+                $ref: "#/components/schemas/Attachment"
+      unevaluatedProperties: false
+    ExperimentPatchEnvelope:
+      type: object
+      additionalProperties: false
+      required: [changes]
+      properties:
+        changes:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            name:
+              type: string
+              description: The server trims whitespace; the result must contain 1 through 200 characters.
+            status:
+              $ref: "#/components/schemas/ExperimentStatus"
+            baseline_experiment_id:
+              $ref: "#/components/schemas/NullableUuid"
+            data_spec:
+              $ref: "#/components/schemas/DataSpec"
+            object_spec:
+              $ref: "#/components/schemas/ObjectSpec"
+            environment_spec:
+              $ref: "#/components/schemas/EnvironmentSpec"
+            config:
+              $ref: "#/components/schemas/Config"
+            notes:
+              type: string
+            metrics:
+              $ref: "#/components/schemas/Metrics"
+            featured_metric_keys:
+              type: array
+              items:
+                type: string
+            result_summary:
+              type: string
+            decision_outcome:
+              $ref: "#/components/schemas/DecisionOutcome"
+            decision_notes:
+              type: string
+            position:
+              type: number
+    ExperimentCreate:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: The server trims whitespace; the result must contain 1 through 200 characters.
+    Activity:
+      type: object
+      additionalProperties: false
+      required: [id, task_id, experiment_id, text, kind, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        experiment_id:
+          $ref: "#/components/schemas/NullableUuid"
+        text:
+          type: string
+        kind:
+          type: string
+          enum: [create, status, assign, experiment, note, edit, comment]
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+    ActivityCreate:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          description: The server trims whitespace; the result must contain 1 through 10000 characters.
+    Attachment:
+      type: object
+      additionalProperties: false
+      required: [id, task_id, experiment_id, url, path, caption, position, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        experiment_id:
+          $ref: "#/components/schemas/NullableUuid"
+        url:
+          type: string
+        path:
+          type: string
+        caption:
+          type: string
+        position:
+          type: number
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+    AttachmentCreateForm:
+      type: object
+      additionalProperties: false
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          minLength: 1
+          maxLength: 10485760
+        caption:
+          type: string
+    AttachmentPatchEnvelope:
+      type: object
+      additionalProperties: false
+      required: [changes]
+      properties:
+        changes:
+          type: object
+          additionalProperties: false
+          required: [caption]
+          properties:
+            caption:
+              type: string
+    TaskAuditSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - module_id
+        - title
+        - status
+        - notes
+        - tags
+        - priority
+        - due_date
+        - position
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        module_id:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        title:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        notes:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        due_date:
+          $ref: "#/components/schemas/NullableDateOnly"
+        position:
+          type: number
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+    ExperimentAuditSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - experiment_no
+        - task_id
+        - owner_id
+        - name
+        - status
+        - baseline_experiment_id
+        - data_spec
+        - object_spec
+        - environment_spec
+        - config
+        - notes
+        - metrics
+        - featured_metric_keys
+        - result_summary
+        - decision_outcome
+        - decision_notes
+        - position
+        - started_at
+        - completed_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        experiment_no:
+          type: number
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        owner_id:
+          $ref: "#/components/schemas/NullableUuid"
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ExperimentStatus"
+        baseline_experiment_id:
+          $ref: "#/components/schemas/NullableUuid"
+        data_spec:
+          type: object
+          additionalProperties: true
+        object_spec:
+          type: object
+          additionalProperties: true
+        environment_spec:
+          type: object
+          additionalProperties: true
+        config:
+          type: object
+          additionalProperties: true
+        notes:
+          type: string
+        metrics:
+          type: object
+          additionalProperties: true
+        featured_metric_keys:
+          type: array
+          items:
+            type: string
+        result_summary:
+          type: string
+        decision_outcome:
+          $ref: "#/components/schemas/DecisionOutcome"
+        decision_notes:
+          type: string
+        position:
+          type: number
+        started_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        completed_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+    AttachmentAuditSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - task_id
+        - experiment_id
+        - url
+        - path
+        - caption
+        - position
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        experiment_id:
+          $ref: "#/components/schemas/NullableUuid"
+        url:
+          type: string
+        path:
+          type: string
+        caption:
+          type: string
+        position:
+          type: number
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+    ActivityAuditSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - task_id
+        - experiment_id
+        - text
+        - kind
+        - created_at
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        experiment_id:
+          $ref: "#/components/schemas/NullableUuid"
+        text:
+          type: string
+        kind:
+          type: string
+          enum: [create, status, assign, experiment, note, edit, comment]
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+    AuditEntryBase:
+      type: object
+      required:
+        - id
+        - key
+        - member
+        - request_id
+        - resource_id
+        - task_id
+        - action
+        - response_status
+        - created_at
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        key:
+          type: object
+          additionalProperties: false
+          required: [id, prefix]
+          properties:
+            id:
+              $ref: "#/components/schemas/Uuid"
+            prefix:
+              type: string
+        member:
+          type: object
+          additionalProperties: false
+          required: [id]
+          properties:
+            id:
+              $ref: "#/components/schemas/Uuid"
+        request_id:
+          type: string
+        resource_id:
+          $ref: "#/components/schemas/Uuid"
+        task_id:
+          $ref: "#/components/schemas/Uuid"
+        action:
+          type: string
+          enum: [create, patch]
+        response_status:
+          type: integer
+          enum: [200, 201]
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+    TaskAuditEntry:
+      allOf:
+        - $ref: "#/components/schemas/AuditEntryBase"
+        - type: object
+          required: [resource_type, before_state, after_state]
+          properties:
+            resource_type:
+              type: string
+              const: task
+            action:
+              type: string
+              const: patch
+            before_state:
+              $ref: "#/components/schemas/TaskAuditSnapshot"
+            after_state:
+              $ref: "#/components/schemas/TaskAuditSnapshot"
+            response_status:
+              type: integer
+              const: 200
+      unevaluatedProperties: false
+    ExperimentAuditEntry:
+      allOf:
+        - $ref: "#/components/schemas/AuditEntryBase"
+        - type: object
+          required: [resource_type]
+          properties:
+            resource_type:
+              type: string
+              const: experiment
+        - oneOf:
+            - type: object
+              required: [action, before_state, after_state, response_status]
+              properties:
+                action:
+                  type: string
+                  const: create
+                before_state:
+                  type: "null"
+                after_state:
+                  $ref: "#/components/schemas/ExperimentAuditSnapshot"
+                response_status:
+                  type: integer
+                  const: 201
+            - type: object
+              required: [action, before_state, after_state, response_status]
+              properties:
+                action:
+                  type: string
+                  const: patch
+                before_state:
+                  $ref: "#/components/schemas/ExperimentAuditSnapshot"
+                after_state:
+                  $ref: "#/components/schemas/ExperimentAuditSnapshot"
+                response_status:
+                  type: integer
+                  const: 200
+      unevaluatedProperties: false
+    AttachmentAuditEntry:
+      allOf:
+        - $ref: "#/components/schemas/AuditEntryBase"
+        - type: object
+          required: [resource_type]
+          properties:
+            resource_type:
+              type: string
+              const: attachment
+        - oneOf:
+            - type: object
+              required: [action, before_state, after_state, response_status]
+              properties:
+                action:
+                  type: string
+                  const: create
+                before_state:
+                  type: "null"
+                after_state:
+                  $ref: "#/components/schemas/AttachmentAuditSnapshot"
+                response_status:
+                  type: integer
+                  const: 201
+            - type: object
+              required: [action, before_state, after_state, response_status]
+              properties:
+                action:
+                  type: string
+                  const: patch
+                before_state:
+                  $ref: "#/components/schemas/AttachmentAuditSnapshot"
+                after_state:
+                  $ref: "#/components/schemas/AttachmentAuditSnapshot"
+                response_status:
+                  type: integer
+                  const: 200
+      unevaluatedProperties: false
+    ActivityAuditEntry:
+      allOf:
+        - $ref: "#/components/schemas/AuditEntryBase"
+        - type: object
+          required: [resource_type, before_state, after_state]
+          properties:
+            resource_type:
+              type: string
+              const: activity
+            action:
+              type: string
+              const: create
+            before_state:
+              type: "null"
+            after_state:
+              $ref: "#/components/schemas/ActivityAuditSnapshot"
+            response_status:
+              type: integer
+              const: 201
+      unevaluatedProperties: false
+    AuditEntry:
+      oneOf:
+        - $ref: "#/components/schemas/TaskAuditEntry"
+        - $ref: "#/components/schemas/ExperimentAuditEntry"
+        - $ref: "#/components/schemas/AttachmentAuditEntry"
+        - $ref: "#/components/schemas/ActivityAuditEntry"
+      discriminator:
+        propertyName: resource_type
+        mapping:
+          task: "#/components/schemas/TaskAuditEntry"
+          experiment: "#/components/schemas/ExperimentAuditEntry"
+          attachment: "#/components/schemas/AttachmentAuditEntry"
+          activity: "#/components/schemas/ActivityAuditEntry"
+    TaskPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
+    ExperimentPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExperimentListRow"
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: "null"
+    BoardSummary:
+      type: object
+      additionalProperties: false
+      required: [modules, members, tasks, experiments, task_statuses, experiment_statuses]
+      properties:
+        modules:
+          type: integer
+          minimum: 0
+        members:
+          type: integer
+          minimum: 0
+        tasks:
+          type: integer
+          minimum: 0
+        experiments:
+          type: integer
+          minimum: 0
+        task_statuses:
+          type: object
+          additionalProperties: false
+          required: [todo, in_progress, done, blocked]
+          properties:
+            todo: { type: integer, minimum: 0 }
+            in_progress: { type: integer, minimum: 0 }
+            done: { type: integer, minimum: 0 }
+            blocked: { type: integer, minimum: 0 }
+        experiment_statuses:
+          type: object
+          additionalProperties: false
+          required: [planned, running, analyzing, completed, blocked, cancelled]
+          properties:
+            planned: { type: integer, minimum: 0 }
+            running: { type: integer, minimum: 0 }
+            analyzing: { type: integer, minimum: 0 }
+            completed: { type: integer, minimum: 0 }
+            blocked: { type: integer, minimum: 0 }
+            cancelled: { type: integer, minimum: 0 }
+    CapabilitiesSuccess:
+      $ref: "#/components/schemas/SuccessCapabilities"
+    SuccessCapabilities:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Capabilities"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    BoardSummarySuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/BoardSummary"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    ModulesSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Module"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    MembersSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    TaskPageSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/TaskPage"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    TaskSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Task"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    TaskMutationSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/StrictTaskMutation"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    ExperimentPageSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/ExperimentPage"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    ExperimentDetailSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/ExperimentDetail"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    ExperimentMutationSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/ExperimentMutation"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    ExperimentCreatedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/ExperimentMutation"
+        meta:
+          $ref: "#/components/schemas/CreatedMeta"
+    ExperimentReplayedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/ExperimentMutation"
+        meta:
+          $ref: "#/components/schemas/ReplayedMeta"
+    ActivitiesSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Activity"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    ActivityCreatedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Activity"
+        meta:
+          $ref: "#/components/schemas/CreatedMeta"
+    ActivityReplayedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Activity"
+        meta:
+          $ref: "#/components/schemas/ReplayedMeta"
+    AttachmentSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Attachment"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"
+    AttachmentCreatedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Attachment"
+        meta:
+          $ref: "#/components/schemas/CreatedMeta"
+    AttachmentReplayedSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/Attachment"
+        meta:
+          $ref: "#/components/schemas/ReplayedMeta"
+    AuditSuccess:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+        meta:
+          $ref: "#/components/schemas/SuccessMeta"

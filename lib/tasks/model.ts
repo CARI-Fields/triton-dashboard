@@ -51,7 +51,6 @@ export function taskPatchToStorage(
   if ("typeId" in patch) storage.module_id = patch.typeId;
   if ("title" in patch) storage.title = patch.title;
   if ("status" in patch) storage.status = patch.status;
-  if ("owners" in patch) storage.assignees = [...(patch.owners ?? [])];
   if ("notes" in patch) storage.notes = patch.notes;
   if ("tags" in patch) storage.tags = normalizeTags(patch.tags ?? []);
   if ("priority" in patch) storage.priority = patch.priority;
@@ -68,7 +67,6 @@ export function newTaskToStorage(
     module_id: input.typeId,
     title: input.title.trim(),
     status: input.status,
-    assignees: [...input.owners],
     notes: input.description.trim(),
     tags: normalizeTags(input.tags),
     priority: input.priority,

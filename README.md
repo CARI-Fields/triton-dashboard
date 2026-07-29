@@ -7,9 +7,10 @@ project. Modules → tasks with owners and status, and each task has its own det
 with progress notes, experiments, auto-generated metric charts, and uploaded plots.
 Everything syncs in real time across everyone's browser.
 
-> **Access model:** password-protected. The board sits behind one **shared team password**
-> (Supabase Auth), and the database rejects any request without a valid login (Row Level
-> Security). So even someone who reads the Supabase key out of the page source gets nothing.
+> **Access model:** the human-facing board sits behind one **shared team password** (Supabase
+> Auth), and Row Level Security rejects browser data requests without a valid login. The separate
+> server-side Agent/Admin Route Handlers authenticate scoped Agent Keys or the configured Admin
+> user and use a server-only Supabase credential; that credential never ships to the browser.
 
 ---
 
@@ -21,7 +22,7 @@ Use Node 24.18.0 (`nvm use`) for local development. The accepted engine range is
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript) — UI
-- **Supabase** — Postgres, Realtime, Auth, Storage (the entire backend; the app talks to it directly from the browser)
+- **Supabase** — Postgres, Realtime, Auth, and Storage; the Board uses the browser client, while Agent/Admin API access goes through server-side Route Handlers
 - **Vercel** — hosting; **auto-deploys on every push to `main`**
 - `react-markdown` + `remark-gfm` for the markdown fields. Charts are hand-rolled SVG/CSS (no chart library).
 
@@ -96,12 +97,94 @@ Nothing secret is in the repo — request the values you need and put them in yo
 | `NEXT_PUBLIC_SUPABASE_URL` | anyone running the app locally | a maintainer, or Vercel → project → Settings → Environment Variables | low (public) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anyone running the app locally | same as above | low — publishable key, already ships in the browser |
 | `SUPABASE_DB_URL` | **only** if you run DB migrations | a maintainer (Supabase session-pooler string + DB password) | **high — full DB admin; treat like a root password** |
+| `SUPABASE_SECRET_KEY` | server-side Agent/Admin Route Handlers | a maintainer, or the Supabase project API settings | **high — server-only privileged credential; never prefix with `NEXT_PUBLIC_`** |
+| `TRITON_BOARD_ADMIN_USER_ID` | server-side Admin Route Handlers | the UUID of the one Supabase Auth user authorized to manage Agent Keys | **high — server-only authorization configuration; never prefix with `NEXT_PUBLIC_`** |
 
 Plus the **team login password** (to sign in to the running board) — shared out-of-band
 (password manager / DM), not an env var.
 
 > **Never commit `.env.local`.** It's git-ignored on purpose. Share secrets through a password
 > manager or a direct message — never through git, because git history keeps them forever.
+
+---
+
+## Agent API
+
+The authenticated, single-resource Agent API is rooted at `/api/agent/v1`. Its complete
+contract is [`.agents/skills/triton-board-api/references/openapi.yaml`](.agents/skills/triton-board-api/references/openapi.yaml).
+Every Key is bound to exactly one existing Member and a selected set of scopes:
+
+| Scope | Permitted operation |
+|---|---|
+| `board:read` | read Board summaries, Modules, Members, Tasks, Experiments, and Activity |
+| `tasks:write` | patch a Task currently assigned to the Key's Member |
+| `experiments:write` | create or patch an Experiment under a Task currently assigned to the Key's Member |
+| `attachments:write` | create an Experiment Attachment or patch an Attachment caption for a collaborated Task |
+| `activity:append` | append a comment to a Task currently assigned to the Key's Member |
+| `audit:read` | read Agent audit entries for Tasks currently assigned to the Key's Member |
+
+Task collaboration is live authorization, not a copied Key setting: the Key identifies a
+Member, and writes require that Member to still be present in the Task's assignees. Experiment
+creation takes `task_id` from the URL, derives `owner_id` from the Key's Member, and fixes the
+initial status to `planned`; clients cannot override those fields. Removing the Member from the
+Task immediately removes the Key's write collaboration for that Task and its Experiments and
+Attachments.
+
+The Agent API has no `DELETE` or batch operation. In particular, the
+`/api/agent/v1/tasks` and `/api/agent/v1/tasks/{id}` endpoints can never delete a Task, and the
+`/api/agent/v1/experiments`, `/api/agent/v1/experiments/{id}`, and
+`/api/agent/v1/tasks/{id}/experiments` endpoints can never delete an Experiment. Task and
+Experiment removal remains outside the Agent API.
+
+### Safe Agent writes
+
+- `PATCH` is optimistic-concurrency protected. `GET /tasks/{id}` and
+  `GET /experiments/{id}` return a quoted `ETag` derived from `updated_at`; send that exact value
+  unchanged in `If-Match` with the smallest allowed `changes` envelope. A `412` means the record
+  changed: fetch it again, compare the intended fields, and only retry if the edit is still safe.
+  Attachment caption patches use the target Attachment's quoted `updated_at`, not the parent
+  Experiment's ETag.
+- Every data-creating `POST` requires a canonical lowercase UUID in `Idempotency-Key`. Reuse the
+  same key for every retry of the same logical request, especially after a transport error or
+  `5xx` with unknown commit state. A replay returns the original result; reusing the key for a
+  different method, path, or payload returns `409`.
+
+### Admin Key lifecycle
+
+The Auth-gated Key administration page is `/admin/api-keys`. The signed-in Supabase user must
+match `TRITON_BOARD_ADMIN_USER_ID`; the server uses `SUPABASE_SECRET_KEY` for privileged Key
+storage. Both values are required server-only settings and must never be rendered, logged, or
+placed in browser-visible environment variables.
+
+1. Create a Key by choosing an existing Member, the minimum required scopes, and an optional
+   expiry. Copy the raw Key immediately: it is shown once and only its digest is stored.
+2. Edit the Key name, Member, scopes, or expiry when its responsibilities change.
+3. Rotate an active Key to invalidate its old credential immediately, then copy the replacement
+   raw Key from the one-time display.
+4. Revoke a Key when access should end. Revocation is immediate and cannot be undone; create a
+   new Key if access is needed again.
+
+Do not place an Agent Key in source control or client-side application code.
+
+### Agent Skill and client environment
+
+The bundled Skill is [`.agents/skills/triton-board-api/`](.agents/skills/triton-board-api/).
+Its safe client reads two environment variables from the client process:
+
+```bash
+export TRITON_BOARD_API_URL=http://localhost:3000/api/agent/v1
+read -rsp "Triton Board API Key: " TRITON_BOARD_API_KEY
+export TRITON_BOARD_API_KEY
+printf "\n"
+python3 .agents/skills/triton-board-api/scripts/triton_board_api.py capabilities
+```
+
+The `capabilities` endpoint requires a valid Key but no scope. `TRITON_BOARD_API_URL` must be
+the full deployment origin plus `/api/agent/v1`.
+`TRITON_BOARD_API_KEY` is the raw Key whose value is shown only once after creation or rotation;
+the silent prompt keeps the value itself out of shell history. Keep it out of logs, command
+arguments, and committed files, or inject it with your secret manager instead. Run the client
+with `--help` and consult the OpenAPI contract for endpoint-specific scopes and envelopes.
 
 ---
 
@@ -144,6 +227,15 @@ Current migrations (run in order on a fresh database):
 6. `0006_experiment_workspace.sql` — structured Experiment context, Owner/Status/Baseline,
    Result/Decision fields, lifecycle timestamps, Experiment Activity linkage, indexes, and
    transaction-safe anonymous Activity triggers
+7. `20260727174232_grant_authenticated_data_api_access.sql` — explicit authenticated Data API grants
+8. `20260727195047_task_type_metadata.sql` — optional Task Types plus tags, priority, and due date
+9. `20260729013215_triton_board_agent_api_schema.sql` — Agent Keys, collaboration, idempotency,
+   rate-limit, and audit schema
+10. `20260729015825_triton_board_agent_api_mutations.sql` — atomic concurrency-safe Agent mutations
+11. `20260729030703_harden_agent_api_service_role_grants.sql` — privileged-role grant hardening
+12. `20260729083128_harden_agent_api_reads.sql` — Agent read-path hardening
+13. `20260729100913_support_direct_attachment_patch.sql` — direct Task Attachment caption support
+14. `20260729142856_extend_agent_api_task_metadata.sql` — Task metadata PATCH support with narrow grants
 
 `supabase/seed.sql` (initial plan data) is optional and separate — run it once via the SQL editor.
 
@@ -153,6 +245,38 @@ Current migrations (run in order on a fresh database):
 > First time on a database that was set up **by hand**, run `npm run db:baseline` **once** — it
 > records the existing migrations as already-applied so they're never re-run (which matters:
 > re-running `0001` would re-open public access before `0004` locks it again).
+
+### Local-only database and application verification
+
+These commands use the local Supabase containers only; they do not use `SUPABASE_DB_URL` or a
+linked production project:
+
+```bash
+npx supabase start
+npx supabase db reset --local
+npx supabase test db --local \
+  supabase/tests/0007_agent_api_schema.sql \
+  supabase/tests/0008_agent_api_mutations.sql \
+  supabase/tests/0009_agent_api_security_behavior.sql \
+  supabase/tests/0012_agent_api_reads.sql \
+  supabase/tests/0013_agent_api_attachment_patch.sql
+
+npm test
+npm run build
+```
+
+Validate the bundled Skill separately:
+
+```bash
+python3 -m py_compile \
+  .agents/skills/triton-board-api/scripts/triton_board_api.py
+python3 "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" \
+  .agents/skills/triton-board-api
+python3 .agents/skills/triton-board-api/scripts/triton_board_api.py --help
+```
+
+The validator command requires the Codex `skill-creator` system skill. Python compilation,
+client help, `npm test`, and `npm run build` use only repository files and normal project tools.
 
 ### Shared login
 
@@ -219,5 +343,6 @@ is loaded and the edit is reapplied.
 
 - Drag-to-reorder (items currently append by `position`)
 - Per-person logins instead of one shared password (would give a real audit trail)
-- Full history / audit log (the per-task activity timeline exists; realtime is still last-write-wins)
+- A human-facing full-history UI (the Agent API has scoped audit records, while the Board UI has
+  only the per-task activity timeline; ordinary realtime edits are still last-write-wins)
 - Fully private images via signed URLs (currently public-read with random UUID paths; upload requires login)

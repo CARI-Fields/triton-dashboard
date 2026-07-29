@@ -12,6 +12,9 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { TEAM_EMAIL } from "@/lib/auth";
 
+const SESSION_VERIFICATION_ERROR =
+  "Could not verify your session. Sign in again.";
+
 interface AuthActions {
   logout: () => Promise<void>;
 }
@@ -40,20 +43,43 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    let active = true;
+    let observedAuthEvent = false;
     if (!supabase) {
       setReady(true);
       return;
     }
-    let active = true;
     const client = supabase;
-    client.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setSession(data.session);
-      setReady(true);
-    });
+    const readInitialSession = async () => {
+      try {
+        const { data, error: sessionError } =
+          await client.auth.getSession();
+        if (!active || observedAuthEvent) return;
+        if (sessionError) {
+          setSession(null);
+          setError(SESSION_VERIFICATION_ERROR);
+          return;
+        }
+        setSession(data.session);
+        if (data.session) setError(null);
+      } catch {
+        if (!active || observedAuthEvent) return;
+        setSession(null);
+        setError(SESSION_VERIFICATION_ERROR);
+      } finally {
+        if (active && !observedAuthEvent) setReady(true);
+      }
+    };
+    void readInitialSession();
     const {
       data: { subscription },
-    } = client.auth.onAuthStateChange((_event, s) => setSession(s));
+    } = client.auth.onAuthStateChange((_event, nextSession) => {
+      if (!active) return;
+      observedAuthEvent = true;
+      setSession(nextSession);
+      if (nextSession) setError(null);
+      setReady(true);
+    });
     return () => {
       active = false;
       subscription.unsubscribe();

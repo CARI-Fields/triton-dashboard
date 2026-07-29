@@ -14,6 +14,11 @@ import type {
 } from "@/lib/types";
 import type { EditableExperimentPatch } from "@/lib/experiments/draft";
 import {
+  normalizeTaskRow,
+  TASK_WITH_ASSIGNEES_SELECT,
+  type TaskRelationRow,
+} from "@/lib/tasks/assignees";
+import {
   buildDuplicateInsert,
   type DuplicateInput,
   type ExperimentInsert,
@@ -161,13 +166,17 @@ export async function listExperimentRows(): Promise<ExperimentListRow[]> {
 
 export async function loadExperimentReferenceData(): Promise<ExperimentReferenceData> {
   const [tasksResult, membersResult] = await Promise.all([
-    client().from("tasks").select("*").order("position"),
+    client()
+      .from("tasks")
+      .select(TASK_WITH_ASSIGNEES_SELECT)
+      .order("position"),
     client().from("members").select("*").order("position"),
   ]);
   throwIfError(tasksResult.error);
   throwIfError(membersResult.error);
   return {
-    tasks: (tasksResult.data ?? []) as Task[],
+    tasks: ((tasksResult.data ?? []) as unknown as TaskRelationRow[])
+      .map(normalizeTaskRow),
     members: (membersResult.data ?? []) as Member[],
   };
 }
@@ -447,6 +456,11 @@ export function watchExperimentIndex(onChange: () => void): () => void {
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "tasks" },
+      onChange,
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "task_assignees" },
       onChange,
     )
     .on(

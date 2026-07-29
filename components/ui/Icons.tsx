@@ -6,6 +6,7 @@ export type IconName =
   | "compare"
   | "activity"
   | "analytics"
+  | "key"
   | "sun"
   | "moon"
   | "logout"
@@ -46,6 +47,12 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   analytics: (
     <>
       <path d="M4 20V10M9.3 20V5M14.7 20v-8M20 20V3M2 20h20" />
+    </>
+  ),
+  key: (
+    <>
+      <circle cx="8" cy="12" r="4" />
+      <path d="M12 12h9M17 12v3M20 12v2" />
     </>
   ),
   sun: (

@@ -46,7 +46,7 @@ describe("task domain mapping", () => {
       typeId: null,
       title: "",
       status: "blocked",
-      owners: [],
+      owners: ["Maya"],
       notes: "",
       tags: [],
       priority: "urgent",
@@ -56,7 +56,6 @@ describe("task domain mapping", () => {
       module_id: null,
       title: "",
       status: "blocked",
-      assignees: [],
       notes: "",
       tags: [],
       priority: "urgent",
@@ -65,13 +64,8 @@ describe("task domain mapping", () => {
     });
   });
 
-  it("does not alias a patch Owner array into the storage payload", () => {
-    const owners = ["Maya"];
-    const storage = taskPatchToStorage({ owners });
-
-    owners.push("Yubai");
-
-    expect(storage.assignees).toEqual(["Maya"]);
+  it("keeps UUID Owner relationships out of Task row patches", () => {
+    expect(taskPatchToStorage({ owners: ["Maya"] })).toEqual({});
   });
 
   it("normalizes tags and assigns a stable case-insensitive visual tone", () => {
@@ -132,7 +126,6 @@ describe("task domain mapping", () => {
       module_id: null,
       title: "Validate kernels",
       status: "todo",
-      assignees: [],
       notes: "Check every case.",
       tags: ["NPU"],
       priority: "medium",
@@ -141,21 +134,18 @@ describe("task domain mapping", () => {
     });
   });
 
-  it("does not alias a new Task Owner array into the storage payload", () => {
-    const owners = ["Maya"];
+  it("keeps UUID Owner relationships out of new Task rows", () => {
     const storage = newTaskToStorage({
       title: "Validate kernels",
       status: "todo",
       typeId: null,
       tags: [],
-      owners,
+      owners: ["Maya"],
       priority: "medium",
       dueDate: null,
       description: "",
     }, 0);
 
-    owners.push("Yubai");
-
-    expect(storage.assignees).toEqual(["Maya"]);
+    expect(storage).not.toHaveProperty("assignees");
   });
 });

@@ -9,6 +9,7 @@ import {
   reconcileRealtime,
   writeSessionExperimentDraft,
 } from "@/lib/experiments/draft";
+import { isMetrics } from "@/lib/experiments/schema";
 
 const draft = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -127,6 +128,67 @@ describe("session Experiment drafts", () => {
       sourceRevision: source.updated_at,
     });
     expect(draftStorageKey(source.id)).toContain(source.id);
+  });
+
+  it.each([Number.POSITIVE_INFINITY, Number.NaN])(
+    "rejects a non-finite metric before persistence",
+    (metric) => {
+      expect(isMetrics({ latency_ms: metric })).toBe(false);
+    },
+  );
+
+  it("rejects a draft containing an unknown platform", () => {
+    const session = storage();
+    const source = {
+      ...draft,
+      id: "00000000-0000-4000-8000-000000000082",
+    };
+    const raw = JSON.stringify({
+      version: 1,
+      experimentId: source.id,
+      sourceRevision: source.updated_at,
+      patch: {
+        ...editableExperimentPatch(source),
+        environment_spec: {
+          ...source.environment_spec,
+          platform: "tpu",
+        },
+      },
+    });
+    session.setItem(draftStorageKey(source.id), raw);
+
+    expect(readSessionExperimentDraft(session, source)).toEqual({ kind: "none" });
+    expect(session.getItem(draftStorageKey(source.id))).toBeNull();
+  });
+
+  it("rejects invalid Dataset items in a draft", () => {
+    const session = storage();
+    const source = {
+      ...draft,
+      id: "00000000-0000-4000-8000-000000000083",
+    };
+    const raw = JSON.stringify({
+      version: 1,
+      experimentId: source.id,
+      sourceRevision: source.updated_at,
+      patch: {
+        ...editableExperimentPatch(source),
+        data_spec: {
+          datasets: [{
+            role: "validation",
+            name: "KernelBench",
+            split: "test",
+            revision: "v1",
+            task_count: 100,
+            samples_per_task: 1,
+          }],
+        },
+      },
+    });
+    session.setItem(draftStorageKey(source.id), raw);
+
+    expect(readSessionExperimentDraft(session, source)).toEqual({ kind: "none" });
+    expect(session.getItem(draftStorageKey(source.id))).toBeNull();
   });
 
   it("preserves a valid draft as a conflict when the remote revision advanced", () => {

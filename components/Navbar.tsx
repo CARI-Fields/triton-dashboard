@@ -61,6 +61,12 @@ const NAV_ITEMS: NavigationItem[] = [
     icon: "analytics",
     active: (pathname: string) => pathname === "/analytics",
   },
+  {
+    href: "/admin/api-keys",
+    label: "API Keys",
+    icon: "key",
+    active: (pathname: string) => pathname === "/admin/api-keys",
+  },
 ];
 
 function NavigationLink({

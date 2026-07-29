@@ -12,6 +12,7 @@ import Analytics from "@/components/Analytics";
 import type { Member, Module, Task } from "@/lib/types";
 
 type TableName = "modules" | "tasks" | "members";
+type RealtimeTableName = TableName | "task_assignees";
 
 interface QueryError {
   message: string;
@@ -26,7 +27,7 @@ interface QueryResult {
 }
 
 interface RealtimeHandler {
-  table: TableName;
+  table: RealtimeTableName;
   callback: () => void;
 }
 
@@ -59,7 +60,7 @@ vi.mock("@/lib/supabase", () => {
       const channel = {
         on: vi.fn((
           _event: string,
-          config: { table: TableName },
+          config: { table: RealtimeTableName },
           callback: () => void,
         ) => {
           supabaseState.handlers.push({
@@ -194,8 +195,12 @@ function rows(
   return value.map((row) => ({
     ...row,
     ...("assignees" in row ? {
-      assignees: [...row.assignees],
+      assignees: ["Stale legacy owner"],
       tags: [...row.tags],
+      task_assignees: row.assignees.map((name, index) => ({
+        member_id: `joined-member-${index}`,
+        member: { name },
+      })),
     } : {}),
   }));
 }
@@ -252,7 +257,7 @@ async function renderLoadedAnalytics() {
   return result;
 }
 
-function realtimeHandler(table: TableName): RealtimeHandler {
+function realtimeHandler(table: RealtimeTableName): RealtimeHandler {
   const handler = supabaseState.handlers.find((item) => item.table === table);
   if (!handler) throw new Error(`No ${table} Realtime handler.`);
   return handler;
@@ -573,6 +578,7 @@ describe("Analytics", () => {
     expect(supabaseState.handlers.map(({ table }) => table)).toEqual([
       "modules",
       "tasks",
+      "task_assignees",
       "members",
     ]);
     unmount();

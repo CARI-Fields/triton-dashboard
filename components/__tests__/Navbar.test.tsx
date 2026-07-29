@@ -31,6 +31,7 @@ const navigationCases = [
   { pathname: "/experiments/compare", active: "Compare" },
   { pathname: "/experiments/compare/shared", active: "Compare" },
   { pathname: "/analytics", active: "Analytics" },
+  { pathname: "/admin/api-keys", active: "API Keys" },
 ] as const;
 
 function renderNavbar() {
@@ -120,7 +121,13 @@ describe("Navbar", () => {
     expect(screen.getByRole("button", { name: "Dark theme" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Log out" })).toBeDefined();
 
-    for (const label of ["Task Board", "Experiments", "Compare", "Analytics"]) {
+    for (const label of [
+      "Task Board",
+      "Experiments",
+      "Compare",
+      "Analytics",
+      "API Keys",
+    ]) {
       const link = screen.getByRole("link", { name: label });
       const icon = link.querySelector("svg");
       expect(icon, `${label} should have an icon`).not.toBeNull();

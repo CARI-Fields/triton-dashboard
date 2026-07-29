@@ -1,0 +1,4 @@
+interface:
+  display_name: "Triton Board API"
+  short_description: "Safely inspect and update Triton Board data"
+  default_prompt: "Use $triton-board-api to inspect a Task and apply a minimal, concurrency-safe update."

@@ -20,12 +20,16 @@ import {
   taskFromStorage,
   taskTypeFromStorage,
 } from "@/lib/tasks/model";
+import {
+  normalizeTaskRow,
+  TASK_WITH_ASSIGNEES_SELECT,
+  type TaskRelationRow,
+} from "@/lib/tasks/assignees";
 import { statusLabel } from "@/lib/status";
 import { relTime } from "@/lib/time";
 import type {
   Member,
   Module,
-  Task,
   TaskModel,
   TaskType,
 } from "@/lib/types";
@@ -65,7 +69,10 @@ export default function Analytics() {
     try {
       const [typeResult, taskResult, memberResult] = await Promise.all([
         supabase.from("modules").select("*").order("position"),
-        supabase.from("tasks").select("*").order("position"),
+        supabase
+          .from("tasks")
+          .select(TASK_WITH_ASSIGNEES_SELECT)
+          .order("position"),
         supabase.from("members").select("*").order("position"),
       ]);
       if (generation !== reloadGenerationRef.current) return;
@@ -88,7 +95,9 @@ export default function Analytics() {
         taskTypeFromStorage(row as Module)
       ));
       const nextTasks = (taskResult.data ?? []).map((row) => (
-        taskFromStorage(row as Task)
+        taskFromStorage(normalizeTaskRow(
+          row as unknown as TaskRelationRow,
+        ))
       ));
       const nextMembers = (memberResult.data ?? []) as Member[];
       setTypes(nextTypes);
@@ -126,6 +135,11 @@ export default function Analytics() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "tasks" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "task_assignees" },
         refresh,
       )
       .on(

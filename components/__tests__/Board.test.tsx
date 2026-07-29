@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Board from "@/components/Board";
 import type { Member, Module, Task } from "@/lib/types";
 
-type TableName = "modules" | "tasks" | "members";
+type TableName = "modules" | "tasks" | "members" | "task_assignees";
 type MutationOperation = "insert" | "update" | "delete";
 
 interface QueryError {
@@ -44,7 +44,10 @@ interface MutationTrace {
   table: TableName;
   operation: MutationOperation;
   id: string | null;
-  payload: Record<string, unknown> | null;
+  payload:
+    | Record<string, unknown>
+    | Array<Record<string, unknown>>
+    | null;
   outcome: "success" | "error";
 }
 
@@ -58,6 +61,7 @@ const supabaseState = vi.hoisted(() => ({
     modules: [] as Array<Record<string, unknown>>,
     tasks: [] as Array<Record<string, unknown>>,
     members: [] as Array<Record<string, unknown>>,
+    task_assignees: [] as Array<Record<string, unknown>>,
   },
   failures: [] as FailureRule[],
   readFailures: [] as ReadFailureRule[],
@@ -91,8 +95,12 @@ vi.mock("@/lib/supabase", () => {
   const client = {
     from: vi.fn((table: TableName) => {
       let operation: MutationOperation | null = null;
-      let payload: Record<string, unknown> | null = null;
+      let payload:
+        | Record<string, unknown>
+        | Array<Record<string, unknown>>
+        | null = null;
       let filterId: string | null = null;
+      const filters = new Map<string, unknown>();
       let orderColumn: string | null = null;
       let returnSingle = false;
       let selectProjection: string | null = null;
@@ -107,6 +115,7 @@ vi.mock("@/lib/supabase", () => {
         return builder;
       });
       builder.eq = vi.fn((column: string, value: unknown) => {
+        filters.set(column, value);
         if (column === "id") filterId = String(value);
         return builder;
       });
@@ -114,7 +123,11 @@ vi.mock("@/lib/supabase", () => {
         returnSingle = true;
         return builder;
       });
-      builder.insert = vi.fn((nextPayload: Record<string, unknown>) => {
+      builder.insert = vi.fn((
+        nextPayload:
+          | Record<string, unknown>
+          | Array<Record<string, unknown>>,
+      ) => {
         operation = "insert";
         payload = nextPayload;
         return builder;
@@ -139,6 +152,22 @@ vi.mock("@/lib/supabase", () => {
             ? supabaseState.readFailures.splice(readFailureIndex, 1)[0]
             : null;
           let rows = cloneRows(table);
+          if (
+            table === "tasks"
+            && selectProjection?.includes("task_assignees")
+          ) {
+            rows = rows.map((row) => ({
+              ...row,
+              task_assignees: supabaseState.tables.task_assignees
+                .filter((relation) => relation.task_id === row.id)
+                .map((relation) => ({
+                  member_id: relation.member_id,
+                  member: supabaseState.tables.members
+                    .filter((member) => member.id === relation.member_id)
+                    .map((member) => ({ name: member.name }))[0] ?? null,
+                })),
+            }));
+          }
           const readDelay = supabaseState.readDelays.shift();
           if (readDelay) await readDelay;
           if (readFailure) {
@@ -187,27 +216,35 @@ vi.mock("@/lib/supabase", () => {
 
         let returnedRow: Record<string, unknown> | null = null;
         if (operation === "insert") {
-          const id = `${table}-${supabaseState.nextId}`;
-          supabaseState.nextId += 1;
           const now = "2026-07-27T18:00:00.000Z";
-          returnedRow = {
-            ...payload,
-            id,
-            created_at: now,
-            ...(table === "tasks" ? { updated_at: now } : {}),
-          };
-          supabaseState.tables[table].push(returnedRow);
+          const rows = Array.isArray(payload) ? payload : [payload ?? {}];
+          for (const row of rows) {
+            const id = table === "task_assignees"
+              ? undefined
+              : `${table}-${supabaseState.nextId}`;
+            if (id) supabaseState.nextId += 1;
+            const inserted = {
+              ...row,
+              ...(id ? { id } : {}),
+              created_at: now,
+              ...(table === "tasks" ? { updated_at: now } : {}),
+            };
+            returnedRow ??= inserted;
+            supabaseState.tables[table].push(inserted);
+          }
         } else if (operation === "update") {
           supabaseState.tables[table] = supabaseState.tables[table].map(
             (row) => (
               filterId === null || String(row.id) === filterId
-                ? { ...row, ...payload }
+                ? { ...row, ...(payload as Record<string, unknown>) }
                 : row
             ),
           );
         } else {
           supabaseState.tables[table] = supabaseState.tables[table].filter(
-            (row) => filterId !== null && String(row.id) !== filterId,
+            (row) => !Array.from(filters).every(
+              ([column, value]) => row[column] === value,
+            ),
           );
           if (table === "modules" && filterId !== null) {
             supabaseState.tables.tasks = supabaseState.tables.tasks.map(
@@ -217,6 +254,18 @@ vi.mock("@/lib/supabase", () => {
                   : row
               ),
             );
+          }
+          if (table === "tasks" && filterId !== null) {
+            supabaseState.tables.task_assignees =
+              supabaseState.tables.task_assignees.filter(
+                (relation) => relation.task_id !== filterId,
+              );
+          }
+          if (table === "members" && filterId !== null) {
+            supabaseState.tables.task_assignees =
+              supabaseState.tables.task_assignees.filter(
+                (relation) => relation.member_id !== filterId,
+              );
           }
         }
 
@@ -373,10 +422,16 @@ function resetSupabaseState() {
   supabaseState.tables.modules = moduleRows.map((row) => ({ ...row }));
   supabaseState.tables.tasks = taskRows.map((row) => ({
     ...row,
-    assignees: [...row.assignees],
+    assignees: ["Stale legacy owner"],
     tags: [...row.tags],
   }));
   supabaseState.tables.members = memberRows.map((row) => ({ ...row }));
+  supabaseState.tables.task_assignees = taskRows.flatMap((task) => (
+    task.assignees.map((name) => ({
+      task_id: task.id,
+      member_id: memberRows.find((member) => member.name === name)?.id,
+    }))
+  ));
   supabaseState.failures.length = 0;
   supabaseState.readFailures.length = 0;
   supabaseState.mutationDelays.length = 0;
@@ -687,6 +742,42 @@ describe("Board", () => {
     ).toBeDefined();
   });
 
+  it("writes quick-edit Owner changes through UUID relationships", async () => {
+    await renderLoadedBoard();
+    openTaskActions("Validate NPU kernels");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Quick edit Validate NPU kernels",
+    }));
+    const editor = screen.getByRole("region", {
+      name: "Quick edit Validate NPU kernels",
+    });
+
+    fireEvent.click(within(editor).getByRole("checkbox", { name: "Theo" }));
+
+    await waitFor(() => {
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "task_assignees",
+          operation: "insert",
+          payload: {
+            task_id: "task-kernels",
+            member_id: "member-theo",
+          },
+          outcome: "success",
+        }),
+      );
+    });
+    expect(supabaseState.mutationTrace.some((entry) => (
+      entry.table === "tasks"
+      && entry.operation === "update"
+      && !Array.isArray(entry.payload)
+      && Object.hasOwn(entry.payload ?? {}, "assignees")
+    ))).toBe(false);
+    expect(within(editor).getByRole("checkbox", {
+      name: "Theo",
+    })).toHaveProperty("checked", true);
+  });
+
   it("uses exact Task deletion copy and checks failed Task writes", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
@@ -980,7 +1071,7 @@ describe("Board", () => {
     });
   });
 
-  it("updates every affected Task before removing a Team member", async () => {
+  it("removes a Team member through UUID cascades without rewriting Tasks", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
     fireEvent.click(screen.getByRole("tab", { name: "Team" }));
@@ -993,22 +1084,12 @@ describe("Board", () => {
         && entry.id === "member-maya"
       ))).toBe(true);
     });
-    const taskUpdates = supabaseState.mutationTrace
-      .map((entry, index) => ({ entry, index }))
-      .filter(({ entry }) => (
-        entry.table === "tasks"
-        && entry.operation === "update"
-        && entry.outcome === "success"
-      ));
-    const memberDeleteIndex = supabaseState.mutationTrace.findIndex((entry) => (
-      entry.table === "members" && entry.operation === "delete"
-    ));
-    expect(taskUpdates).toHaveLength(2);
-    expect(taskUpdates.every(({ index }) => index < memberDeleteIndex)).toBe(true);
-    expect(taskUpdates.map(({ entry }) => entry.payload)).toEqual([
-      { assignees: ["Yubai"] },
-      { assignees: [] },
-    ]);
+    expect(supabaseState.mutationTrace.some((entry) => (
+      entry.table === "tasks" && entry.operation === "update"
+    ))).toBe(false);
+    expect(supabaseState.tables.task_assignees.some(
+      (relation) => relation.member_id === "member-maya",
+    )).toBe(false);
     expect(screen.queryByRole("button", { name: "Remove Maya" })).toBeNull();
   });
 
@@ -1016,10 +1097,10 @@ describe("Board", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const removalWrite = deferred();
     delayNextMutation(
-      "tasks",
-      "update",
+      "members",
+      "delete",
       removalWrite.promise,
-      "task-kernels",
+      "member-maya",
     );
     await renderLoadedBoard();
     fireEvent.click(screen.getByRole("tab", { name: "Team" }));
@@ -1061,25 +1142,30 @@ describe("Board", () => {
     );
   });
 
-  it("keeps the member, reports the error, and reloads when an Owner update fails", async () => {
+  it("keeps the member, reports the error, and reloads when deletion fails", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    failNext("tasks", "update", "Owner update failed.", "task-kernels");
+    failNext("members", "delete", "Owner delete failed.", "member-maya");
     await renderLoadedBoard();
     fireEvent.click(screen.getByRole("tab", { name: "Team" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove Maya" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain(
-      "Could not remove member. Owner update failed.",
+      "Could not remove member. Owner delete failed.",
     );
-    expect(supabaseState.mutationTrace.some((entry) => (
-      entry.table === "members" && entry.operation === "delete"
-    ))).toBe(false);
+    expect(supabaseState.mutationTrace).toContainEqual(
+      expect.objectContaining({
+        table: "members",
+        operation: "delete",
+        id: "member-maya",
+        outcome: "error",
+      }),
+    );
     expect(screen.getByRole("button", { name: "Remove Maya" })).toBeDefined();
     expect(supabaseState.readTrace.length).toBeGreaterThanOrEqual(6);
   });
 
-  it("keeps a partial-cleanup failure visible after a slower realtime reload", async () => {
+  it("keeps a deletion failure visible after a slower realtime reload", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
     fireEvent.click(screen.getByRole("tab", { name: "Team" }));
@@ -1103,32 +1189,21 @@ describe("Board", () => {
       );
     });
 
-    failNext("tasks", "update", "Second Owner update failed.", "task-research");
+    failNext("members", "delete", "Owner delete failed.", "member-maya");
     fireEvent.click(screen.getByRole("button", { name: "Remove Maya" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain(
-      "Could not remove member. Second Owner update failed.",
+      "Could not remove member. Owner delete failed.",
     );
     expect(supabaseState.mutationTrace).toContainEqual(
       expect.objectContaining({
-        table: "tasks",
-        operation: "update",
-        id: "task-kernels",
-        outcome: "success",
-      }),
-    );
-    expect(supabaseState.mutationTrace).toContainEqual(
-      expect.objectContaining({
-        table: "tasks",
-        operation: "update",
-        id: "task-research",
+        table: "members",
+        operation: "delete",
+        id: "member-maya",
         outcome: "error",
       }),
     );
-    expect(supabaseState.mutationTrace.some((entry) => (
-      entry.table === "members" && entry.operation === "delete"
-    ))).toBe(false);
 
     await act(async () => {
       slowRealtime.resolve();
@@ -1137,7 +1212,7 @@ describe("Board", () => {
     });
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain(
-        "Could not remove member. Second Owner update failed.",
+        "Could not remove member. Owner delete failed.",
       );
     });
     expect(screen.getByRole("button", { name: "Remove Maya" })).toBeDefined();
@@ -1187,7 +1262,6 @@ describe("Board", () => {
             module_id: "type-research",
             title: "New generic task",
             status: "todo",
-            assignees: ["Maya"],
             tags: ["NPU", "RL"],
             priority: "medium",
             due_date: null,
@@ -1196,6 +1270,17 @@ describe("Board", () => {
         }),
       );
     });
+    expect(supabaseState.mutationTrace).toContainEqual(
+      expect.objectContaining({
+        table: "task_assignees",
+        operation: "insert",
+        payload: [{
+          task_id: "tasks-100",
+          member_id: "member-maya",
+        }],
+        outcome: "success",
+      }),
+    );
     expect(screen.queryByRole("dialog", { name: "Create task" })).toBeNull();
     expect(
       screen.getByRole("link", { name: "New generic task" }),
@@ -1241,9 +1326,12 @@ describe("Board", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));
     await waitFor(() => expect(supabaseState.mutationTrace).toContainEqual(
       expect.objectContaining({
-        table: "tasks",
+        table: "task_assignees",
         operation: "insert",
-        payload: expect.objectContaining({ assignees: ["Nova"] }),
+        payload: [{
+          task_id: "tasks-101",
+          member_id: "members-100",
+        }],
         outcome: "success",
       }),
     ));
@@ -1354,11 +1442,12 @@ describe("Board", () => {
     );
   });
 
-  it("preserves three-table realtime reload and channel cleanup", async () => {
+  it("reloads UUID Owner changes and cleans up the channel", async () => {
     const { unmount } = await renderLoadedBoard();
     expect(supabaseState.handlers.map(({ table }) => table)).toEqual([
       "modules",
       "tasks",
+      "task_assignees",
       "members",
     ]);
 

@@ -28,6 +28,13 @@ import {
   taskTypeFromStorage,
   taskTypePatchToStorage,
 } from "@/lib/tasks/model";
+import {
+  assignTaskMember,
+  normalizeTaskRow,
+  TASK_WITH_ASSIGNEES_SELECT,
+  type TaskRelationRow,
+  unassignTaskMember,
+} from "@/lib/tasks/assignees";
 import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
 import type {
   ActivityKind,
@@ -35,7 +42,6 @@ import type {
   Module,
   NewTaskInput,
   Status,
-  Task,
   TaskModel,
   TaskPatch,
   TaskType,
@@ -118,6 +124,8 @@ export default function Board() {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const reloadGenerationRef = useRef(0);
   const memberRemovalLockRef = useRef(false);
+  const tasksRef = useRef<TaskModel[]>([]);
+  const membersRef = useRef<Member[]>([]);
 
   const recordActivity = useCallback((
     taskId: string,
@@ -152,7 +160,10 @@ export default function Board() {
     try {
       const [typeResult, taskResult, memberResult] = await Promise.all([
         supabase.from("modules").select("*").order("position"),
-        supabase.from("tasks").select("*").order("position"),
+        supabase
+          .from("tasks")
+          .select(TASK_WITH_ASSIGNEES_SELECT)
+          .order("position"),
         supabase.from("members").select("*").order("position"),
       ]);
       const firstError =
@@ -165,12 +176,16 @@ export default function Board() {
           taskTypeFromStorage(row as Module)
         )),
       );
-      setTasks(
-        (taskResult.data ?? []).map((row) => (
-          taskFromStorage(row as Task)
-        )),
-      );
-      setMembers((memberResult.data ?? []) as Member[]);
+      const nextTasks = (taskResult.data ?? []).map((row) => (
+        taskFromStorage(normalizeTaskRow(
+          row as unknown as TaskRelationRow,
+        ))
+      ));
+      const nextMembers = (memberResult.data ?? []) as Member[];
+      tasksRef.current = nextTasks;
+      membersRef.current = nextMembers;
+      setTasks(nextTasks);
+      setMembers(nextMembers);
       setHasSuccessfulSnapshot(true);
       setLoadErrorMsg(null);
     } catch (caught) {
@@ -207,6 +222,11 @@ export default function Board() {
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "task_assignees" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "members" },
         refresh,
       )
@@ -237,16 +257,30 @@ export default function Board() {
       ? Math.min(...tasks.map((task) => task.position)) - 1
       : 0;
     try {
+      const ownerMembers = input.owners.map((name) => {
+        const member = findMemberByName(membersRef.current, name);
+        if (!member) throw new Error(`Owner “${name}” no longer exists.`);
+        return member;
+      });
       const result = await supabase
         .from("tasks")
         .insert(newTaskToStorage(input, position))
         .select("id")
         .single();
       if (result.error) throw result.error;
-      await reload();
-      if (result.data?.id) {
-        recordActivity(result.data.id, "Task created", "create");
+      const taskId = result.data?.id;
+      if (!taskId) throw new Error("Created Task did not return an id.");
+      if (ownerMembers.length > 0) {
+        const assignmentResult = await supabase
+          .from("task_assignees")
+          .insert(ownerMembers.map((member) => ({
+            task_id: taskId,
+            member_id: member.id,
+          })));
+        if (assignmentResult.error) throw assignmentResult.error;
       }
+      await reload();
+      recordActivity(taskId, "Task created", "create");
     } catch (caught) {
       throw await exposeMutationError("create task", caught);
     }
@@ -264,11 +298,39 @@ export default function Board() {
     }
     setMutationErrorMsg(null);
     try {
-      const result = await supabase
-        .from("tasks")
-        .update(taskPatchToStorage(patch))
-        .eq("id", id);
-      if (result.error) throw result.error;
+      const storagePatch = taskPatchToStorage(patch);
+      if (Object.keys(storagePatch).length > 0) {
+        const result = await supabase
+          .from("tasks")
+          .update(storagePatch)
+          .eq("id", id);
+        if (result.error) throw result.error;
+      }
+      if (Object.hasOwn(patch, "owners")) {
+        const currentOwners = tasksRef.current.find(
+          (task) => task.id === id,
+        )?.owners ?? [];
+        const nextOwners = patch.owners ?? [];
+        const removed = currentOwners.filter(
+          (name) => !nextOwners.includes(name),
+        );
+        const added = nextOwners.filter(
+          (name) => !currentOwners.includes(name),
+        );
+        for (const name of removed) {
+          const member = findMemberByName(membersRef.current, name);
+          if (!member) throw new Error(`Owner “${name}” no longer exists.`);
+          await unassignTaskMember(supabase, id, member.id);
+        }
+        for (const name of added) {
+          const member = findMemberByName(membersRef.current, name);
+          if (!member) throw new Error(`Owner “${name}” no longer exists.`);
+          await assignTaskMember(supabase, id, member.id);
+        }
+        tasksRef.current = tasksRef.current.map((task) => (
+          task.id === id ? { ...task, owners: [...nextOwners] } : task
+        ));
+      }
       await reload();
       if (patch.status) {
         recordActivity(
@@ -278,7 +340,7 @@ export default function Board() {
         );
       } else if (patch.title) {
         recordActivity(id, `Renamed to “${patch.title}”`, "edit");
-      } else if (patch.owners) {
+      } else if (Object.hasOwn(patch, "owners")) {
         recordActivity(id, "Owner updated", "assign");
       }
     } catch (caught) {
@@ -418,21 +480,7 @@ export default function Board() {
     memberRemovalLockRef.current = true;
     setMutationErrorMsg(null);
 
-    const affectedTasks = tasks.filter(
-      (task) => task.owners.includes(member.name),
-    );
     try {
-      for (const task of affectedTasks) {
-        const owners = task.owners.filter(
-          (owner) => owner !== member.name,
-        );
-        const updateResult = await supabase
-          .from("tasks")
-          .update(taskPatchToStorage({ owners }))
-          .eq("id", task.id);
-        if (updateResult.error) throw updateResult.error;
-      }
-
       const deleteResult = await supabase
         .from("members")
         .delete()
@@ -444,7 +492,7 @@ export default function Board() {
     } finally {
       memberRemovalLockRef.current = false;
     }
-  }, [exposeMutationError, reload, tasks]);
+  }, [exposeMutationError, reload]);
 
   const lastUpdated = useMemo(() => {
     const latest = tasks.reduce<number | null>((current, task) => {

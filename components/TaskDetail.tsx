@@ -26,6 +26,13 @@ import {
   taskPatchToStorage,
   taskTypeFromStorage,
 } from "@/lib/tasks/model";
+import {
+  assignTaskMember,
+  normalizeTaskRow,
+  TASK_WITH_ASSIGNEES_SELECT,
+  type TaskRelationRow,
+  unassignTaskMember,
+} from "@/lib/tasks/assignees";
 import { fmtDate, relTime } from "@/lib/time";
 import type {
   Activity,
@@ -34,7 +41,6 @@ import type {
   Experiment,
   Member,
   Module,
-  Task,
   TaskModel,
   TaskPatch,
   TaskType,
@@ -246,6 +252,7 @@ export default function TaskDetail({ id }: { id: string }) {
   const retryTokenRef = useRef<RetryToken | null>(null);
   const mutationQueuesRef = useRef(new Map<string, Promise<void>>());
   const ownerCoordinatorRef = useRef<OwnerCoordinator | null>(null);
+  const membersRef = useRef<Member[]>([]);
   const tagCoordinatorRef = useRef<TagCoordinator | null>(null);
   const experimentIdsRef = useRef(new Set<string>());
   const attachmentIdsRef = useRef(new Set<string>());
@@ -313,7 +320,7 @@ export default function TaskDetail({ id }: { id: string }) {
     try {
       const taskResult = await supabase
         .from("tasks")
-        .select("*")
+        .select(TASK_WITH_ASSIGNEES_SELECT)
         .eq("id", requestedVisit.id)
         .maybeSingle();
       if (!isCurrentRequest(requestedVisit, requestVersion)) return;
@@ -337,7 +344,9 @@ export default function TaskDetail({ id }: { id: string }) {
         return;
       }
 
-      const nextTask = taskFromStorage(taskResult.data as Task);
+      const nextTask = taskFromStorage(normalizeTaskRow(
+        taskResult.data as unknown as TaskRelationRow,
+      ));
       const [
         typesResult,
         experimentsResult,
@@ -409,7 +418,9 @@ export default function TaskDetail({ id }: { id: string }) {
       experimentIdsRef.current = new Set(
         nextExperiments.map((experiment) => experiment.id),
       );
-      setMembers((membersResult.data ?? []) as Member[]);
+      const nextMembers = (membersResult.data ?? []) as Member[];
+      membersRef.current = nextMembers;
+      setMembers(nextMembers);
       setAttachments(nextAttachments);
       attachmentIdsRef.current = new Set(
         nextAttachments.map((attachment) => attachment.id),
@@ -440,6 +451,7 @@ export default function TaskDetail({ id }: { id: string }) {
     requestVersionRef.current += 1;
     retryTokenRef.current = null;
     ownerCoordinatorRef.current = null;
+    membersRef.current = [];
     tagCoordinatorRef.current = null;
     experimentIdsRef.current = new Set();
     attachmentIdsRef.current = new Set();
@@ -524,6 +536,10 @@ export default function TaskDetail({ id }: { id: string }) {
     const refreshDeletedTask = (payload: RealtimePayload) => {
       if (payload.old?.id === visit.id) refresh();
     };
+    const refreshTaskOwner = (payload: RealtimePayload) => {
+      const changedTaskId = payload.new?.task_id ?? payload.old?.task_id;
+      if (changedTaskId === visit.id) refresh();
+    };
     const refreshDeletedExperiment = (payload: RealtimePayload) => {
       const deletedId = payload.old?.id;
       if (
@@ -601,6 +617,20 @@ export default function TaskDetail({ id }: { id: string }) {
         "postgres_changes",
         { event: "DELETE", schema: "public", table: "tasks" },
         refreshDeletedTask,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "task_assignees",
+        },
+        refreshTaskOwner,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "members" },
+        refresh,
       )
       .on(
         "postgres_changes",
@@ -759,10 +789,6 @@ export default function TaskDetail({ id }: { id: string }) {
           activityEvent.coordinator.confirmed,
           activityEvent.change,
         );
-        effectivePatch = {
-          ...patch,
-          owners: nextConfirmedOwners,
-        };
       }
       if (tagEvent) {
         tagChangeIsNoOp = sameStrings(
@@ -804,13 +830,24 @@ export default function TaskDetail({ id }: { id: string }) {
         settleTagChange(false);
         return;
       }
-      let result;
       try {
-        result = await client
-          .from("tasks")
-          .update(taskPatchToStorage(effectivePatch))
-          .eq("id", requestedVisit.id);
-        throwIfError(result.error);
+        if (activityEvent) {
+          const member = membersRef.current.find(
+            (candidate) => candidate.name === activityEvent.change.name,
+          );
+          if (!member) throw new Error("Owner no longer exists.");
+          if (activityEvent.change.assigned) {
+            await assignTaskMember(client, requestedVisit.id, member.id);
+          } else {
+            await unassignTaskMember(client, requestedVisit.id, member.id);
+          }
+        } else {
+          const result = await client
+            .from("tasks")
+            .update(taskPatchToStorage(effectivePatch))
+            .eq("id", requestedVisit.id);
+          throwIfError(result.error);
+        }
       } catch (caught) {
         settleOwnerChange(false);
         settleTagChange(false);
@@ -1092,10 +1129,12 @@ export default function TaskDetail({ id }: { id: string }) {
       }
       const created = result.data as Member;
       if (visitRef.current === requestedVisit) {
-        setMembers((current) => [
-          ...current.filter((member) => member.id !== created.id),
+        const nextMembers = [
+          ...membersRef.current.filter((member) => member.id !== created.id),
           created,
-        ].sort((left, right) => left.position - right.position));
+        ].sort((left, right) => left.position - right.position);
+        membersRef.current = nextMembers;
+        setMembers(nextMembers);
       }
       return { ...created };
     } catch (caught) {

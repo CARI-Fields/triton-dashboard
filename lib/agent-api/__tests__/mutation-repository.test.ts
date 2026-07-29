@@ -27,7 +27,9 @@ const context: AgentContext = {
   expiresAt: null,
 };
 
-function taskRow(): Record<string, unknown> {
+function taskRow(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     id: TASK_ID,
     module_id: MODULE_ID,
@@ -35,10 +37,14 @@ function taskRow(): Record<string, unknown> {
     status: "blocked",
     assignees: ["Legacy Bruce"],
     notes: "Profile the fused path.",
+    tags: ["NPU", "Verifier"],
+    priority: "urgent",
+    due_date: "2026-08-15",
     position: 2,
     created_at: "2026-07-28T10:00:00.000Z",
     updated_at: UPDATED_AT,
     internal_task_secret: "never-return",
+    ...overrides,
   };
 }
 
@@ -203,6 +209,9 @@ describe("Agent API mutation RPC repository", () => {
         title: "Tune matmul",
         status: "blocked",
         notes: "Profile the fused path.",
+        tags: ["NPU", "Verifier"],
+        priority: "urgent",
+        due_date: "2026-08-15",
         position: 2,
         created_at: "2026-07-28T10:00:00.000Z",
         updated_at: UPDATED_AT,
@@ -211,6 +220,28 @@ describe("Agent API mutation RPC repository", () => {
     });
     expect(JSON.stringify(result)).not.toContain("assignees");
     expect(JSON.stringify(result)).not.toContain("internal_task_secret");
+  });
+
+  it("accepts an untyped Task mutation response", async () => {
+    const { rpc, repository } = rpcClient();
+    rpc.mockResolvedValue({
+      data: {
+        data: taskRow({ module_id: null, due_date: null }),
+        idempotency_replayed: false,
+      },
+      error: null,
+    });
+
+    const result = await repository.patchTask({
+      context,
+      taskId: TASK_ID,
+      expectedUpdatedAt: UPDATED_AT,
+      changes: { notes: "Keep this Task untyped." },
+      requestId: REQUEST_ID,
+    });
+
+    expect(result.data.module_id).toBeNull();
+    expect(result.data.due_date).toBeNull();
   });
 
   it("calls Experiment create with exact RPC arguments and forwards replay state", async () => {
@@ -439,6 +470,18 @@ describe("Agent API mutation RPC repository", () => {
     { data: taskRow(), idempotency_replayed: "false" },
     {
       data: { ...taskRow(), updated_at: null },
+      idempotency_replayed: false,
+    },
+    {
+      data: taskRow({ tags: ["NPU", 1] }),
+      idempotency_replayed: false,
+    },
+    {
+      data: taskRow({ priority: "critical" }),
+      idempotency_replayed: false,
+    },
+    {
+      data: taskRow({ due_date: "2026-02-30" }),
       idempotency_replayed: false,
     },
   ])("rejects malformed Task RPC response %#", async (rpcData) => {

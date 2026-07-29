@@ -143,7 +143,12 @@ export default function ResultEditor({
                 [key]: nextValue,
               })}
             />
-            <label className="featured-toggle">
+            <label
+              className="featured-toggle"
+              title={validFeatured.includes(key)
+                ? `Remove ${key} from featured metrics`
+                : `Feature ${key}`}
+            >
               <input
                 type="checkbox"
                 aria-label={`Feature ${key}`}
@@ -155,7 +160,12 @@ export default function ResultEditor({
                     : validFeatured.filter((featured) => featured !== key),
                 )}
               />
-              Featured
+              <span className="featured-star" aria-hidden="true">
+                {validFeatured.includes(key) ? "★" : "☆"}
+              </span>
+              <span className="sr-only">
+                {validFeatured.includes(key) ? "Featured" : "Not featured"}
+              </span>
             </label>
             <button
               type="button"

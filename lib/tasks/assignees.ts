@@ -7,6 +7,9 @@ export const TASK_WITH_ASSIGNEES_SELECT = [
   "title",
   "status",
   "notes",
+  "tags",
+  "priority",
+  "due_date",
   "position",
   "created_at",
   "updated_at",
@@ -26,7 +29,11 @@ export function normalizeTaskRow(row: TaskRelationRow): Task {
     ...task,
     assignees: task_assignees
       .flatMap((relation) => relation.member?.name ?? [])
-      .sort((left, right) => left.localeCompare(right)),
+      .sort((left, right) => {
+        const leftKey = left.toLowerCase();
+        const rightKey = right.toLowerCase();
+        return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+      }),
   };
 }
 

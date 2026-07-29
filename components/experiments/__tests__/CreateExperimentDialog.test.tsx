@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Experiment, Member, Task } from "@/lib/types";
+import type { Experiment, Member } from "@/lib/types";
 import CreateExperimentDialog from "@/components/experiments/CreateExperimentDialog";
 import { createExperiment } from "@/lib/experiments/repository";
 
@@ -11,15 +11,8 @@ vi.mock("@/lib/experiments/repository", () => ({
 
 const task = {
   id: "00000000-0000-4000-8000-000000000010",
-  module_id: "00000000-0000-4000-8000-000000000011",
   title: "Optimize conv2d",
-  status: "in_progress",
-  assignees: [],
-  notes: "",
-  position: 0,
-  created_at: "2026-07-24T00:00:00.000Z",
-  updated_at: "2026-07-24T00:00:00.000Z",
-} satisfies Task;
+};
 
 const member = {
   id: "00000000-0000-4000-8000-000000000020",

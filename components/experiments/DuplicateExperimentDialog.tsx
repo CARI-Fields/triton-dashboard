@@ -10,7 +10,7 @@ import {
 import type { Experiment, Member } from "@/lib/types";
 import { duplicateExperiment } from "@/lib/experiments/repository";
 import { formatExperimentId } from "@/lib/experiments/policy";
-import { useModalFocus } from "@/components/experiments/useModalFocus";
+import { useModalFocus } from "@/components/ui/useModalFocus";
 
 export default function DuplicateExperimentDialog({
   open,

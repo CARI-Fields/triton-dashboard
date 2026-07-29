@@ -14,6 +14,11 @@ Everything syncs in real time across everyone's browser.
 
 ---
 
+### Runtime
+
+Use Node 24.18.0 (`nvm use`) for local development. The accepted engine range is
+`>=24.18.0 <25.0.0`.
+
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript) — UI
@@ -223,12 +228,14 @@ Current migrations (run in order on a fresh database):
    Result/Decision fields, lifecycle timestamps, Experiment Activity linkage, indexes, and
    transaction-safe anonymous Activity triggers
 7. `20260727174232_grant_authenticated_data_api_access.sql` — explicit authenticated Data API grants
-8. `20260729013215_triton_board_agent_api_schema.sql` — Agent Keys, collaboration, idempotency,
+8. `20260727195047_task_type_metadata.sql` — optional Task Types plus tags, priority, and due date
+9. `20260729013215_triton_board_agent_api_schema.sql` — Agent Keys, collaboration, idempotency,
    rate-limit, and audit schema
-9. `20260729015825_triton_board_agent_api_mutations.sql` — atomic concurrency-safe Agent mutations
-10. `20260729030703_harden_agent_api_service_role_grants.sql` — privileged-role grant hardening
-11. `20260729083128_harden_agent_api_reads.sql` — Agent read-path hardening
-12. `20260729100913_support_direct_attachment_patch.sql` — direct Task Attachment caption support
+10. `20260729015825_triton_board_agent_api_mutations.sql` — atomic concurrency-safe Agent mutations
+11. `20260729030703_harden_agent_api_service_role_grants.sql` — privileged-role grant hardening
+12. `20260729083128_harden_agent_api_reads.sql` — Agent read-path hardening
+13. `20260729100913_support_direct_attachment_patch.sql` — direct Task Attachment caption support
+14. `20260729142856_extend_agent_api_task_metadata.sql` — Task metadata PATCH support with narrow grants
 
 `supabase/seed.sql` (initial plan data) is optional and separate — run it once via the SQL editor.
 

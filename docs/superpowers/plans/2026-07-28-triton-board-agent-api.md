@@ -828,7 +828,7 @@ Inside one function:
 1. Call `agent_api_require_task_access` with `tasks:write`.
 2. Call `agent_api_require_write_quota`.
 3. Select `to_jsonb(tasks.*)` into `v_before`.
-4. Update only `title`, `status`, `notes`, and `position`, using `CASE WHEN p_changes ? 'field'`.
+4. Update only `title`, `status`, `notes`, `tags`, `priority`, `due_date`, and `position`, using `CASE WHEN p_changes ? 'field'`.
 5. Filter by both `id` and `updated_at`.
 6. Raise `VERSION_CONFLICT` when no row is returned.
 7. Insert the before/after audit row with `response_status = 200`.
@@ -1926,7 +1926,7 @@ Return typed rows from the RPC `data` field and forward `idempotency_replayed`.
 
 Cover:
 
-- Task PATCH accepts title/status/notes/position.
+- Task PATCH accepts title/status/notes/tags/priority/due_date/position.
 - Task PATCH rejects module/assignee/system fields with `422`.
 - Missing If-Match returns `400 MISSING_IF_MATCH`.
 - Stale If-Match returns `412`.

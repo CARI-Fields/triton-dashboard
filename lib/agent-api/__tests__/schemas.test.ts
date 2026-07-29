@@ -137,15 +137,40 @@ describe("readJsonObject", () => {
 describe("Task PATCH schema", () => {
   it("accepts only Task writable fields", () => {
     expect(parseTaskPatch({
-      changes: { title: "Tune matmul", status: "blocked", position: 2 },
+      changes: {
+        title: "Tune matmul",
+        status: "blocked",
+        notes: "Profile the fused path.",
+        tags: ["NPU", "Verifier"],
+        priority: "urgent",
+        due_date: "2026-08-15",
+        position: 2,
+      },
     })).toEqual({
       title: "Tune matmul",
       status: "blocked",
+      notes: "Profile the fused path.",
+      tags: ["NPU", "Verifier"],
+      priority: "urgent",
+      due_date: "2026-08-15",
       position: 2,
     });
   });
 
-  it.each(["module_id", "assignees", "id", "created_at", "updated_at"])(
+  it("accepts clearing a Task due date", () => {
+    expect(parseTaskPatch({
+      changes: { due_date: null },
+    })).toEqual({ due_date: null });
+  });
+
+  it.each([
+    "module_id",
+    "assignees",
+    "task_assignees",
+    "id",
+    "created_at",
+    "updated_at",
+  ])(
     "rejects Task field %s",
     (field) => {
       expect(() => parseTaskPatch({ changes: { [field]: "x" } }))
@@ -155,7 +180,7 @@ describe("Task PATCH schema", () => {
 
   it("rejects unknown Task fields rather than dropping them", () => {
     expectCode(
-      () => parseTaskPatch({ changes: { priority: "high" } }),
+      () => parseTaskPatch({ changes: { surprise: "high" } }),
       "UNKNOWN_FIELD",
     );
   });
@@ -183,6 +208,11 @@ describe("Task PATCH schema", () => {
     [{ title: 1 }, "INVALID_FIELD"],
     [{ status: "paused" }, "INVALID_FIELD"],
     [{ notes: null }, "INVALID_FIELD"],
+    [{ tags: "NPU" }, "INVALID_FIELD"],
+    [{ tags: ["NPU", 1] }, "INVALID_FIELD"],
+    [{ priority: "critical" }, "INVALID_FIELD"],
+    [{ due_date: "2026-02-30" }, "INVALID_FIELD"],
+    [{ due_date: "2026-08-15T00:00:00Z" }, "INVALID_FIELD"],
     [{ position: Number.NaN }, "INVALID_FIELD"],
     [{ position: Number.POSITIVE_INFINITY }, "INVALID_FIELD"],
   ])("rejects invalid Task changes %j", (changes, code) => {

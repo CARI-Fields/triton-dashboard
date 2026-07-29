@@ -59,6 +59,29 @@ function experiment(id: string, passAt1: number, device: string): Experiment {
 }
 
 describe("comparison derivation", () => {
+  it("derives only the recorded metric key without synthesizing Result fields", () => {
+    const baseline = experiment(
+      "00000000-0000-4000-8000-000000000001",
+      0.1,
+      "npu:0",
+    );
+    const current = experiment(
+      "00000000-0000-4000-8000-000000000002",
+      0.2,
+      "npu:1",
+    );
+
+    const keys = buildCompareColumns(
+      [
+        { ...baseline, metrics: { "pass@1": 0.42 }, result_summary: "" },
+        { ...current, metrics: { "pass@1": 0.48 }, result_summary: "" },
+      ],
+      { groups: ["result"], baselineId: null, diffOnly: false },
+    ).map((column) => column.key);
+
+    expect(keys).toEqual(["result.metrics.pass@1"]);
+  });
+
   it("does not produce Delta columns without a Baseline", () => {
     const columns = buildCompareColumns(
       [experiment("00000000-0000-4000-8000-000000000001", 0.1, "npu:0")],

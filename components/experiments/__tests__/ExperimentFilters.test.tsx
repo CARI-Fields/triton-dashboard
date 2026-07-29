@@ -37,17 +37,33 @@ describe("ExperimentFilters", () => {
   it("reports controlled saved-view and field changes and exposes pressed state", () => {
     const onChange = vi.fn();
     const { rerender } = render(
-      <ExperimentFilters rows={rows} value={EMPTY_EXPERIMENT_FILTERS} onChange={onChange} />,
+      <ExperimentFilters
+        rows={rows}
+        value={EMPTY_EXPERIMENT_FILTERS}
+        resultCount={1}
+        onChange={onChange}
+      />,
     );
 
+    const views = screen.getAllByRole("button");
+    expect(views.map((view) => view.textContent)).toEqual([
+      "All",
+      "Running",
+      "Blocked",
+      "Needs Decision",
+      "Recently Completed",
+    ]);
     expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Running" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("searchbox", { name: "Search experiments" })
+      .closest(".database-toolbar")).not.toBeNull();
+    expect(screen.getByText("1 experiments")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Needs Decision" }));
     expect(onChange).toHaveBeenLastCalledWith({
       ...EMPTY_EXPERIMENT_FILTERS,
       savedView: "needs_decision",
     });
-    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "conv" } });
+    fireEvent.change(screen.getByLabelText("Search experiments"), { target: { value: "conv" } });
     expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_EXPERIMENT_FILTERS, search: "conv" });
     fireEvent.change(screen.getByLabelText("Owner"), { target: { value: rows[0].owner_id } });
     expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_EXPERIMENT_FILTERS, ownerId: rows[0].owner_id });
@@ -56,6 +72,7 @@ describe("ExperimentFilters", () => {
       <ExperimentFilters
         rows={rows}
         value={{ ...EMPTY_EXPERIMENT_FILTERS, savedView: "running" }}
+        resultCount={1}
         onChange={onChange}
       />,
     );

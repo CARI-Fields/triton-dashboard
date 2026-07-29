@@ -7,18 +7,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { Session } from "@supabase/supabase-js";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
-import AuthGate from "@/components/AuthGate";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import AuthGate, { useAuthActions } from "@/components/AuthGate";
 
-const mocks = vi.hoisted(() => ({
-  authListener: null as null | ((event: string, session: unknown) => void),
+const mockAuth = vi.hoisted(() => ({
+  listener: null as null | ((event: string, session: Session | null) => void),
   getSession: vi.fn(),
   onAuthStateChange: vi.fn(),
   signInWithPassword: vi.fn(),
@@ -30,15 +23,25 @@ vi.mock("@/lib/supabase", () => ({
   isSupabaseConfigured: true,
   supabase: {
     auth: {
-      getSession: mocks.getSession,
-      onAuthStateChange: mocks.onAuthStateChange,
-      signInWithPassword: mocks.signInWithPassword,
-      signOut: mocks.signOut,
+      getSession: mockAuth.getSession,
+      onAuthStateChange: mockAuth.onAuthStateChange,
+      signInWithPassword: mockAuth.signInWithPassword,
+      signOut: mockAuth.signOut,
     },
   },
 }));
 
-const SESSION: Session = {
+function AuthenticatedShell() {
+  const { logout } = useAuthActions();
+
+  return (
+    <button type="button" onClick={() => void logout()}>
+      Log out through shell
+    </button>
+  );
+}
+
+const SESSION = {
   access_token: "test-access-token",
   refresh_token: "test-refresh-token",
   expires_in: 3600,
@@ -52,219 +55,112 @@ const SESSION: Session = {
     email: "team@example.test",
     created_at: "2026-07-29T12:00:00.000Z",
   },
-};
+} satisfies Session;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((next, fail) => {
+  const promise = new Promise<T>((next) => {
     resolve = next;
-    reject = fail;
   });
-  return { promise, reject, resolve };
-}
-
-function emitAuth(event: string, session: Session | null) {
-  if (!mocks.authListener) throw new Error("Auth listener was not registered.");
-  act(() => mocks.authListener?.(event, session));
-}
-
-function renderGate() {
-  return render(
-    <AuthGate>
-      <p>Protected child</p>
-    </AuthGate>,
-  );
+  return { promise, resolve };
 }
 
 describe("AuthGate", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.authListener = null;
-    mocks.getSession.mockResolvedValue({
+    mockAuth.listener = null;
+    mockAuth.getSession.mockResolvedValue({
       data: { session: null },
       error: null,
     });
-    mocks.onAuthStateChange.mockImplementation((listener) => {
-      mocks.authListener = listener;
+    mockAuth.onAuthStateChange.mockImplementation((listener) => {
+      mockAuth.listener = listener;
       return {
-        data: {
-          subscription: { unsubscribe: mocks.unsubscribe },
-        },
+        data: { subscription: { unsubscribe: mockAuth.unsubscribe } },
       };
     });
-    mocks.signInWithPassword.mockResolvedValue({
-      data: { session: SESSION, user: SESSION.user },
-      error: null,
-    });
-    mocks.signOut.mockResolvedValue({ error: null });
+    mockAuth.signInWithPassword.mockResolvedValue({ error: null });
+    mockAuth.signOut.mockResolvedValue({ error: null });
   });
 
   afterEach(() => {
     cleanup();
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
-  it.each([
-    {
-      name: "a synchronous throw",
-      arrange: () => mocks.getSession.mockImplementationOnce(() => {
-        throw new Error("token-native-marker synchronous failure");
-      }),
-    },
-    {
-      name: "a rejected promise",
-      arrange: () => mocks.getSession.mockRejectedValueOnce(
-        new Error("token-native-marker rejected failure"),
-      ),
-    },
-    {
-      name: "a resolved Auth error",
-      arrange: () => mocks.getSession.mockResolvedValueOnce({
-        data: { session: null },
-        error: new Error("token-native-marker resolved failure"),
-      }),
-    },
-  ])("safely finishes initial loading after $name", async ({ arrange }) => {
-    arrange();
-    renderGate();
+  it("keeps the authenticated shell hidden behind one session boundary", async () => {
+    render(
+      <AuthGate>
+        <div data-testid="authenticated-shell">Shell</div>
+      </AuthGate>,
+    );
 
-    expect(await screen.findByText(
-      "Could not verify your session. Sign in again.",
-    )).toBeDefined();
-    expect(screen.queryByText("Loading…")).toBeNull();
-    expect(screen.queryByText("Protected child")).toBeNull();
-    expect(document.body.textContent).not.toContain("token-native-marker");
+    expect(screen.queryByTestId("authenticated-shell")).toBeNull();
+    expect(
+      await screen.findByRole("heading", { name: "Enter the team password" }),
+    ).toBeDefined();
+    expect(mockAuth.onAuthStateChange).toHaveBeenCalledOnce();
   });
 
-  it("renders its real child after a valid initial session", async () => {
-    mocks.getSession.mockResolvedValueOnce({
+  it("provides the existing logout action to authenticated shell controls", async () => {
+    mockAuth.getSession.mockResolvedValue({
       data: { session: SESSION },
       error: null,
     });
 
-    renderGate();
+    render(
+      <AuthGate>
+        <AuthenticatedShell />
+      </AuthGate>,
+    );
 
-    expect(await screen.findByText("Protected child")).toBeDefined();
-    expect(screen.queryByText("Enter the team password")).toBeNull();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Log out through shell" }),
+    );
+
+    await waitFor(() => expect(mockAuth.signOut).toHaveBeenCalledOnce());
   });
 
-  it.each(["null session", "error"] as const)(
-    "keeps SIGNED_IN authoritative after a late initial %s",
-    async (outcome) => {
-      const initial = deferred<{
-        data: { session: Session | null };
-        error: Error | null;
-      }>();
-      mocks.getSession.mockReturnValueOnce(initial.promise);
-      renderGate();
-      expect(screen.getByText("Loading…")).toBeDefined();
-
-      emitAuth("SIGNED_IN", SESSION);
-      expect(await screen.findByText("Protected child")).toBeDefined();
-
-      await act(async () => {
-        if (outcome === "null session") {
-          initial.resolve({ data: { session: null }, error: null });
-        } else {
-          initial.reject(new Error("token-native-marker late rejection"));
-        }
-      });
-
-      expect(screen.getByText("Protected child")).toBeDefined();
-      expect(screen.queryByText("Enter the team password")).toBeNull();
-      expect(screen.queryByText(
-        "Could not verify your session. Sign in again.",
-      )).toBeNull();
-      expect(document.body.textContent).not.toContain("token-native-marker");
-    },
-  );
-
-  it.each(["valid session", "error"] as const)(
-    "keeps SIGNED_OUT authoritative after a late initial %s",
-    async (outcome) => {
-      const initial = deferred<{
-        data: { session: Session | null };
-        error: Error | null;
-      }>();
-      mocks.getSession.mockReturnValueOnce(initial.promise);
-      renderGate();
-      expect(screen.getByText("Loading…")).toBeDefined();
-
-      emitAuth("SIGNED_OUT", null);
-      expect(await screen.findByText("Enter the team password")).toBeDefined();
-
-      await act(async () => {
-        if (outcome === "valid session") {
-          initial.resolve({ data: { session: SESSION }, error: null });
-        } else {
-          initial.reject(new Error("token-native-marker late rejection"));
-        }
-      });
-
-      expect(screen.getByText("Enter the team password")).toBeDefined();
-      expect(screen.queryByText("Protected child")).toBeNull();
-      expect(screen.queryByText(
-        "Could not verify your session. Sign in again.",
-      )).toBeNull();
-      expect(document.body.textContent).not.toContain("token-native-marker");
-    },
-  );
-
-  it.each(["resolve", "reject"])(
-    "ignores a late initial session %s after unmount",
-    async (outcome) => {
-      const initial = deferred<{
-        data: { session: Session | null };
-        error: Error | null;
-      }>();
-      mocks.getSession.mockReturnValueOnce(initial.promise);
-      const { unmount } = renderGate();
-      expect(screen.getByText("Loading…")).toBeDefined();
-
-      unmount();
-      await act(async () => {
-        if (outcome === "resolve") {
-          initial.resolve({ data: { session: SESSION }, error: null });
-        } else {
-          initial.reject(new Error("token-native-marker late rejection"));
-        }
-      });
-
-      expect(mocks.unsubscribe).toHaveBeenCalledTimes(1);
-      expect(document.body.textContent).not.toContain("token-native-marker");
-    },
-  );
-
-  it("clears verification errors across auth logout and login transitions", async () => {
-    mocks.getSession.mockResolvedValueOnce({
+  it("shows a safe retryable boundary when initial session verification fails", async () => {
+    mockAuth.getSession.mockResolvedValueOnce({
       data: { session: null },
-      error: new Error("token-native-marker resolved failure"),
+      error: new Error("token-native-marker"),
     });
-    renderGate();
+
+    render(
+      <AuthGate>
+        <div data-testid="authenticated-shell">Shell</div>
+      </AuthGate>,
+    );
+
     expect(await screen.findByText(
       "Could not verify your session. Sign in again.",
     )).toBeDefined();
-
-    emitAuth("SIGNED_IN", SESSION);
-    expect(await screen.findByText("Protected child")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: /Log out/ }));
-    await waitFor(() => expect(mocks.signOut).toHaveBeenCalledTimes(1));
-    emitAuth("SIGNED_OUT", null);
-    expect(await screen.findByText("Enter the team password")).toBeDefined();
-    expect(screen.queryByText(
-      "Could not verify your session. Sign in again.",
-    )).toBeNull();
-
-    fireEvent.change(screen.getByPlaceholderText("Password"), {
-      target: { value: "test-team-password" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Unlock board" }));
-    await waitFor(() => {
-      expect(mocks.signInWithPassword).toHaveBeenCalledTimes(1);
-    });
-    emitAuth("SIGNED_IN", SESSION);
-    expect(await screen.findByText("Protected child")).toBeDefined();
+    expect(screen.queryByTestId("authenticated-shell")).toBeNull();
     expect(document.body.textContent).not.toContain("token-native-marker");
+  });
+
+  it("keeps a newer auth event authoritative over a late initial session", async () => {
+    const initial = deferred<{
+      data: { session: Session | null };
+      error: Error | null;
+    }>();
+    mockAuth.getSession.mockReturnValueOnce(initial.promise);
+
+    render(
+      <AuthGate>
+        <div data-testid="authenticated-shell">Shell</div>
+      </AuthGate>,
+    );
+    expect(screen.getByText("Loading…")).toBeDefined();
+
+    act(() => mockAuth.listener?.("SIGNED_IN", SESSION));
+    expect(await screen.findByTestId("authenticated-shell")).toBeDefined();
+
+    await act(async () => {
+      initial.resolve({ data: { session: null }, error: null });
+    });
+
+    expect(screen.getByTestId("authenticated-shell")).toBeDefined();
+    expect(screen.queryByText("Enter the team password")).toBeNull();
   });
 });

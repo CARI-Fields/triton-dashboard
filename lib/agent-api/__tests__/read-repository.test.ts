@@ -107,6 +107,9 @@ function taskRow(
     title: "Fused attention",
     status: "in_progress",
     notes: "Public notes",
+    tags: ["NPU", "Verifier"],
+    priority: "high",
+    due_date: "2026-08-15",
     position: 2,
     created_at: "2026-07-28T12:00:00.000Z",
     updated_at: updatedAt,
@@ -403,6 +406,9 @@ describe("read repository DTOs and queries", () => {
       status: "in_progress",
       assignees: ["Alice", "Bruce"],
       notes: "Public notes",
+      tags: ["NPU", "Verifier"],
+      priority: "high",
+      due_date: "2026-08-15",
       position: 2,
       created_at: "2026-07-28T12:00:00.000Z",
       updated_at: UPDATED_AT,
@@ -909,6 +915,16 @@ describe("read repository DTOs and queries", () => {
       resource_id: TASK_ID,
       task_id: TASK_ID,
       action: "patch",
+      before_state: expect.objectContaining({
+        tags: ["NPU", "Verifier"],
+        priority: "high",
+        due_date: "2026-08-15",
+      }),
+      after_state: expect.objectContaining({
+        tags: ["NPU", "Verifier"],
+        priority: "high",
+        due_date: "2026-08-15",
+      }),
       response_status: 200,
     });
     expect(serialized).not.toContain("secret");

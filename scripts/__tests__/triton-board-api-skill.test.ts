@@ -507,6 +507,54 @@ describe("Triton Board API skill artifacts", () => {
 
   });
 
+  it("documents every current Task response and PATCH metadata field", () => {
+    const openapi = readFileSync(openapiPath, "utf8");
+    const mutation = componentBlock(openapi, "schemas", "TaskMutation");
+    const mutationFields = [
+      "id",
+      "module_id",
+      "title",
+      "status",
+      "notes",
+      "tags",
+      "priority",
+      "due_date",
+      "position",
+      "created_at",
+      "updated_at",
+    ];
+    expect(directSchemaProperties(mutation)).toEqual(
+      [...mutationFields].sort(),
+    );
+    expect(directRequiredFields(mutation)).toEqual(
+      [...mutationFields].sort(),
+    );
+    expect(mutation).toMatch(
+      /module_id:\n\s+oneOf:\n\s+- \$ref: "#\/components\/schemas\/Uuid"\n\s+- type: "null"/,
+    );
+    const task = componentBlock(openapi, "schemas", "Task");
+    expect(task).toMatch(
+      /assignees:\n\s+type: array\n\s+items:\n\s+type: string/,
+    );
+    expect(task).not.toContain(
+      '$ref: "#/components/schemas/Uuid"',
+    );
+
+    const patch = componentBlock(openapi, "schemas", "TaskPatchEnvelope");
+    for (const field of [
+      "title",
+      "status",
+      "notes",
+      "tags",
+      "priority",
+      "due_date",
+      "position",
+    ]) {
+      expect(patch).toMatch(new RegExp(`^            ${field}:$`, "m"));
+    }
+    expect(patch).not.toMatch(/^            (?:module_id|assignees):$/m);
+  });
+
   it("models the server's Gregorian timestamp contract for values and ETags", () => {
     const openapi = readFileSync(openapiPath, "utf8");
     const timestamp = schemaPattern(openapi, "Timestamp");
@@ -553,6 +601,9 @@ describe("Triton Board API skill artifacts", () => {
         "title",
         "status",
         "notes",
+        "tags",
+        "priority",
+        "due_date",
         "position",
         "created_at",
         "updated_at",

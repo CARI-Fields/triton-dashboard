@@ -52,6 +52,19 @@ describe("ExperimentTable", () => {
   it("renders real stored fields, status and decision labels, and real links", () => {
     const decidedRow = { ...row, decision_outcome: "accepted" as const };
     render(<ExperimentTable rows={[decidedRow]} showTask selectable={false} />);
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers.map((header) => header.textContent)).toEqual([
+        "ID",
+        "Name",
+        "Task",
+        "Owner",
+        "Status",
+        "Decision",
+        "Featured metrics",
+        "Updated",
+      ]);
+    expect(headers.every((header) => header.getAttribute("scope") === "col"))
+      .toBe(true);
     expect(screen.getByText("EXP-0007")).toBeDefined();
     expect(screen.getByRole("link", { name: "Manual NPU run" }).getAttribute("href"))
       .toBe("/experiments/00000000-0000-4000-8000-000000000001");
@@ -98,7 +111,32 @@ describe("ExperimentTable", () => {
     const checkbox = screen.getByRole("checkbox", { name: "Select EXP-0007" });
     expect((checkbox as HTMLInputElement).checked).toBe(true);
     expect(checkbox.closest("a")).toBeNull();
+    expect(checkbox.closest("tr")?.getAttribute("aria-selected")).toBe("true");
+    expect(checkbox.closest("tr")?.classList.contains("selected-row")).toBe(true);
     fireEvent.click(checkbox);
+    expect(onToggle).toHaveBeenCalledWith(row.id);
+  });
+
+  it("toggles selection from the checkbox's semantic hit-area wrapper", () => {
+    const onToggle = vi.fn();
+    render(
+      <ExperimentTable
+        rows={[row]}
+        showTask={false}
+        selectable
+        onToggle={onToggle}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Select EXP-0007",
+    });
+    const hitArea = checkbox.parentElement;
+    expect(hitArea?.tagName).toBe("LABEL");
+    expect(hitArea?.classList.contains("experiment-select-control")).toBe(true);
+
+    fireEvent.click(hitArea as HTMLElement);
+    expect(onToggle).toHaveBeenCalledOnce();
     expect(onToggle).toHaveBeenCalledWith(row.id);
   });
 

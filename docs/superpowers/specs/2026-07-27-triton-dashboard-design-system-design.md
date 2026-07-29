@@ -2,7 +2,7 @@
 
 **日期：** 2026-07-27
 
-**状态：** 已通过书面 Spec 复核，实施计划已完成，待选择执行方式
+**状态：** 已实现并通过自动化与浏览器验收
 
 **范围：** 全部已登录界面、Light/Dark 双主题、桌面优先响应式体验，以及 Task
 分类模型从固定 Module/Pipeline 语义向通用 Type + Tags 的无损演进
@@ -834,3 +834,21 @@ low | medium | high | urgent
 实现应以这些状态的共同系统为基准，而不是把单张概念图中的示例数据当成新的
 业务 Schema。若概念图与现有领域规则冲突，以本 Spec、`lib/types.ts` 和
 `lib/experiments/compare.ts` 的明确规则为准。
+
+## 22. Implementation Fidelity Ledger
+
+最终复核以本 Spec、AppFlowy/AFFiNE 原生参考图和 1536×1024、1024×768、
+390×844 的 Light/Dark 浏览器截图为共同基准。当前工作区未保留早期
+Superdesign 画布的独立导出图，因此本账本只记录可由上述设计基准与实际产品状态
+复核的差异。
+
+| Surface | 概念图匹配 | 有意差异 | 原因 |
+| --- | --- | --- | --- |
+| Task Board | 保留安静画布、文本层级、细分隔线、四列 Status Board 和紧凑 Task Card。 | 窄屏不把列堆叠为纵向列表，仍显示下一列边缘并允许横向滚动。 | 桌面优先，同时保留列上下文和完整 Board 操作。 |
+| Add Task | 桌面为右侧 Drawer，窄屏为全屏 Sheet；字段、Footer、Focus Trap 和恢复触发点与概念交互一致。 | 字段严格使用 Title、Status、Type、Tags、Owner、Priority、Due date 和 Description。 | 通用 Task 模型是产品权威，不引入概念图示例字段。 |
+| Experiments | 使用数据库式 Saved Views、筛选工具栏、紧凑行、Sticky Header、选择和 Featured Metrics。 | 窄屏继续是真实 Table 与横向筛选栏，不转换为 Card。 | 保持扫描顺序、选择/Compare 语义和表格可访问结构。 |
+| Experiment Detail | 使用文档式标题、无卡片属性网格、Section Anchors、Activity Rail 和 Sticky Save Bar。 | 编辑器、Baseline、Conflict、Attachment 与 Timeline 仍由现有领域行为决定。 | 视觉重构不削弱 Draft、验证、Realtime 和冲突恢复能力。 |
+| Compare | Experiment 为行、字段为列，身份列 Sticky，Baseline/Delta 明确，容器横向滚动。 | 只渲染 `Experiment` Schema 动态派生的字段组，不补充概念图指标。 | Schema authority：以 `flattenExperiment` / `buildCompareColumns` 为唯一字段来源。 |
+| Analytics | 保留连续画布、Hairline KPI Strip、Status/Attention 层级和紧凑数据表。 | 不显示时间范围、趋势、增长率、预测或统计显著性。 | Current-snapshot authority：只从当前 Task、Type 和 Owner 数据派生。 |
+| Dark theme | 所有 Surface、Table、Input、Drawer、Card、状态和 Focus 使用匹配的语义 Token。 | 不复制高亮装饰、纯黑 Panel、霓虹边界或发光效果。 | 保持 Notion-like 安静层级并满足 WCAG AA。 |
+| Narrow layout | 使用带完整品牌的紧凑 App Header、Navigation Sheet、44px Touch Target 和全屏 Dialog/Drawer。 | Board、Experiments 和 Compare 保留桌面信息结构，通过命名且可聚焦的水平区域承载溢出。 | 不因响应式适配丢失创建、过滤、编辑、比较、保存或重试能力。 |

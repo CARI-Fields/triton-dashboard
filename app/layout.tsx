@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
+import Script from "next/script";
+import AuthGate from "@/components/AuthGate";
 import Navbar from "@/components/Navbar";
+import ThemeProvider from "@/components/theme/ThemeProvider";
 import "./globals.css";
 import "./experiment-workspace.css";
 
@@ -8,18 +11,36 @@ export const metadata: Metadata = {
   description: "Task-centered experiment context, evidence, comparison, and decisions.",
 };
 
+const themeScript = `
+  try {
+    const saved = localStorage.getItem("triton-theme");
+    const theme = saved === "light" || saved === "dark"
+      ? saved
+      : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  } catch {}
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
-}>) {
+  }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
-        <div className="app-shell">
-          <Navbar />
-          <main className="app-content">{children}</main>
-        </div>
+        <Script id="theme-init" strategy="beforeInteractive">
+          {themeScript}
+        </Script>
+        <ThemeProvider>
+          <AuthGate>
+            <div className="app-shell">
+              <Navbar />
+              <main className="app-content">{children}</main>
+            </div>
+          </AuthGate>
+        </ThemeProvider>
       </body>
     </html>
   );

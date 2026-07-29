@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Activity,
+  Attachment,
   Experiment,
   Member,
   Module,
@@ -53,11 +54,20 @@ interface MutationCall {
   filters: Array<[string, unknown]>;
 }
 
+interface QueryTrace {
+  table: string;
+  operation: "select" | "update" | "insert" | "delete";
+  filters: Array<["eq" | "is", string, unknown]>;
+}
+
+const routerPush = vi.hoisted(() => vi.fn());
+
 const supabaseState = vi.hoisted(() => ({
   queues: new Map<string, Promise<QueryResult>[]>(),
   handlers: [] as RealtimeHandler[],
   fromCalls: [] as string[],
   mutations: [] as MutationCall[],
+  queryTraces: [] as QueryTrace[],
   orderCalls: [] as Array<{
     table: string;
     column: string;
@@ -67,7 +77,7 @@ const supabaseState = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: routerPush }),
 }));
 
 vi.mock("@/lib/supabase", () => {
@@ -78,16 +88,26 @@ vi.mock("@/lib/supabase", () => {
       if (!response) {
         throw new Error(`No ${table} query result was queued.`);
       }
+      const trace: QueryTrace = {
+        table,
+        operation: "select",
+        filters: [],
+      };
+      supabaseState.queryTraces.push(trace);
       const builder: Record<string, unknown> = {};
       let mutation: MutationCall | null = null;
       builder.select = vi.fn(() => builder);
       builder.eq = vi.fn((column: string, value: unknown) => {
+        trace.filters.push(["eq", column, value]);
         mutation?.filters.push([column, value]);
         return builder;
       });
-      for (const method of ["maybeSingle"]) {
-        builder[method] = vi.fn(() => builder);
-      }
+      builder.is = vi.fn((column: string, value: unknown) => {
+        trace.filters.push(["is", column, value]);
+        return builder;
+      });
+      builder.maybeSingle = vi.fn(() => builder);
+      builder.single = vi.fn(() => builder);
       builder.order = vi.fn((
         column: string,
         options?: { ascending?: boolean },
@@ -97,6 +117,7 @@ vi.mock("@/lib/supabase", () => {
       });
       for (const kind of ["update", "insert", "delete"] as const) {
         builder[kind] = vi.fn((payload?: unknown) => {
+          trace.operation = kind;
           mutation = { table, kind, payload, filters: [] };
           supabaseState.mutations.push(mutation);
           return builder;
@@ -135,6 +156,9 @@ const taskA = {
   status: "in_progress",
   assignees: [],
   notes: "A notes",
+  tags: [],
+  priority: "medium",
+  due_date: null,
   position: 0,
   created_at: "2026-07-24T00:00:00.000Z",
   updated_at: "2026-07-24T00:00:00.000Z",
@@ -176,6 +200,26 @@ const bob = {
   name: "Bob",
   initials: "BO",
 } satisfies Member;
+
+const nova = {
+  ...member,
+  id: "00000000-0000-4000-8000-000000000023",
+  name: "Nova",
+  initials: "N",
+  position: 1,
+} satisfies Member;
+
+const taskAttachment = {
+  id: "attachment-task-a",
+  task_id: taskA.id,
+  experiment_id: null,
+  url: "https://example.test/task-attachment.png",
+  path: `${taskA.id}/task/task-attachment.png`,
+  caption: "",
+  position: 0,
+  created_at: "2026-07-24T00:00:00.000Z",
+  updated_at: "2026-07-24T00:00:00.000Z",
+} satisfies Attachment;
 
 function experiment(name: string): Experiment {
   return {
@@ -260,20 +304,25 @@ function enqueueRelated(
   experiments: Experiment[] = [],
   activities: Activity[] = [],
   members: Member[] = [member],
+  attachments: Attachment[] = [],
 ) {
-  enqueue("modules", ok(moduleRow));
+  enqueue("modules", ok([moduleRow]));
   enqueue("experiments", ok(experiments));
   enqueue("members", ok(members));
+  enqueue("attachments", ok(attachments));
   enqueue("activity", ok(activities));
 }
 
 function taskRow(task: Task, members: Member[] = [member]) {
   return {
     ...task,
+    assignees: ["Stale legacy owner"],
     task_assignees: task.assignees.map((name) => {
-      const assignedMember = members.find((candidate) => candidate.name === name);
+      const assignedMember = members.find(
+        (candidate) => candidate.name === name,
+      );
       if (!assignedMember) {
-        throw new Error(`Missing Member fixture for assignee ${name}.`);
+        throw new Error(`Missing Member fixture for Owner ${name}.`);
       }
       return {
         member_id: assignedMember.id,
@@ -288,9 +337,10 @@ function enqueueLoad(
   experiments: Experiment[] = [],
   activities: Activity[] = [],
   members: Member[] = [member],
+  attachments: Attachment[] = [],
 ) {
   enqueue("tasks", ok(taskRow(task, members)));
-  enqueueRelated(experiments, activities, members);
+  enqueueRelated(experiments, activities, members, attachments);
 }
 
 function taskUpdates() {
@@ -341,10 +391,10 @@ function trigger(
       return false;
     }
     if (!candidate.config.filter) return true;
-    if (eventType === "DELETE") return false;
     const match = /^([^=]+)=eq\.(.*)$/.exec(candidate.config.filter);
     if (!match) throw new Error(`Unsupported filter: ${candidate.config.filter}`);
-    return String(next[match[1]]) === match[2];
+    const row = eventType === "DELETE" ? old : next;
+    return String(row[match[1]]) === match[2];
   });
   if (handlers.length === 0) return;
   act(() => {
@@ -357,13 +407,177 @@ beforeEach(() => {
   supabaseState.handlers.length = 0;
   supabaseState.fromCalls.length = 0;
   supabaseState.mutations.length = 0;
+  supabaseState.queryTraces.length = 0;
   supabaseState.orderCalls.length = 0;
   supabaseState.removeChannel.mockClear();
+  routerPush.mockClear();
 });
 
 afterEach(cleanup);
 
 describe("TaskDetail orchestration", () => {
+  it("uses a labelled record skeleton for the initial Task load", async () => {
+    const pending = deferred<QueryResult>();
+    enqueue("tasks", pending.promise);
+    const view = render(<TaskDetail id={taskA.id} />);
+
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Task",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-record");
+    expect(skeleton.querySelectorAll(".skeleton-record i")).toHaveLength(13);
+    expect(screen.queryByText("Loading task…")).toBeNull();
+
+    view.unmount();
+    await act(async () => pending.resolve(ok(taskRow(taskA))));
+  });
+
+  it("loads and renders only Task-level attachments", async () => {
+    enqueueLoad(taskA, [], [], [member], [taskAttachment]);
+
+    render(<TaskDetail id={taskA.id} />);
+
+    expect(await screen.findByRole("link", {
+      name: "Open Task attachment",
+    })).toBeDefined();
+    expect(supabaseState.queryTraces).toContainEqual({
+      table: "attachments",
+      operation: "select",
+      filters: [
+        ["eq", "task_id", taskA.id],
+        ["is", "experiment_id", null],
+      ],
+    });
+  });
+
+  it("renders a full-width record with Activity closed in a right-side drawer", async () => {
+    enqueueLoad(taskA);
+
+    const { container } = render(<TaskDetail id={taskA.id} />);
+
+    expect(await screen.findByRole("link", { name: "← Task Board" }))
+      .toBeDefined();
+    const recordMain = container.querySelector(".record-main");
+    expect(recordMain?.tagName).toBe("DIV");
+    expect(screen.getByRole("region", { name: "Task details" }))
+      .toBe(recordMain);
+    expect(container.querySelector("main")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Description" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Experiments" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Attachments" })).toBeDefined();
+    const taskPage = container.querySelector(".task-detail-page");
+    expect(taskPage?.getAttribute("data-activity-open")).toBe("false");
+    expect(screen.queryByRole("dialog", { name: "Task activity" })).toBeNull();
+    const showActivity = screen.getByRole("button", {
+      name: "Show activity",
+    });
+    expect(showActivity.getAttribute("aria-expanded")).toBe("false");
+    expect(showActivity.getAttribute("aria-controls"))
+      .toBe("task-activity-drawer");
+
+    showActivity.focus();
+    fireEvent.click(showActivity);
+    const activityDialog = screen.getByRole("dialog", {
+      name: "Task activity",
+    });
+    expect(taskPage?.getAttribute("data-activity-open")).toBe("true");
+    expect(screen.getByRole("heading", { name: "Activity" })).toBeDefined();
+    const activityContent = activityDialog.querySelector(
+      ".activity-drawer-scroll",
+    ) as HTMLElement;
+    expect(activityContent.getAttribute("tabindex")).toBe("0");
+    const timelineInput = within(activityDialog).getByLabelText(
+      "Add a note to the timeline",
+    );
+    fireEvent.change(timelineInput, { target: { value: "Preserve this note" } });
+
+    const closeActivity = within(activityDialog).getByRole("button", {
+      name: "Close activity",
+    });
+    fireEvent.click(closeActivity);
+    expect(taskPage?.getAttribute("data-activity-open")).toBe("false");
+    expect(screen.queryByRole("dialog", { name: "Task activity" })).toBeNull();
+
+    showActivity.focus();
+    fireEvent.click(showActivity);
+    expect(screen.getByRole("dialog", { name: "Task activity" })).toBeDefined();
+    expect(timelineInput).toHaveProperty("value", "Preserve this note");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Task activity" })).toBeNull();
+      expect(document.activeElement).toBe(showActivity);
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    expect(screen.queryByText("Module")).toBeNull();
+    expect(screen.queryByText(/Assignee/)).toBeNull();
+  });
+
+  it("maps domain property patches back to compatibility storage fields", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    enqueue("tasks", ok(null));
+    enqueueLoad({ ...taskA, module_id: null });
+    fireEvent.change(screen.getByLabelText("Task type"), {
+      target: { value: "" },
+    });
+    await waitFor(() => expect(
+      (screen.getByLabelText("Task type") as HTMLSelectElement).value,
+    ).toBe(""));
+
+    enqueue("tasks", ok(null));
+    enqueueLoad({ ...taskA, module_id: null, tags: ["NPU"] });
+    const tags = screen.getByLabelText("Task tags");
+    fireEvent.change(tags, { target: { value: "NPU" } });
+    fireEvent.keyDown(tags, { key: "Enter" });
+    await screen.findByText("NPU");
+
+    enqueue("tasks", ok(null));
+    enqueueLoad({
+      ...taskA,
+      module_id: null,
+      tags: ["NPU"],
+      priority: "high",
+    });
+    fireEvent.change(screen.getByLabelText("Task priority"), {
+      target: { value: "high" },
+    });
+    await waitFor(() => expect(
+      (screen.getByLabelText("Task priority") as HTMLSelectElement).value,
+    ).toBe("high"));
+
+    enqueue("tasks", ok(null));
+    enqueueLoad({
+      ...taskA,
+      module_id: null,
+      tags: ["NPU"],
+      priority: "high",
+      due_date: "2026-08-15",
+    });
+    fireEvent.change(screen.getByLabelText("Task due date"), {
+      target: { value: "2026-08-15" },
+    });
+    await waitFor(() => expect(
+      (screen.getByLabelText("Task due date") as HTMLInputElement).value,
+    ).toBe("2026-08-15"));
+
+    expect(taskUpdates().map((call) => call.payload)).toEqual([
+      { module_id: null },
+      { tags: ["NPU"] },
+      { priority: "high" },
+      { due_date: "2026-08-15" },
+    ]);
+    expect(taskUpdates()).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        typeId: expect.anything(),
+        owners: expect.anything(),
+        dueDate: expect.anything(),
+      }),
+    ]));
+  });
+
   it("orders equal-position Task experiments by stable Experiment identity", async () => {
     const first = experiment("First stable");
     const second = {
@@ -579,7 +793,7 @@ describe("TaskDetail orchestration", () => {
     await screen.findByRole("button", { name: "Task A" });
 
     enqueue("tasks", failure("Task update denied."));
-    fireEvent.change(screen.getByLabelText("Status"), {
+    fireEvent.change(screen.getByLabelText("Task status"), {
       target: { value: "done" },
     });
     const alert = await screen.findByRole("alert");
@@ -589,7 +803,7 @@ describe("TaskDetail orchestration", () => {
 
     const staleMutation = deferred<QueryResult>();
     enqueue("tasks", staleMutation.promise);
-    fireEvent.change(screen.getByLabelText("Status"), {
+    fireEvent.change(screen.getByLabelText("Task status"), {
       target: { value: "blocked" },
     });
     enqueueLoad(taskB);
@@ -599,6 +813,62 @@ describe("TaskDetail orchestration", () => {
     await act(async () => staleMutation.resolve(ok(taskRow(taskA))));
     expect(screen.getByRole("button", { name: "Task B" })).toBeDefined();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("deletes the current Task after the exact confirmation and navigates home", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    try {
+      enqueue("tasks", ok(null));
+      fireEvent.click(screen.getByLabelText("More task actions"));
+      fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+
+      await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/"));
+      expect(confirm).toHaveBeenCalledWith(
+        "Delete task “Task A”? This cannot be undone.",
+      );
+      expect(supabaseState.mutations).toContainEqual({
+        table: "tasks",
+        kind: "delete",
+        payload: undefined,
+        filters: [["id", taskA.id]],
+      });
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it("surfaces Task delete failures without stale navigation", async () => {
+    enqueueLoad(taskA);
+    const view = render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    try {
+      enqueue("tasks", failure("Delete denied."));
+      fireEvent.click(screen.getByLabelText("More task actions"));
+      fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "Could not delete task. Delete denied.",
+      );
+      expect(routerPush).not.toHaveBeenCalled();
+
+      const staleDelete = deferred<QueryResult>();
+      enqueue("tasks", staleDelete.promise);
+      fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+      enqueueLoad(taskB);
+      view.rerender(<TaskDetail id={taskB.id} />);
+      await screen.findByRole("button", { name: "Task B" });
+      await act(async () => staleDelete.resolve(ok(null)));
+
+      expect(routerPush).not.toHaveBeenCalled();
+      expect(screen.queryByRole("alert")).toBeNull();
+    } finally {
+      confirm.mockRestore();
+    }
   });
 
   it("does not suppress overlapping independent Task writes, audits, or reconciliation", async () => {
@@ -615,7 +885,7 @@ describe("TaskDetail orchestration", () => {
     const titleInput = screen.getByLabelText("Task title");
     fireEvent.change(titleInput, { target: { value: "Edited Task A" } });
     fireEvent.blur(titleInput);
-    fireEvent.change(screen.getByLabelText("Status"), {
+    fireEvent.change(screen.getByLabelText("Task status"), {
       target: { value: "done" },
     });
 
@@ -636,7 +906,7 @@ describe("TaskDetail orchestration", () => {
       "Status set to Done",
     ]);
     expect(
-      (screen.getByLabelText("Status") as HTMLSelectElement).value,
+      (screen.getByLabelText("Task status") as HTMLSelectElement).value,
     ).toBe("done");
 
   });
@@ -655,7 +925,7 @@ describe("TaskDetail orchestration", () => {
     const titleInput = screen.getByLabelText("Task title");
     fireEvent.change(titleInput, { target: { value: "Rejected title" } });
     fireEvent.blur(titleInput);
-    fireEvent.change(screen.getByLabelText("Status"), {
+    fireEvent.change(screen.getByLabelText("Task status"), {
       target: { value: "done" },
     });
 
@@ -670,7 +940,7 @@ describe("TaskDetail orchestration", () => {
     expect(alert.textContent).toContain("Could not update task.");
     expect(alert.textContent).toContain("Title update denied.");
     expect(
-      (screen.getByLabelText("Status") as HTMLSelectElement).value,
+      (screen.getByLabelText("Task status") as HTMLSelectElement).value,
     ).toBe("done");
 
     enqueue("tasks", failure("Concurrent refresh denied."));
@@ -694,9 +964,10 @@ describe("TaskDetail orchestration", () => {
     const firstWrite = deferred<QueryResult>();
     const secondWrite = deferred<QueryResult>();
     enqueue("task_assignees", firstWrite.promise);
-    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
-    fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Bob" }));
 
     expect(taskAssigneeMutations()).toEqual([
       {
@@ -741,6 +1012,201 @@ describe("TaskDetail orchestration", () => {
     await act(async () => secondWrite.resolve(ok(null)));
   });
 
+  it("creates a Team member before assigning it as an Owner", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    enqueue("members", ok(nova));
+    enqueue("task_assignees", ok(null));
+    enqueue("activity", ok(null));
+    enqueueLoad(
+      { ...taskA, assignees: ["Nova"] },
+      [],
+      [],
+      [member, nova],
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    await waitFor(() => expect(taskAssigneeMutations()).toContainEqual({
+      table: "task_assignees",
+      kind: "insert",
+      payload: { task_id: taskA.id, member_id: nova.id },
+      filters: [],
+    }));
+    expect(legacyAssigneeWrites()).toEqual([]);
+    expect(supabaseState.mutations).toContainEqual({
+      table: "members",
+      kind: "insert",
+      payload: expect.objectContaining({
+        name: "Nova",
+        initials: "N",
+      }),
+      filters: [],
+    });
+    expect(screen.getByRole("button", { name: "Remove Nova" })).toBeDefined();
+  });
+
+  it("keeps the Owner create draft and selection when member creation fails", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    enqueue("members", failure("Owner insert failed."));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "Could not add owner. Owner insert failed.",
+    );
+    expect(taskUpdates()).toHaveLength(0);
+    expect(screen.getByLabelText("New owner name")).toHaveProperty(
+      "value",
+      "Nova",
+    );
+    expect(screen.getByText("No owners yet.")).toBeDefined();
+  });
+
+  it("does not assign a created Owner after navigation to another Task", async () => {
+    enqueueLoad(taskA);
+    const view = render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const memberInsert = deferred<QueryResult>();
+    enqueue("members", memberInsert.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    enqueueLoad(taskB);
+    view.rerender(<TaskDetail id={taskB.id} />);
+    await screen.findByRole("button", { name: "Task B" });
+    enqueue("task_assignees", failure("Stale Owner patch escaped."));
+
+    await act(async () => memberInsert.resolve(ok(nova)));
+
+    expect(taskUpdates()).toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("does not assign a created Owner after an A to B to A revisit", async () => {
+    enqueueLoad(taskA);
+    const view = render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const memberInsert = deferred<QueryResult>();
+    enqueue("members", memberInsert.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    enqueueLoad(taskB);
+    view.rerender(<TaskDetail id={taskB.id} />);
+    await screen.findByRole("button", { name: "Task B" });
+    enqueueLoad(taskA);
+    view.rerender(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+    enqueue("task_assignees", failure("Stale Owner patch escaped."));
+
+    await act(async () => memberInsert.resolve(ok(nova)));
+
+    expect(taskUpdates()).toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("rolls back one optimistic Owner toggle when its write is rejected", async () => {
+    enqueueLoad(taskA, [], [], [member, alice]);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const ownerWrite = deferred<QueryResult>();
+    enqueue("task_assignees", ownerWrite.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
+    expect(screen.getByRole("button", { name: "Remove Alice" })).toBeDefined();
+
+    await act(async () => ownerWrite.resolve(failure("Owner update denied.")));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Owner update denied.",
+    );
+    await waitFor(() => expect(
+      screen.queryByRole("button", { name: "Remove Alice" }),
+    ).toBeNull());
+  });
+
+  it("serializes rapid Tag intent without losing the cumulative draft", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const firstWrite = deferred<QueryResult>();
+    const secondWrite = deferred<QueryResult>();
+    enqueue("tasks", firstWrite.promise);
+    const input = screen.getByLabelText("Task tags");
+    fireEvent.change(input, { target: { value: "NPU" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "Verifier" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(taskUpdates().map((call) => call.payload)).toEqual([
+      { tags: ["NPU"] },
+    ]);
+
+    enqueueLoad({ ...taskA, tags: ["NPU"] });
+    enqueue("tasks", secondWrite.promise);
+    enqueueLoad({ ...taskA, tags: ["NPU", "Verifier"] });
+    await act(async () => firstWrite.resolve(ok(null)));
+
+    await waitFor(() => expect(
+      taskUpdates().map((call) => call.payload),
+    ).toEqual([
+      { tags: ["NPU"] },
+      { tags: ["NPU", "Verifier"] },
+    ]));
+    expect(screen.getByText("NPU")).toBeDefined();
+    expect(screen.getByText("Verifier")).toBeDefined();
+
+    await act(async () => secondWrite.resolve(ok(null)));
+    await waitFor(() => expect(screen.getByText("Verifier")).toBeDefined());
+  });
+
+  it("rolls back one optimistic Tag addition when its write is rejected", async () => {
+    enqueueLoad(taskA);
+    render(<TaskDetail id={taskA.id} />);
+    await screen.findByRole("button", { name: "Task A" });
+
+    const tagWrite = deferred<QueryResult>();
+    enqueue("tasks", tagWrite.promise);
+    const input = screen.getByLabelText("Task tags");
+
+    fireEvent.change(input, { target: { value: "NPU" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("button", { name: "Remove NPU" })).toBeDefined();
+
+    await act(async () => tagWrite.resolve(failure("Tag update denied.")));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Tag update denied.",
+    );
+    await waitFor(() => expect(
+      screen.queryByRole("button", { name: "Remove NPU" }),
+    ).toBeNull());
+  });
+
   it("rebases a queued assignee change after an earlier assignee write fails", async () => {
     enqueueLoad(taskA, [], [], [member, alice, bob]);
     render(<TaskDetail id={taskA.id} />);
@@ -749,9 +1215,10 @@ describe("TaskDetail orchestration", () => {
     const aliceWrite = deferred<QueryResult>();
     const bobWrite = deferred<QueryResult>();
     enqueue("task_assignees", aliceWrite.promise);
-    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
-    fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Bob" }));
     expect(taskAssigneeMutations()).toEqual([
       {
         table: "task_assignees",
@@ -788,9 +1255,12 @@ describe("TaskDetail orchestration", () => {
     expect(legacyAssigneeWrites()).toEqual([]);
     await act(async () => bobWrite.resolve(ok(null)));
 
-    expect(await screen.findByRole("button", { name: "Unassign Bob" }))
-      .toBeDefined();
-    expect(screen.queryByRole("button", { name: "Unassign Alice" })).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: "Remove Bob" }),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole("button", { name: "Remove Alice" }),
+    ).toBeNull();
     expect(activityInserts().map((call) => call.payload)).toEqual([
       expect.objectContaining({
         task_id: taskA.id,
@@ -808,9 +1278,9 @@ describe("TaskDetail orchestration", () => {
 
     const assignWrite = deferred<QueryResult>();
     enqueue("task_assignees", assignWrite.promise);
-    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
-    fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Alice" }));
 
     enqueue("task_assignees", ok(null));
     enqueue("activity", ok(null));
@@ -828,19 +1298,22 @@ describe("TaskDetail orchestration", () => {
     ]);
     expect(legacyAssigneeWrites()).toEqual([]);
     expect(activityInserts()).toHaveLength(0);
-    expect(screen.queryByRole("button", { name: "Unassign Alice" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Remove Alice" }),
+    ).toBeNull();
   });
 
   it("skips a queued assign that becomes a no-op after unassign fails", async () => {
     const assignedTask = { ...taskA, assignees: ["Alice"] };
     enqueueLoad(assignedTask, [], [], [member, alice]);
     render(<TaskDetail id={taskA.id} />);
-    await screen.findByRole("button", { name: "Unassign Alice" });
+    await screen.findByRole("button", { name: "Remove Alice" });
 
     const unassignWrite = deferred<QueryResult>();
     enqueue("task_assignees", unassignWrite.promise);
-    fireEvent.click(screen.getByRole("button", { name: "Unassign Alice" }));
-    fireEvent.click(screen.getByRole("button", { name: "Unassign Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Alice" }));
 
     enqueue("task_assignees", ok(null));
     enqueue("activity", ok(null));
@@ -861,7 +1334,9 @@ describe("TaskDetail orchestration", () => {
     ]);
     expect(legacyAssigneeWrites()).toEqual([]);
     expect(activityInserts()).toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Unassign Alice" })).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Remove Alice" }),
+    ).toBeDefined();
   });
 
   it("reports partial Task success truthfully and reconciles after activity failure", async () => {
@@ -872,7 +1347,7 @@ describe("TaskDetail orchestration", () => {
     enqueue("tasks", ok(null));
     enqueue("activity", failure("Activity insert denied."));
     enqueueLoad({ ...taskA, status: "done" });
-    fireEvent.change(screen.getByLabelText("Status"), {
+    fireEvent.change(screen.getByLabelText("Task status"), {
       target: { value: "done" },
     });
 
@@ -883,7 +1358,7 @@ describe("TaskDetail orchestration", () => {
     expect(alert.textContent).toContain("Activity insert denied.");
     expect(alert.textContent).not.toContain("Could not update task.");
     expect(
-      (screen.getByLabelText("Status") as HTMLSelectElement).value,
+      (screen.getByLabelText("Task status") as HTMLSelectElement).value,
     ).toBe("done");
   });
 
@@ -922,6 +1397,7 @@ describe("TaskDetail orchestration", () => {
     const pendingInsert = deferred<QueryResult>();
     enqueue("activity", pendingInsert.promise);
     enqueue("activity", pendingInsert.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Show activity" }));
     const input = screen.getByLabelText("Add a note to the timeline");
     fireEvent.change(input, { target: { value: "One note" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -939,6 +1415,7 @@ describe("TaskDetail orchestration", () => {
     await screen.findByRole("button", { name: "Task A" });
 
     enqueue("activity", failure("Timeline insert denied."));
+    fireEvent.click(screen.getByRole("button", { name: "Show activity" }));
     fireEvent.change(screen.getByLabelText("Add a note to the timeline"), {
       target: { value: "Keep this draft" },
     });
@@ -994,6 +1471,19 @@ describe("TaskDetail orchestration", () => {
       {
         event: "INSERT",
         schema: "public",
+        table: "attachments",
+        filter: `task_id=eq.${taskA.id}`,
+      },
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "attachments",
+        filter: `task_id=eq.${taskA.id}`,
+      },
+      { event: "DELETE", schema: "public", table: "attachments" },
+      {
+        event: "INSERT",
+        schema: "public",
         table: "activity",
         filter: `task_id=eq.${taskA.id}`,
       },
@@ -1020,11 +1510,11 @@ describe("TaskDetail orchestration", () => {
     )).toHaveLength(taskQueries);
   });
 
-  it("reloads only when a deleted UUID assignment belongs to this Task", async () => {
+  it("reloads only UUID Owner changes that belong to this Task", async () => {
     const assignedTask = { ...taskA, assignees: ["Alice"] };
     enqueueLoad(assignedTask, [], [], [member, alice]);
     render(<TaskDetail id={taskA.id} />);
-    await screen.findByRole("button", { name: "Unassign Alice" });
+    await screen.findByRole("button", { name: "Remove Alice" });
 
     const taskQueries = () => supabaseState.fromCalls.filter(
       (table) => table === "tasks",
@@ -1049,52 +1539,58 @@ describe("TaskDetail orchestration", () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Unassign Alice" }))
+      expect(screen.queryByRole("button", { name: "Remove Alice" }))
         .toBeNull();
     });
     expect(taskQueries()).toBe(initialQueries + 1);
   });
 
-  it("reloads nested assignee names and picker members after a Member update", async () => {
-    const assignedTask = { ...taskA, assignees: ["Alice"] };
-    enqueueLoad(assignedTask, [], [], [member, alice]);
+  it("refreshes only Task-level attachment traffic and clears IDs on visits", async () => {
+    enqueueLoad(taskA, [], [], [member], [taskAttachment]);
     const view = render(<TaskDetail id={taskA.id} />);
-    await screen.findByRole("button", { name: "Unassign Alice" });
+    await screen.findByRole("link", { name: "Open Task attachment" });
+    const taskQueries = () => supabaseState.fromCalls.filter(
+      (table) => table === "tasks",
+    ).length;
+    const initialQueries = taskQueries();
 
-    const renamedAlice = {
-      ...alice,
-      name: "Alicia",
-      initials: "AC",
-    };
-    const renamedMember = {
-      ...member,
-      name: "Bruno",
-      initials: "BR",
-    };
-    enqueueLoad(
-      { ...assignedTask, assignees: ["Alicia"] },
-      [],
-      [],
-      [renamedMember, renamedAlice],
-    );
     trigger(
       `task-${taskA.id}`,
-      "members",
+      "attachments",
       "UPDATE",
-      { id: alice.id, name: "Alicia" },
+      {
+        id: "experiment-attachment",
+        task_id: taskA.id,
+        experiment_id: "experiment-a",
+      },
     );
+    expect(taskQueries()).toBe(initialQueries);
 
-    expect(await screen.findByRole("button", { name: "Unassign Alicia" }))
-      .toBeDefined();
-    expect(screen.queryByRole("button", { name: "Unassign Alice" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
-    const picker = screen.getByRole("menu");
-    expect(within(picker).getByRole("button", { name: /Bruno$/ }))
-      .toBeDefined();
-    expect(within(picker).queryByRole("button", { name: /Bruce$/ })).toBeNull();
+    enqueueLoad(taskA, [], [], [member], [taskAttachment]);
+    trigger(
+      `task-${taskA.id}`,
+      "attachments",
+      "UPDATE",
+      {
+        id: taskAttachment.id,
+        task_id: taskA.id,
+        experiment_id: "corrupted-but-known",
+      },
+    );
+    await waitFor(() => expect(taskQueries()).toBe(initialQueries + 1));
 
-    view.unmount();
-    expect(supabaseState.removeChannel).toHaveBeenCalledTimes(1);
+    enqueueLoad(taskB);
+    view.rerender(<TaskDetail id={taskB.id} />);
+    await screen.findByRole("button", { name: "Task B" });
+    const taskBQueries = taskQueries();
+    trigger(
+      `task-${taskB.id}`,
+      "attachments",
+      "DELETE",
+      { id: taskAttachment.id },
+      {},
+    );
+    expect(taskQueries()).toBe(taskBQueries);
   });
 
   it("ignores unrelated DELETE payloads but detects current Task and Experiment deletion", async () => {
@@ -1172,6 +1668,7 @@ describe("TaskDetail orchestration", () => {
     enqueue("modules", oldModule.promise);
     enqueue("experiments", ok([inserted]));
     enqueue("members", ok([member]));
+    enqueue("attachments", ok([]));
     enqueue("activity", ok([]));
     trigger(
       `task-${taskA.id}`,
@@ -1195,7 +1692,7 @@ describe("TaskDetail orchestration", () => {
       (table) => table === "tasks",
     )).toHaveLength(3));
 
-    await act(async () => oldModule.resolve(ok(moduleRow)));
+    await act(async () => oldModule.resolve(ok([moduleRow])));
     expect(screen.queryByText("Transient experiment")).toBeNull();
   });
 
@@ -1210,6 +1707,7 @@ describe("TaskDetail orchestration", () => {
     enqueue("modules", oldModule.promise);
     enqueue("experiments", ok([]));
     enqueue("members", ok([member]));
+    enqueue("attachments", ok([]));
     enqueue("activity", ok([inserted]));
     trigger(
       `task-${taskA.id}`,
@@ -1233,7 +1731,7 @@ describe("TaskDetail orchestration", () => {
       (table) => table === "tasks",
     )).toHaveLength(3));
 
-    await act(async () => oldModule.resolve(ok(moduleRow)));
+    await act(async () => oldModule.resolve(ok([moduleRow])));
     expect(screen.queryByText("Transient activity")).toBeNull();
   });
 

@@ -7,7 +7,7 @@ import type {
   Experiment,
   ExperimentListRow,
   Member,
-  Task,
+  TaskModel,
 } from "@/lib/types";
 import { serializeCompareSelection } from "@/lib/experiments/compare-url";
 import CreateExperimentDialog from "@/components/experiments/CreateExperimentDialog";
@@ -24,7 +24,7 @@ export default function TaskExperimentsPanel({
   experiments,
   members,
 }: {
-  task: Task;
+  task: TaskModel;
   experiments: Experiment[];
   members: Member[];
 }) {

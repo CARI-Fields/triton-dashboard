@@ -8,8 +8,11 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Member, Module, Task } from "@/lib/types";
 import Board from "@/components/Board";
+import type { Member, Module, Task } from "@/lib/types";
+
+type TableName = "modules" | "tasks" | "members" | "task_assignees";
+type MutationOperation = "insert" | "update" | "delete";
 
 interface QueryError {
   message: string;
@@ -18,61 +21,281 @@ interface QueryError {
   code: string;
 }
 
-interface QueryResult<T = unknown> {
-  data: T;
-  error: QueryError | null;
+interface FailureRule {
+  table: TableName;
+  operation: MutationOperation;
+  id?: string;
+  message: string;
+}
+
+interface ReadFailureRule {
+  table: TableName;
+  message: string;
+}
+
+interface MutationDelayRule {
+  table: TableName;
+  operation: MutationOperation;
+  id?: string;
+  promise: Promise<void>;
+}
+
+interface MutationTrace {
+  table: TableName;
+  operation: MutationOperation;
+  id: string | null;
+  payload:
+    | Record<string, unknown>
+    | Array<Record<string, unknown>>
+    | null;
+  outcome: "success" | "error";
 }
 
 interface RealtimeHandler {
-  table: string;
-  callback: (payload: {
-    eventType: "INSERT" | "UPDATE" | "DELETE";
-    new: Record<string, unknown>;
-    old: Record<string, unknown>;
-  }) => void;
+  table: TableName;
+  callback: (payload: unknown) => void;
 }
 
 const supabaseState = vi.hoisted(() => ({
-  queues: new Map<string, Promise<QueryResult>[]>(),
-  activityResponses: [] as Promise<string | null>[],
-  fromCalls: [] as string[],
+  tables: {
+    modules: [] as Array<Record<string, unknown>>,
+    tasks: [] as Array<Record<string, unknown>>,
+    members: [] as Array<Record<string, unknown>>,
+    task_assignees: [] as Array<Record<string, unknown>>,
+  },
+  failures: [] as FailureRule[],
+  readFailures: [] as ReadFailureRule[],
+  mutationDelays: [] as MutationDelayRule[],
+  mutationTrace: [] as MutationTrace[],
+  readTrace: [] as TableName[],
+  readDelays: [] as Array<Promise<void>>,
   handlers: [] as RealtimeHandler[],
   removeChannel: vi.fn(),
+  nextId: 100,
 }));
 
 vi.mock("@/lib/activity", () => ({
-  logActivity: vi.fn(() => (
-    supabaseState.activityResponses.shift() ?? Promise.resolve(null)
-  )),
+  logActivity: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/supabase", () => {
+  function queryError(message: string): QueryError {
+    return {
+      message,
+      details: "",
+      hint: "",
+      code: "TEST_ERROR",
+    };
+  }
+
+  function cloneRows(table: TableName): Array<Record<string, unknown>> {
+    return supabaseState.tables[table].map((row) => ({ ...row }));
+  }
+
   const client = {
-    from: vi.fn((table: string) => {
-      supabaseState.fromCalls.push(table);
-      const response = supabaseState.queues.get(table)?.shift();
-      if (!response) throw new Error(`No ${table} query result was queued.`);
+    from: vi.fn((table: TableName) => {
+      let operation: MutationOperation | null = null;
+      let payload:
+        | Record<string, unknown>
+        | Array<Record<string, unknown>>
+        | null = null;
+      let filterId: string | null = null;
+      const filters = new Map<string, unknown>();
+      let orderColumn: string | null = null;
+      let returnSingle = false;
+      let selectProjection: string | null = null;
+
       const builder: Record<string, unknown> = {};
-      for (const method of [
-        "select",
-        "order",
-        "eq",
-        "single",
-        "insert",
-        "update",
-        "delete",
-      ]) {
-        builder[method] = vi.fn(() => builder);
+      builder.select = vi.fn((projection: string) => {
+        selectProjection = projection;
+        return builder;
+      });
+      builder.order = vi.fn((column: string) => {
+        orderColumn = column;
+        return builder;
+      });
+      builder.eq = vi.fn((column: string, value: unknown) => {
+        filters.set(column, value);
+        if (column === "id") filterId = String(value);
+        return builder;
+      });
+      builder.single = vi.fn(() => {
+        returnSingle = true;
+        return builder;
+      });
+      builder.insert = vi.fn((
+        nextPayload:
+          | Record<string, unknown>
+          | Array<Record<string, unknown>>,
+      ) => {
+        operation = "insert";
+        payload = nextPayload;
+        return builder;
+      });
+      builder.update = vi.fn((nextPayload: Record<string, unknown>) => {
+        operation = "update";
+        payload = nextPayload;
+        return builder;
+      });
+      builder.delete = vi.fn(() => {
+        operation = "delete";
+        return builder;
+      });
+
+      async function execute() {
+        if (!operation) {
+          supabaseState.readTrace.push(table);
+          const readFailureIndex = supabaseState.readFailures.findIndex(
+            (rule) => rule.table === table,
+          );
+          const readFailure = readFailureIndex >= 0
+            ? supabaseState.readFailures.splice(readFailureIndex, 1)[0]
+            : null;
+          let rows = cloneRows(table);
+          if (
+            table === "tasks"
+            && selectProjection?.includes("task_assignees")
+          ) {
+            rows = rows.map((row) => ({
+              ...row,
+              task_assignees: supabaseState.tables.task_assignees
+                .filter((relation) => relation.task_id === row.id)
+                .map((relation) => ({
+                  member_id: relation.member_id,
+                  member: supabaseState.tables.members
+                    .filter((member) => member.id === relation.member_id)
+                    .map((member) => ({ name: member.name }))[0] ?? null,
+                })),
+            }));
+          }
+          const readDelay = supabaseState.readDelays.shift();
+          if (readDelay) await readDelay;
+          if (readFailure) {
+            return {
+              data: null,
+              error: queryError(readFailure.message),
+            };
+          }
+          if (filterId !== null) {
+            rows = rows.filter((row) => String(row.id) === filterId);
+          }
+          if (orderColumn) {
+            rows.sort((first, second) => (
+              Number(first[orderColumn]) - Number(second[orderColumn])
+            ));
+          }
+          return { data: rows, error: null };
+        }
+
+        const delayIndex = supabaseState.mutationDelays.findIndex((rule) => (
+          rule.table === table
+          && rule.operation === operation
+          && (rule.id === undefined || rule.id === filterId)
+        ));
+        if (delayIndex >= 0) {
+          const [delay] = supabaseState.mutationDelays.splice(delayIndex, 1);
+          await delay.promise;
+        }
+
+        const failureIndex = supabaseState.failures.findIndex((rule) => (
+          rule.table === table
+          && rule.operation === operation
+          && (rule.id === undefined || rule.id === filterId)
+        ));
+        if (failureIndex >= 0) {
+          const [failure] = supabaseState.failures.splice(failureIndex, 1);
+          supabaseState.mutationTrace.push({
+            table,
+            operation,
+            id: filterId,
+            payload,
+            outcome: "error",
+          });
+          return { data: null, error: queryError(failure.message) };
+        }
+
+        let returnedRow: Record<string, unknown> | null = null;
+        if (operation === "insert") {
+          const now = "2026-07-27T18:00:00.000Z";
+          const rows = Array.isArray(payload) ? payload : [payload ?? {}];
+          for (const row of rows) {
+            const id = table === "task_assignees"
+              ? undefined
+              : `${table}-${supabaseState.nextId}`;
+            if (id) supabaseState.nextId += 1;
+            const inserted = {
+              ...row,
+              ...(id ? { id } : {}),
+              created_at: now,
+              ...(table === "tasks" ? { updated_at: now } : {}),
+            };
+            returnedRow ??= inserted;
+            supabaseState.tables[table].push(inserted);
+          }
+        } else if (operation === "update") {
+          supabaseState.tables[table] = supabaseState.tables[table].map(
+            (row) => (
+              filterId === null || String(row.id) === filterId
+                ? { ...row, ...(payload as Record<string, unknown>) }
+                : row
+            ),
+          );
+        } else {
+          supabaseState.tables[table] = supabaseState.tables[table].filter(
+            (row) => !Array.from(filters).every(
+              ([column, value]) => row[column] === value,
+            ),
+          );
+          if (table === "modules" && filterId !== null) {
+            supabaseState.tables.tasks = supabaseState.tables.tasks.map(
+              (row) => (
+                row.module_id === filterId
+                  ? { ...row, module_id: null }
+                  : row
+              ),
+            );
+          }
+          if (table === "tasks" && filterId !== null) {
+            supabaseState.tables.task_assignees =
+              supabaseState.tables.task_assignees.filter(
+                (relation) => relation.task_id !== filterId,
+              );
+          }
+          if (table === "members" && filterId !== null) {
+            supabaseState.tables.task_assignees =
+              supabaseState.tables.task_assignees.filter(
+                (relation) => relation.member_id !== filterId,
+              );
+          }
+        }
+
+        supabaseState.mutationTrace.push({
+          table,
+          operation,
+          id: filterId,
+          payload,
+          outcome: "success",
+        });
+        return {
+          data: returnSingle && returnedRow
+            ? selectProjection === "*" ? returnedRow : { id: returnedRow.id }
+            : null,
+          error: null,
+        };
       }
-      builder.then = response.then.bind(response);
+
+      builder.then = (
+        onFulfilled: (value: unknown) => unknown,
+        onRejected?: (reason: unknown) => unknown,
+      ) => execute().then(onFulfilled, onRejected);
       return builder;
     }),
     channel: vi.fn(() => {
       const channel = {
         on: vi.fn((
           _kind: string,
-          config: { table: string },
-          callback: RealtimeHandler["callback"],
+          config: { table: TableName },
+          callback: (payload: unknown) => void,
         ) => {
           supabaseState.handlers.push({
             table: config.table,
@@ -86,494 +309,1164 @@ vi.mock("@/lib/supabase", () => {
     }),
     removeChannel: supabaseState.removeChannel,
   };
-  return { isSupabaseConfigured: true, supabase: client };
+
+  return {
+    isSupabaseConfigured: true,
+    supabase: client,
+  };
 });
 
-const moduleRow = {
-  id: "00000000-0000-4000-8000-000000000011",
-  name: "Kernel work",
-  kind: "pipeline",
-  objective: "",
-  position: 0,
-  created_at: "2026-07-24T00:00:00.000Z",
-} satisfies Module;
+const moduleRows: Module[] = [
+  {
+    id: "type-kernel",
+    name: "Kernel",
+    kind: "foundation",
+    objective: "Kernel implementation work",
+    position: 0,
+    created_at: "2026-07-27T00:00:00.000Z",
+  },
+  {
+    id: "type-research",
+    name: "Research",
+    kind: "pipeline",
+    objective: "Research and evaluation",
+    position: 1,
+    created_at: "2026-07-27T00:00:00.000Z",
+  },
+];
 
-const alice = {
-  id: "00000000-0000-4000-8000-000000000021",
-  name: "Alice",
-  initials: "AL",
-  position: 0,
-  created_at: "2026-07-24T00:00:00.000Z",
-} satisfies Member;
+const taskRows: Task[] = [
+  {
+    id: "task-kernels",
+    module_id: "type-kernel",
+    title: "Validate NPU kernels",
+    status: "todo",
+    assignees: ["Maya", "Yubai"],
+    notes: "Run every verifier case.",
+    tags: ["NPU", "Verifier"],
+    priority: "high",
+    due_date: "2026-08-01",
+    position: 0,
+    created_at: "2026-07-27T16:00:00.000Z",
+    updated_at: "2026-07-27T17:30:00.000Z",
+  },
+  {
+    id: "task-benchmark",
+    module_id: "type-kernel",
+    title: "Benchmark convolution kernels",
+    status: "done",
+    assignees: ["Theo"],
+    notes: "",
+    tags: ["NPU"],
+    priority: "medium",
+    due_date: null,
+    position: 1,
+    created_at: "2026-07-27T15:00:00.000Z",
+    updated_at: "2026-07-27T17:00:00.000Z",
+  },
+  {
+    id: "task-untyped",
+    module_id: null,
+    title: "Triage shared failures",
+    status: "blocked",
+    assignees: [],
+    notes: "",
+    tags: [],
+    priority: "urgent",
+    due_date: null,
+    position: 2,
+    created_at: "2026-07-27T14:00:00.000Z",
+    updated_at: "2026-07-27T16:00:00.000Z",
+  },
+  {
+    id: "task-research",
+    module_id: "type-research",
+    title: "Collect agentic trajectories",
+    status: "in_progress",
+    assignees: ["Maya"],
+    notes: "",
+    tags: ["SFT"],
+    priority: "medium",
+    due_date: null,
+    position: 3,
+    created_at: "2026-07-27T13:00:00.000Z",
+    updated_at: "2026-07-27T15:00:00.000Z",
+  },
+];
 
-const task = {
-  id: "00000000-0000-4000-8000-000000000010",
-  module_id: moduleRow.id,
-  title: "Task A",
-  status: "todo",
-  assignees: [],
-  notes: "",
-  position: 0,
-  created_at: "2026-07-24T00:00:00.000Z",
-  updated_at: "2026-07-24T00:00:00.000Z",
-} satisfies Task;
+const memberRows: Member[] = [
+  {
+    id: "member-maya",
+    name: "Maya",
+    initials: "MA",
+    position: 0,
+    created_at: "2026-07-27T00:00:00.000Z",
+  },
+  {
+    id: "member-yubai",
+    name: "Yubai",
+    initials: "YF",
+    position: 1,
+    created_at: "2026-07-27T00:00:00.000Z",
+  },
+  {
+    id: "member-theo",
+    name: "Theo",
+    initials: "TH",
+    position: 2,
+    created_at: "2026-07-27T00:00:00.000Z",
+  },
+];
 
-function ok<T>(data: T): QueryResult<T> {
-  return { data, error: null };
+function resetSupabaseState() {
+  supabaseState.tables.modules = moduleRows.map((row) => ({ ...row }));
+  supabaseState.tables.tasks = taskRows.map((row) => ({
+    ...row,
+    assignees: ["Stale legacy owner"],
+    tags: [...row.tags],
+  }));
+  supabaseState.tables.members = memberRows.map((row) => ({ ...row }));
+  supabaseState.tables.task_assignees = taskRows.flatMap((task) => (
+    task.assignees.map((name) => ({
+      task_id: task.id,
+      member_id: memberRows.find((member) => member.name === name)?.id,
+    }))
+  ));
+  supabaseState.failures.length = 0;
+  supabaseState.readFailures.length = 0;
+  supabaseState.mutationDelays.length = 0;
+  supabaseState.mutationTrace.length = 0;
+  supabaseState.readTrace.length = 0;
+  supabaseState.readDelays.length = 0;
+  supabaseState.handlers.length = 0;
+  supabaseState.removeChannel.mockClear();
+  supabaseState.nextId = 100;
 }
 
-function failure(message: string): QueryResult<null> {
-  return {
-    data: null,
-    error: { message, details: "", hint: "", code: "TEST_ERROR" },
-  };
+function failNext(
+  table: TableName,
+  operation: MutationOperation,
+  message: string,
+  id?: string,
+) {
+  supabaseState.failures.push({ table, operation, message, id });
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
+function failNextRead(table: TableName, message: string) {
+  supabaseState.readFailures.push({ table, message });
+}
+
+function delayNextMutation(
+  table: TableName,
+  operation: MutationOperation,
+  promise: Promise<void>,
+  id?: string,
+) {
+  supabaseState.mutationDelays.push({
+    table,
+    operation,
+    promise,
+    id,
+  });
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
   });
   return { promise, resolve };
 }
 
-function enqueue(table: string, result: QueryResult | Promise<QueryResult>) {
-  const queue = supabaseState.queues.get(table) ?? [];
-  queue.push(Promise.resolve(result));
-  supabaseState.queues.set(table, queue);
+async function renderLoadedBoard() {
+  const result = render(<Board />);
+  await screen.findByRole("link", { name: "Validate NPU kernels" });
+  return result;
 }
 
-function taskRow(nextTask: Task, members: Member[]) {
-  return {
-    ...nextTask,
-    task_assignees: nextTask.assignees.map((name) => {
-      const assigned = members.find((candidate) => candidate.name === name);
-      if (!assigned) throw new Error(`Missing Member fixture for ${name}.`);
-      return {
-        member_id: assigned.id,
-        member: { name: assigned.name },
-      };
-    }),
-  };
+function openTaskActions(title: string) {
+  fireEvent.click(screen.getByRole("button", {
+    name: `Actions for ${title}`,
+  }));
 }
 
-function enqueueBoardLoad(
-  nextTask: Task = task,
-  members: Member[] = [alice],
-) {
-  enqueue("modules", ok([moduleRow]));
-  enqueue("tasks", ok([taskRow(nextTask, members)]));
-  enqueue("members", ok(members));
-}
+beforeEach(resetSupabaseState);
 
-function triggerRealtime(
-  table: string,
-  eventType: "INSERT" | "UPDATE" | "DELETE",
-  next: Record<string, unknown>,
-  old: Record<string, unknown> = {},
-) {
-  const handler = supabaseState.handlers.find(
-    (candidate) => candidate.table === table,
-  );
-  if (!handler) throw new Error(`No ${table} realtime handler registered.`);
-  act(() => {
-    handler.callback({ eventType, new: next, old });
-  });
-}
-
-async function openAssigneePicker() {
-  await screen.findByText("Task A");
-  fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
-}
-
-beforeEach(() => {
-  supabaseState.queues.clear();
-  supabaseState.activityResponses.length = 0;
-  supabaseState.fromCalls.length = 0;
-  supabaseState.handlers.length = 0;
-  supabaseState.removeChannel.mockClear();
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
 });
 
-afterEach(cleanup);
+describe("Board", () => {
+  it("uses a labelled structural board skeleton only for the initial load", async () => {
+    const pending = deferred();
+    supabaseState.readDelays.push(pending.promise);
+    const view = render(<Board />);
 
-describe("Board UUID assignment errors", () => {
-  it.each([
-    {
-      name: "assign",
-      initialTask: task,
-      action: async () => {
-        await openAssigneePicker();
-        fireEvent.click(
-          within(screen.getByRole("menu"))
-            .getByRole("button", { name: /Alice$/ }),
-        );
-      },
-    },
-    {
-      name: "unassign",
-      initialTask: { ...task, assignees: ["Alice"] },
-      action: async () => {
-        await screen.findByRole("button", { name: "Unassign Alice" });
-        fireEvent.click(screen.getByRole("button", { name: "Unassign Alice" }));
-      },
-    },
-  ])("captures a failed $name without starting a reload", async ({
-    initialTask,
-    action,
-  }) => {
-    enqueueBoardLoad(initialTask);
-    enqueue("task_assignees", failure("assignment denied"));
-    render(<Board />);
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Task Board",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-board");
+    expect(skeleton.querySelectorAll(".skeleton-board-column")).toHaveLength(4);
+    expect(screen.queryByText("Loading the board…")).toBeNull();
 
-    await action();
-
-    expect(await screen.findByText(/assignment denied/)).toBeDefined();
-    expect(supabaseState.fromCalls.filter((table) => table === "tasks"))
-      .toHaveLength(1);
+    view.unmount();
+    await act(async () => pending.resolve());
   });
 
-  it("captures add-teammate assignment failure", async () => {
-    const cara = {
-      ...alice,
-      id: "00000000-0000-4000-8000-000000000022",
-      name: "Cara",
-      initials: "CA",
-    };
-    enqueueBoardLoad(task, []);
-    enqueue("members", ok(cara));
-    enqueue("task_assignees", failure("new teammate assignment denied"));
+  it("shows only a retryable error when the initial three-table read fails", async () => {
+    failNextRead("modules", "Types unavailable.");
+    failNextRead("tasks", "Tasks unavailable.");
+    failNextRead("members", "Owners unavailable.");
     render(<Board />);
-    await openAssigneePicker();
 
-    const menu = screen.getByRole("menu");
-    fireEvent.change(within(menu).getByPlaceholderText("Add teammate…"), {
-      target: { value: "Cara" },
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not load board. Types unavailable.",
+    );
+    expect(screen.queryByRole("region", {
+      name: "Task Board columns",
+    })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "To do" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("link", {
+      name: "Validate NPU kernels",
+    })).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("retains the last successful Board snapshot when a refresh fails", async () => {
+    await renderLoadedBoard();
+    failNextRead("modules", "Refresh unavailable.");
+    failNextRead("tasks", "Refresh tasks unavailable.");
+    failNextRead("members", "Refresh owners unavailable.");
+
+    const taskHandler = supabaseState.handlers.find(
+      ({ table }) => table === "tasks",
+    );
+    act(() => {
+      taskHandler?.callback({});
     });
-    fireEvent.click(within(menu).getByRole("button", { name: "Add" }));
 
-    expect(await screen.findByText(/new teammate assignment denied/))
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not load board. Refresh unavailable.",
+    );
+    expect(screen.getByRole("link", {
+      name: "Validate NPU kernels",
+    })).toBeDefined();
+    expect(screen.queryByRole("status", {
+      name: "Loading Task Board",
+    })).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+  });
+
+  it("uses the exact generic Status columns and four approved views", async () => {
+    await renderLoadedBoard();
+
+    const pageHeader = screen.getByRole("heading", {
+      name: "Task Board",
+    }).closest("header");
+    expect(pageHeader).not.toBeNull();
+    expect(within(pageHeader!).getByText("Research Workspace")).toBeDefined();
+    expect(pageHeader?.textContent).not.toMatch(
+      /\b(Distill|SFT|RL|Pipeline)\b/i,
+    );
+    expect(screen.getByRole("heading", { name: "To do" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "In progress" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Done" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Blocked" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "SFT" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Types" })).toBeDefined();
+    for (const view of ["Board", "Types", "Ownership", "Team"]) {
+      expect(screen.getByRole("tab", { name: view })).toBeDefined();
+    }
+    expect(document.body.textContent).not.toMatch(
+      /\b(Module|Foundation|Pipeline|Assignee|Assignees)\b/i,
+    );
+    const boardRegion = screen.getByRole("region", {
+      name: "Task Board columns",
+    });
+    const helpId = boardRegion.getAttribute("aria-describedby");
+    expect(helpId).toBe("task-board-scroll-help");
+    expect(document.getElementById(helpId ?? "")?.textContent).toContain(
+      "Scroll horizontally",
+    );
+    expect(boardRegion.tabIndex).toBe(0);
+    const todoColumn = screen.getByRole("heading", { name: "To do" })
+      .closest(".task-column") as HTMLElement;
+    expect(
+      within(todoColumn).getByRole("region", { name: "To do task list" })
+        .tabIndex,
+    ).toBe(0);
+  });
+
+  it("implements keyboard activation and relationships for the view tabs", async () => {
+    await renderLoadedBoard();
+
+    const boardTab = screen.getByRole("tab", { name: "Board" });
+    const typesTab = screen.getByRole("tab", { name: "Types" });
+    const teamTab = screen.getByRole("tab", { name: "Team" });
+    const panel = screen.getByRole("tabpanel");
+    const boardPage = screen.getByRole("heading", { name: "Task Board" })
+      .closest(".board-page") as HTMLElement;
+    expect(boardPage.dataset.view).toBe("board");
+    expect(boardTab.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.getAttribute("aria-labelledby")).toBe(boardTab.id);
+    expect(boardTab.tabIndex).toBe(0);
+    expect(typesTab.tabIndex).toBe(-1);
+
+    boardTab.focus();
+    fireEvent.keyDown(boardTab, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(typesTab);
+    expect(typesTab.getAttribute("aria-selected")).toBe("true");
+    expect(boardPage.dataset.view).toBe("types");
+    expect(screen.getByRole("columnheader", { name: "Task count" }))
       .toBeDefined();
-    expect(supabaseState.fromCalls.filter((table) => table === "tasks"))
-      .toHaveLength(1);
+    expect(panel.getAttribute("aria-labelledby")).toBe(typesTab.id);
+
+    fireEvent.keyDown(typesTab, { key: "End" });
+    expect(document.activeElement).toBe(teamTab);
+    expect(teamTab.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(teamTab, { key: "Home" });
+    expect(document.activeElement).toBe(boardTab);
+    expect(boardTab.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("keeps an add-and-assign error visible after an earlier realtime reload finishes", async () => {
-    const cara = {
-      ...alice,
-      id: "00000000-0000-4000-8000-000000000022",
-      name: "Cara",
-      initials: "CA",
-    };
-    const assignment = deferred<QueryResult>();
-    const backgroundModules = deferred<QueryResult<Module[]>>();
-    enqueueBoardLoad(task, []);
-    enqueue("members", ok(cara));
-    enqueue("task_assignees", assignment.promise);
-    enqueue("modules", backgroundModules.promise);
-    enqueue("tasks", ok([taskRow(task, [cara])]));
-    enqueue("members", ok([cara]));
+  it("groups by Status or Type, including No type, and carries column defaults", async () => {
+    await renderLoadedBoard();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add task to Blocked" }));
+    expect(screen.getByRole("dialog", { name: "Create task" })).toBeDefined();
+    expect(screen.getByLabelText("Status")).toHaveProperty("value", "blocked");
+    fireEvent.click(screen.getByRole("button", { name: "Close create task" }));
+
+    fireEvent.change(screen.getByLabelText("Group by"), {
+      target: { value: "type" },
+    });
+    expect(screen.getByRole("heading", { name: "Kernel" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Research" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "No type" })).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "Triage shared failures" })
+        .closest(".task-card")?.textContent,
+    ).toContain("Blocked");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add task to Research" }));
+    expect(screen.getByLabelText("Type")).toHaveProperty(
+      "value",
+      "type-research",
+    );
+  });
+
+  it("renders complete cards with a detail link and accessible quick-edit/delete controls", async () => {
+    await renderLoadedBoard();
+
+    const link = screen.getByRole("link", { name: "Validate NPU kernels" });
+    expect(link.getAttribute("href")).toBe("/task/task-kernels");
+    const card = link.closest(".task-card") as HTMLElement;
+    expect(within(card).getByText("Kernel")).toBeDefined();
+    expect(within(card).getByText("NPU")).toBeDefined();
+    expect(within(card).getByText("Verifier")).toBeDefined();
+    expect(within(card).getByRole("img", { name: "Maya" })).toBeDefined();
+    expect(within(card).getByRole("img", { name: "Yubai" })).toBeDefined();
+    expect(within(card).getByText(/^Updated /)).toBeDefined();
+    expect(within(card).queryByText("To do")).toBeNull();
+
+    const trigger = screen.getByRole("button", {
+      name: "Actions for Validate NPU kernels",
+    });
+    openTaskActions("Validate NPU kernels");
+    const actions = screen.getByRole("group", {
+      name: "Actions for Validate NPU kernels",
+    });
+    expect(trigger.getAttribute("aria-controls")).toBe(actions.id);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    const quickEdit = screen.getByRole("button", {
+      name: "Quick edit Validate NPU kernels",
+    });
+    await waitFor(() => expect(document.activeElement).toBe(quickEdit));
+    fireEvent.keyDown(quickEdit, { key: "Escape" });
+    expect(screen.queryByRole("group", {
+      name: "Actions for Validate NPU kernels",
+    })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    openTaskActions("Validate NPU kernels");
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("group", {
+      name: "Actions for Validate NPU kernels",
+    })).toBeNull();
+
+    openTaskActions("Validate NPU kernels");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Quick edit Validate NPU kernels",
+    }));
+    expect(screen.getByRole("region", {
+      name: "Quick edit Validate NPU kernels",
+    })).toBeDefined();
+    expect(screen.getByLabelText("Status for Validate NPU kernels")).toBeDefined();
+    expect(screen.getByLabelText("Type for Validate NPU kernels")).toBeDefined();
+    expect(screen.getByRole("button", {
+      name: "Delete Validate NPU kernels",
+    })).toBeDefined();
+  });
+
+  it("maps quick edits through storage and reloads authoritative rows", async () => {
+    await renderLoadedBoard();
+    openTaskActions("Validate NPU kernels");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Quick edit Validate NPU kernels",
+    }));
+    fireEvent.change(screen.getByLabelText("Status for Validate NPU kernels"), {
+      target: { value: "done" },
+    });
+
+    await waitFor(() => {
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "tasks",
+          operation: "update",
+          id: "task-kernels",
+          payload: { status: "done" },
+          outcome: "success",
+        }),
+      );
+    });
+    expect(supabaseState.readTrace.length).toBeGreaterThanOrEqual(6);
+    const doneColumn = screen.getByRole("heading", { name: "Done" })
+      .closest(".task-column") as HTMLElement;
+    expect(
+      within(doneColumn).getByRole("link", { name: "Validate NPU kernels" }),
+    ).toBeDefined();
+  });
+
+  it("writes quick-edit Owner changes through UUID relationships", async () => {
+    await renderLoadedBoard();
+    openTaskActions("Validate NPU kernels");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Quick edit Validate NPU kernels",
+    }));
+    const editor = screen.getByRole("region", {
+      name: "Quick edit Validate NPU kernels",
+    });
+
+    fireEvent.click(within(editor).getByRole("checkbox", { name: "Theo" }));
+
+    await waitFor(() => {
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "task_assignees",
+          operation: "insert",
+          payload: {
+            task_id: "task-kernels",
+            member_id: "member-theo",
+          },
+          outcome: "success",
+        }),
+      );
+    });
+    expect(supabaseState.mutationTrace.some((entry) => (
+      entry.table === "tasks"
+      && entry.operation === "update"
+      && !Array.isArray(entry.payload)
+      && Object.hasOwn(entry.payload ?? {}, "assignees")
+    ))).toBe(false);
+    expect(within(editor).getByRole("checkbox", {
+      name: "Theo",
+    })).toHaveProperty("checked", true);
+  });
+
+  it("uses exact Task deletion copy and checks failed Task writes", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await renderLoadedBoard();
+
+    openTaskActions("Validate NPU kernels");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Quick edit Validate NPU kernels",
+    }));
+    failNext("tasks", "update", "Task update failed.", "task-kernels");
+    fireEvent.change(screen.getByLabelText("Status for Validate NPU kernels"), {
+      target: { value: "done" },
+    });
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "Could not update task. Task update failed.",
+    );
+    expect(supabaseState.readTrace.length).toBeGreaterThanOrEqual(6);
+
+    openTaskActions("Validate NPU kernels");
+    const actions = screen.getByRole("group", {
+      name: "Actions for Validate NPU kernels",
+    });
+    fireEvent.click(within(actions).getByRole("button", {
+      name: "Delete Validate NPU kernels",
+    }));
+    await waitFor(() => {
+      expect(confirm).toHaveBeenCalledWith(
+        "Delete task “Validate NPU kernels”? This cannot be undone.",
+      );
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "tasks",
+          operation: "delete",
+          id: "task-kernels",
+          outcome: "success",
+        }),
+      );
+    });
+  });
+
+  it("keeps a Task and reports a failed destructive write", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    failNext("tasks", "delete", "Task delete failed.", "task-kernels");
+    await renderLoadedBoard();
+
+    openTaskActions("Validate NPU kernels");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Delete Validate NPU kernels",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "Could not delete task. Task delete failed.",
+    );
+    expect(screen.getByRole("link", {
+      name: "Validate NPU kernels",
+    })).toBeDefined();
+    expect(supabaseState.mutationTrace).toContainEqual(
+      expect.objectContaining({
+        table: "tasks",
+        operation: "delete",
+        id: "task-kernels",
+        outcome: "error",
+      }),
+    );
+  });
+
+  it("renders exact Types and Ownership table semantics", async () => {
+    await renderLoadedBoard();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+    for (const heading of [
+      "Type",
+      "Description",
+      "Task count",
+      "Progress",
+      "Position",
+    ]) {
+      expect(
+        screen.getByRole("columnheader", { name: heading }).getAttribute("scope"),
+      ).toBe("col");
+    }
+    const kernelRow = screen.getByRole("cell", { name: "Kernel" })
+      .closest("tr") as HTMLElement;
+    expect(
+      within(kernelRow).getByLabelText("Description for Kernel"),
+    ).toHaveProperty("value", "Kernel implementation work");
+    expect(within(kernelRow).getByRole("cell", { name: "2" })).toBeDefined();
+    const progress = within(kernelRow).getByRole("progressbar", {
+      name: "Kernel progress",
+    });
+    expect(progress.getAttribute("max")).toBe("2");
+    expect(progress.getAttribute("value")).toBe("1");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ownership" }));
+    for (const heading of ["Owner", "Task", "Type", "Status", "Updated"]) {
+      expect(
+        screen.getByRole("columnheader", { name: heading }).getAttribute("scope"),
+      ).toBe("col");
+    }
+    expect(screen.getByText("No owner yet")).toBeDefined();
+    expect(screen.getAllByText("Validate NPU kernels")).toHaveLength(2);
+    expect(screen.getAllByRole("cell", { name: "Maya" })).toHaveLength(2);
+    expect(screen.getByRole("cell", { name: "Yubai" })).toBeDefined();
+  });
+
+  it("renders concise empty states for Types, Ownership, and Team", async () => {
+    supabaseState.tables.modules = [];
+    supabaseState.tables.tasks = [];
+    supabaseState.tables.members = [];
     render(<Board />);
-    await openAssigneePicker();
+    await screen.findByRole("button", { name: "Add task to To do" });
 
-    const menu = screen.getByRole("menu");
-    fireEvent.change(within(menu).getByPlaceholderText("Add teammate…"), {
-      target: { value: "Cara" },
+    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+    expect(screen.getByText("No types yet.")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ownership" }));
+    expect(screen.getByText("No tasks yet.")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    expect(screen.getByText("No team members yet.")).toBeDefined();
+  });
+
+  it("creates, patches, and deletes Types with compatibility defaults and exact copy", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+
+    fireEvent.change(screen.getByLabelText("New type name"), {
+      target: { value: "Documentation" },
     });
-    fireEvent.click(within(menu).getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add type" }));
     await waitFor(() => {
-      expect(supabaseState.fromCalls.filter(
-        (table) => table === "task_assignees",
-      )).toHaveLength(1);
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "modules",
+          operation: "insert",
+          payload: {
+            name: "Documentation",
+            objective: "",
+            kind: "pipeline",
+            position: 2,
+          },
+          outcome: "success",
+        }),
+      );
     });
 
-    triggerRealtime("members", "INSERT", cara);
-    await waitFor(() => {
-      expect(supabaseState.fromCalls.filter((table) => table === "modules"))
-        .toHaveLength(2);
+    fireEvent.change(screen.getByLabelText("Description for Kernel"), {
+      target: { value: "Specialized kernel work" },
     });
+    fireEvent.blur(screen.getByLabelText("Description for Kernel"));
+    await waitFor(() => {
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "modules",
+          operation: "update",
+          id: "type-kernel",
+          payload: { objective: "Specialized kernel work" },
+          outcome: "success",
+        }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Kernel" }));
+    await waitFor(() => {
+      expect(confirm).toHaveBeenCalledWith(
+        "Remove Type “Kernel”? Its tasks will remain and move to No type.",
+      );
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "modules",
+          operation: "delete",
+          id: "type-kernel",
+          outcome: "success",
+        }),
+      );
+    });
+  });
+
+  it("reconciles failed Type drafts and external realtime values", async () => {
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+
+    failNext("modules", "update", "Description failed.", "type-kernel");
+    const description = screen.getByLabelText("Description for Kernel");
+    fireEvent.change(description, {
+      target: { value: "Unsaved description" },
+    });
+    fireEvent.blur(description);
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not update type. Description failed.",
+    );
+    await waitFor(() => expect(description).toHaveProperty(
+      "value",
+      "Kernel implementation work",
+    ));
+
+    failNext("modules", "update", "Position failed.", "type-kernel");
+    const position = screen.getByLabelText("Position for Kernel");
+    fireEvent.change(position, { target: { value: "99" } });
+    fireEvent.blur(position);
+    await waitFor(() => {
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "modules",
+          operation: "update",
+          id: "type-kernel",
+          payload: { position: 99 },
+          outcome: "error",
+        }),
+      );
+      expect(position).toHaveProperty("value", "0");
+    });
+
+    supabaseState.tables.modules = supabaseState.tables.modules.map((row) => (
+      row.id === "type-kernel"
+        ? {
+            ...row,
+            objective: "Externally revised description",
+            position: 7,
+          }
+        : row
+    ));
+    const moduleHandler = supabaseState.handlers.find(
+      ({ table }) => table === "modules",
+    );
+    act(() => {
+      moduleHandler?.callback({});
+    });
+    await waitFor(() => {
+      expect(description).toHaveProperty(
+        "value",
+        "Externally revised description",
+      );
+      expect(position).toHaveProperty("value", "7");
+    });
+  });
+
+  it("rolls a failed Type commit back to the latest realtime value", async () => {
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+
+    const delayedCommit = deferred();
+    delayNextMutation(
+      "modules",
+      "update",
+      delayedCommit.promise,
+      "type-kernel",
+    );
+    failNext("modules", "update", "Deferred description failed.", "type-kernel");
+    const description = screen.getByLabelText("Description for Kernel");
+    fireEvent.change(description, {
+      target: { value: "Local description attempt" },
+    });
+    fireEvent.blur(description);
+    await waitFor(() => {
+      expect(supabaseState.mutationDelays).toHaveLength(0);
+    });
+
+    supabaseState.tables.modules = supabaseState.tables.modules.map((row) => (
+      row.id === "type-kernel"
+        ? { ...row, objective: "Realtime authoritative description" }
+        : row
+    ));
+    const moduleHandler = supabaseState.handlers.find(
+      ({ table }) => table === "modules",
+    );
+    act(() => {
+      moduleHandler?.callback({});
+    });
+    await waitFor(() => {
+      expect(description).toHaveProperty(
+        "value",
+        "Realtime authoritative description",
+      );
+    });
+
+    await act(async () => {
+      delayedCommit.resolve();
+      await delayedCommit.promise;
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not update type. Deferred description failed.",
+    );
+    await waitFor(() => {
+      expect(description).toHaveProperty(
+        "value",
+        "Realtime authoritative description",
+      );
+    });
+  });
+
+  it("removes a Team member through UUID cascades without rewriting Tasks", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Maya" }));
+
+    await waitFor(() => {
+      expect(supabaseState.mutationTrace.some((entry) => (
+        entry.table === "members"
+        && entry.operation === "delete"
+        && entry.id === "member-maya"
+      ))).toBe(true);
+    });
+    expect(supabaseState.mutationTrace.some((entry) => (
+      entry.table === "tasks" && entry.operation === "update"
+    ))).toBe(false);
+    expect(supabaseState.tables.task_assignees.some(
+      (relation) => relation.member_id === "member-maya",
+    )).toBe(false);
+    expect(screen.queryByRole("button", { name: "Remove Maya" })).toBeNull();
+  });
+
+  it("serializes same-tick Team removals and disables every remove action", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const removalWrite = deferred();
+    delayNextMutation(
+      "members",
+      "delete",
+      removalWrite.promise,
+      "member-maya",
+    );
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    const removeMaya = screen.getByRole("button", { name: "Remove Maya" });
+    const removeYubai = screen.getByRole("button", { name: "Remove Yubai" });
 
     act(() => {
-      assignment.resolve(failure("new teammate assignment denied"));
+      removeMaya.click();
+      removeYubai.click();
     });
-    expect(await screen.findByText(/new teammate assignment denied/))
-      .toBeDefined();
+    await waitFor(() => {
+      expect(confirm).toHaveBeenCalledOnce();
+      expect(screen.getAllByRole("button", { name: /^Remove / }).every(
+        (button) => (button as HTMLButtonElement).disabled,
+      )).toBe(true);
+    });
+    expect(supabaseState.mutationTrace).not.toContainEqual(
+      expect.objectContaining({
+        table: "members",
+        operation: "delete",
+        id: "member-yubai",
+      }),
+    );
 
+    await act(async () => {
+      removalWrite.resolve();
+      await removalWrite.promise;
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Remove Maya" })).toBeNull();
+    });
+    expect(screen.getByRole("button", { name: "Remove Yubai" })).toBeDefined();
+    expect(supabaseState.mutationTrace).not.toContainEqual(
+      expect.objectContaining({
+        table: "members",
+        operation: "delete",
+        id: "member-yubai",
+      }),
+    );
+  });
+
+  it("keeps the member, reports the error, and reloads when deletion fails", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    failNext("members", "delete", "Owner delete failed.", "member-maya");
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Maya" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "Could not remove member. Owner delete failed.",
+    );
+    expect(supabaseState.mutationTrace).toContainEqual(
+      expect.objectContaining({
+        table: "members",
+        operation: "delete",
+        id: "member-maya",
+        outcome: "error",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Remove Maya" })).toBeDefined();
+    expect(supabaseState.readTrace.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it("keeps a deletion failure visible after a slower realtime reload", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+
+    const slowRealtime = deferred();
+    supabaseState.readDelays.push(
+      slowRealtime.promise,
+      slowRealtime.promise,
+      slowRealtime.promise,
+    );
+    const readsBeforeRealtime = supabaseState.readTrace.length;
+    const taskHandler = supabaseState.handlers.find(
+      ({ table }) => table === "tasks",
+    );
     act(() => {
-      backgroundModules.resolve(ok([moduleRow]));
-    });
-    expect(await within(screen.getByRole("menu")).findByRole(
-      "button",
-      { name: /Cara$/ },
-    )).toBeDefined();
-    expect(screen.getByText(/new teammate assignment denied/)).toBeDefined();
-  });
-
-  it("ignores an older reload failure after a newer assignment error", async () => {
-    const oldModules = deferred<QueryResult>();
-    enqueueBoardLoad();
-    render(<Board />);
-    await openAssigneePicker();
-
-    enqueue("modules", oldModules.promise);
-    enqueue("tasks", ok([taskRow(task, [alice])]));
-    enqueue("members", ok([alice]));
-    triggerRealtime("members", "UPDATE", alice);
-
-    enqueue("task_assignees", failure("newer assignment denied"));
-    fireEvent.click(
-      within(screen.getByRole("menu"))
-        .getByRole("button", { name: /Alice$/ }),
-    );
-    expect(await screen.findByText(/newer assignment denied/)).toBeDefined();
-
-    await act(async () => {
-      oldModules.resolve(failure("older reload denied"));
-      await oldModules.promise;
-    });
-
-    expect(screen.getByText(/newer assignment denied/)).toBeDefined();
-    expect(screen.queryByText(/older reload denied/)).toBeNull();
-  });
-
-  it("ignores stale reload data and success after a newer reload fails", async () => {
-    const oldModules = deferred<QueryResult<Module[]>>();
-    const staleTask = { ...task, title: "Stale Task from reload A" };
-    enqueueBoardLoad();
-    render(<Board />);
-    await screen.findByText("Task A");
-
-    enqueue("modules", oldModules.promise);
-    enqueue("tasks", ok([taskRow(staleTask, [alice])]));
-    enqueue("members", ok([alice]));
-    triggerRealtime("members", "UPDATE", alice);
-
-    enqueue("modules", failure("reload B denied"));
-    enqueue("tasks", ok([taskRow(task, [alice])]));
-    enqueue("members", ok([alice]));
-    triggerRealtime("tasks", "UPDATE", task);
-    expect(await screen.findByText(/reload B denied/)).toBeDefined();
-
-    await act(async () => {
-      oldModules.resolve(ok([moduleRow]));
-      await oldModules.promise;
-    });
-
-    expect(screen.getByText(/reload B denied/)).toBeDefined();
-    expect(screen.queryByText("Stale Task from reload A")).toBeNull();
-    expect(screen.getByText("Task A")).toBeDefined();
-  });
-
-  it("does not let an old activity failure overwrite a newer action error", async () => {
-    const oldActivity = deferred<string | null>();
-    enqueueBoardLoad();
-    supabaseState.activityResponses.push(oldActivity.promise);
-    render(<Board />);
-    await screen.findByText("Task A");
-
-    enqueue("tasks", ok(null));
-    enqueueBoardLoad({ ...task, status: "done" });
-    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), {
-      target: { value: "done" },
+      taskHandler?.callback({});
     });
     await waitFor(() => {
-      expect(
-        (screen.getByRole("combobox", { name: "Status" }) as HTMLSelectElement)
-          .value,
-      ).toBe("done");
+      expect(supabaseState.readTrace.length).toBe(
+        readsBeforeRealtime + 3,
+      );
     });
 
-    enqueue("task_assignees", failure("newer assignment denied"));
-    await openAssigneePicker();
-    fireEvent.click(
-      within(screen.getByRole("menu"))
-        .getByRole("button", { name: /Alice$/ }),
+    failNext("members", "delete", "Owner delete failed.", "member-maya");
+    fireEvent.click(screen.getByRole("button", { name: "Remove Maya" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(
+      "Could not remove member. Owner delete failed.",
     );
-    expect(await screen.findByText(/newer assignment denied/)).toBeDefined();
+    expect(supabaseState.mutationTrace).toContainEqual(
+      expect.objectContaining({
+        table: "members",
+        operation: "delete",
+        id: "member-maya",
+        outcome: "error",
+      }),
+    );
 
     await act(async () => {
-      oldActivity.resolve("older status activity denied");
-      await oldActivity.promise;
-    });
-
-    expect(screen.getByText(/newer assignment denied/)).toBeDefined();
-    expect(screen.queryByText(/older status activity denied/)).toBeNull();
-  });
-
-  it("does not revive an old activity failure after a newer action succeeds", async () => {
-    const oldActivity = deferred<string | null>();
-    enqueueBoardLoad();
-    supabaseState.activityResponses.push(oldActivity.promise);
-    render(<Board />);
-    await screen.findByText("Task A");
-
-    enqueue("tasks", ok(null));
-    enqueueBoardLoad({ ...task, status: "done" });
-    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), {
-      target: { value: "done" },
-    });
-    await waitFor(() => {
-      expect(
-        (screen.getByRole("combobox", { name: "Status" }) as HTMLSelectElement)
-          .value,
-      ).toBe("done");
-    });
-
-    supabaseState.activityResponses.push(Promise.resolve(null));
-    enqueue("task_assignees", ok(null));
-    enqueueBoardLoad({ ...task, status: "done", assignees: ["Alice"] });
-    await openAssigneePicker();
-    fireEvent.click(
-      within(screen.getByRole("menu"))
-        .getByRole("button", { name: /Alice$/ }),
-    );
-    expect(await screen.findByRole("button", { name: "Unassign Alice" }))
-      .toBeDefined();
-
-    await act(async () => {
-      oldActivity.resolve("older status activity denied");
-      await oldActivity.promise;
-    });
-
-    expect(screen.queryByText(/older status activity denied/)).toBeNull();
-    expect(document.querySelector(".error-banner")).toBeNull();
-  });
-
-  it("keeps an unassign error when adding the already assigned teammate is a no-op", async () => {
-    const assignedTask = { ...task, assignees: ["Alice"] };
-    enqueueBoardLoad(assignedTask);
-    enqueue("task_assignees", failure("unassignment denied"));
-    render(<Board />);
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Unassign Alice" }),
-    );
-    expect(await screen.findByText(/unassignment denied/)).toBeDefined();
-
-    fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
-    const menu = screen.getByRole("menu");
-    fireEvent.change(within(menu).getByPlaceholderText("Add teammate…"), {
-      target: { value: "Alice" },
-    });
-    const callsBeforeNoOp = [...supabaseState.fromCalls];
-    enqueueBoardLoad(assignedTask);
-    await act(async () => {
-      fireEvent.click(within(menu).getByRole("button", { name: "Add" }));
-      await Promise.resolve();
+      slowRealtime.resolve();
+      await slowRealtime.promise;
       await Promise.resolve();
     });
-
-    expect(screen.getByText(/unassignment denied/)).toBeDefined();
-    expect(supabaseState.fromCalls).toEqual(callsBeforeNoOp);
-  });
-
-  it("clears a load error after a later successful realtime reload", async () => {
-    enqueue("modules", failure("board load denied"));
-    enqueue("tasks", ok([taskRow(task, [alice])]));
-    enqueue("members", ok([alice]));
-    render(<Board />);
-
-    expect(await screen.findByText(/board load denied/)).toBeDefined();
-
-    enqueueBoardLoad();
-    triggerRealtime("members", "UPDATE", alice);
-
-    await screen.findByText("Task A");
     await waitFor(() => {
-      expect(screen.queryByText(/board load denied/)).toBeNull();
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Could not remove member. Owner delete failed.",
+      );
     });
+    expect(screen.getByRole("button", { name: "Remove Maya" })).toBeDefined();
   });
 
-  it("clears an old assignment error when the next assignment succeeds", async () => {
-    enqueueBoardLoad();
-    enqueue("task_assignees", failure("first assignment denied"));
-    render(<Board />);
-    await openAssigneePicker();
+  it("keeps the Team draft and reports a failed add-member write", async () => {
+    failNext("members", "insert", "Owner insert failed.");
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
 
-    fireEvent.click(
-      within(screen.getByRole("menu"))
-        .getByRole("button", { name: /Alice$/ }),
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not add owner. Owner insert failed.",
     );
-    expect(await screen.findByText(/first assignment denied/)).toBeDefined();
-
-    enqueue("task_assignees", ok(null));
-    enqueueBoardLoad({ ...task, assignees: ["Alice"] });
-    fireEvent.click(
-      within(screen.getByRole("menu"))
-        .getByRole("button", { name: /Alice$/ }),
+    expect(screen.getByLabelText("New owner name")).toHaveProperty(
+      "value",
+      "Nova",
     );
-
-    expect(await screen.findByRole("button", { name: "Unassign Alice" }))
-      .toBeDefined();
-    expect(screen.queryByText(/first assignment denied/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove Nova" })).toBeNull();
   });
 
-  it("clears an old action error when a status mutation succeeds", async () => {
-    enqueueBoardLoad();
-    enqueue("task_assignees", failure("assignment denied before status change"));
-    render(<Board />);
-    await openAssigneePicker();
-
-    fireEvent.click(
-      within(screen.getByRole("menu"))
-        .getByRole("button", { name: /Alice$/ }),
-    );
-    expect(await screen.findByText(/assignment denied before status change/))
-      .toBeDefined();
-
-    enqueue("tasks", ok(null));
-    enqueueBoardLoad({ ...task, status: "done" });
-    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), {
-      target: { value: "done" },
+  it("creates generic Tasks through the adapter and keeps failed drafts visible", async () => {
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "New generic task" },
     });
+    fireEvent.change(screen.getByLabelText("Type"), {
+      target: { value: "type-research" },
+    });
+    fireEvent.change(screen.getByLabelText("Tags"), {
+      target: { value: "NPU, npu, RL" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Maya" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
 
     await waitFor(() => {
-      expect(
-        (screen.getByRole("combobox", { name: "Status" }) as HTMLSelectElement)
-          .value,
-      ).toBe("done");
+      expect(supabaseState.mutationTrace).toContainEqual(
+        expect.objectContaining({
+          table: "tasks",
+          operation: "insert",
+          payload: expect.objectContaining({
+            module_id: "type-research",
+            title: "New generic task",
+            status: "todo",
+            tags: ["NPU", "RL"],
+            priority: "medium",
+            due_date: null,
+          }),
+          outcome: "success",
+        }),
+      );
     });
-    expect(screen.queryByText(/assignment denied before status change/))
-      .toBeNull();
-  });
-
-  it("shows a newer load failure instead of an older action error", async () => {
-    enqueueBoardLoad();
-    enqueue("task_assignees", failure("older assignment denied"));
-    render(<Board />);
-    await openAssigneePicker();
-
-    fireEvent.click(
-      within(screen.getByRole("menu"))
-        .getByRole("button", { name: /Alice$/ }),
+    expect(supabaseState.mutationTrace).toContainEqual(
+      expect.objectContaining({
+        table: "task_assignees",
+        operation: "insert",
+        payload: [{
+          task_id: "tasks-100",
+          member_id: "member-maya",
+        }],
+        outcome: "success",
+      }),
     );
-    expect(await screen.findByText(/older assignment denied/)).toBeDefined();
+    expect(screen.queryByRole("dialog", { name: "Create task" })).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "New generic task" }),
+    ).toBeDefined();
 
-    enqueue("modules", failure("newer board reload denied"));
-    enqueue("tasks", ok([taskRow(task, [alice])]));
-    enqueue("members", ok([alice]));
-    triggerRealtime("members", "UPDATE", alice);
-
-    expect(await screen.findByText(/newer board reload denied/)).toBeDefined();
-    expect(screen.queryByText(/older assignment denied/)).toBeNull();
-  });
-
-  it("reloads after a successful UUID assignment", async () => {
-    enqueueBoardLoad();
-    enqueue("task_assignees", ok(null));
-    enqueueBoardLoad({ ...task, assignees: ["Alice"] });
-    render(<Board />);
-    await openAssigneePicker();
-
-    fireEvent.click(
-      within(screen.getByRole("menu"))
-        .getByRole("button", { name: /Alice$/ }),
-    );
-
-    expect(await screen.findByRole("button", { name: "Unassign Alice" }))
-      .toBeDefined();
+    failNext("tasks", "insert", "Create failed.");
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Retained failed task" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
     await waitFor(() => {
-      expect(supabaseState.fromCalls.filter((table) => table === "tasks"))
-        .toHaveLength(2);
+      const messages = screen.getAllByRole("alert")
+        .map((element) => element.textContent ?? "");
+      expect(messages.some((message) => (
+        message.includes("Could not create task. Create failed.")
+      ))).toBe(true);
     });
+    expect(screen.getByLabelText("Task title")).toHaveProperty(
+      "value",
+      "Retained failed task",
+    );
+  });
+
+  it("creates a Team Owner for a task and submits the returned name", async () => {
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Assign Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    fireEvent.change(screen.getByLabelText("New owner name"), {
+      target: { value: "Nova" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create owner" }));
+
+    expect(await screen.findByRole("button", { name: "Remove Nova" }))
+      .toBeDefined();
+    expect(supabaseState.mutationTrace.filter((entry) => (
+      entry.table === "members" && entry.operation === "insert"
+    ))).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() => expect(supabaseState.mutationTrace).toContainEqual(
+      expect.objectContaining({
+        table: "task_assignees",
+        operation: "insert",
+        payload: [{
+          task_id: "tasks-101",
+          member_id: "members-100",
+        }],
+        outcome: "success",
+      }),
+    ));
+  });
+
+  it("selects the checked inserted Type id in the retained task draft", async () => {
+    await renderLoadedBoard();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.change(screen.getByLabelText("Task title"), {
+      target: { value: "Document the verifier" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create type" }));
+    fireEvent.change(screen.getByLabelText("New type name"), {
+      target: { value: "Documentation" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add type" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Type")).toHaveProperty(
+        "value",
+        "modules-100",
+      );
+    });
+    expect(screen.getByLabelText("Task title")).toHaveProperty(
+      "value",
+      "Document the verifier",
+    );
+  });
+
+  it("ignores an older realtime row response that resolves last", async () => {
+    await renderLoadedBoard();
+    const staleReload = deferred();
+    supabaseState.readDelays.push(
+      staleReload.promise,
+      staleReload.promise,
+      staleReload.promise,
+    );
+    const readsBefore = supabaseState.readTrace.length;
+    const taskHandler = supabaseState.handlers.find(
+      ({ table }) => table === "tasks",
+    );
+    act(() => {
+      taskHandler?.callback({});
+    });
+    await waitFor(() => {
+      expect(supabaseState.readTrace.length).toBe(readsBefore + 3);
+    });
+
+    supabaseState.tables.tasks = supabaseState.tables.tasks.map((row) => (
+      row.id === "task-kernels"
+        ? { ...row, title: "Newest kernel validation" }
+        : row
+    ));
+    act(() => {
+      taskHandler?.callback({});
+    });
+    expect(await screen.findByRole("link", {
+      name: "Newest kernel validation",
+    })).toBeDefined();
+
+    await act(async () => {
+      staleReload.resolve();
+      await staleReload.promise;
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("link", {
+      name: "Newest kernel validation",
+    })).toBeDefined();
+    expect(screen.queryByRole("link", {
+      name: "Validate NPU kernels",
+    })).toBeNull();
+  });
+
+  it("does not let an older successful reload clear a newer load error", async () => {
+    await renderLoadedBoard();
+    const staleReload = deferred();
+    supabaseState.readDelays.push(
+      staleReload.promise,
+      staleReload.promise,
+      staleReload.promise,
+    );
+    const readsBefore = supabaseState.readTrace.length;
+    const taskHandler = supabaseState.handlers.find(
+      ({ table }) => table === "tasks",
+    );
+    act(() => {
+      taskHandler?.callback({});
+    });
+    await waitFor(() => {
+      expect(supabaseState.readTrace.length).toBe(readsBefore + 3);
+    });
+
+    failNextRead("modules", "Newest reload failed.");
+    act(() => {
+      taskHandler?.callback({});
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not load board. Newest reload failed.",
+    );
+
+    await act(async () => {
+      staleReload.resolve();
+      await staleReload.promise;
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Could not load board. Newest reload failed.",
+    );
+  });
+
+  it("reloads UUID Owner changes and cleans up the channel", async () => {
+    const { unmount } = await renderLoadedBoard();
+    expect(supabaseState.handlers.map(({ table }) => table)).toEqual([
+      "modules",
+      "tasks",
+      "task_assignees",
+      "members",
+    ]);
+
+    supabaseState.tables.tasks = supabaseState.tables.tasks.map((row) => (
+      row.id === "task-kernels"
+        ? { ...row, title: "Realtime kernel validation" }
+        : row
+    ));
+    const taskHandler = supabaseState.handlers.find(
+      ({ table }) => table === "tasks",
+    );
+    act(() => {
+      taskHandler?.callback({});
+    });
+    expect(await screen.findByRole("link", {
+      name: "Realtime kernel validation",
+    })).toBeDefined();
+
+    unmount();
+    expect(supabaseState.removeChannel).toHaveBeenCalledOnce();
   });
 });

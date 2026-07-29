@@ -413,7 +413,7 @@ describe("required experiment inputs", () => {
 });
 
 describe("repository query contracts", () => {
-  it("normalizes Task assignees from UUID relationships", async () => {
+  it("normalizes Task owners from UUID relationships", async () => {
     enqueue("tasks", "select", {
       data: [{
         id: experiment.task_id,
@@ -422,6 +422,9 @@ describe("repository query contracts", () => {
         status: "todo",
         assignees: ["stale name"],
         notes: "",
+        tags: ["NPU"],
+        priority: "high",
+        due_date: "2026-08-01",
         position: 0,
         created_at: "2026-07-24T00:00:00.000Z",
         updated_at: "2026-07-24T00:00:00.000Z",
@@ -443,12 +446,16 @@ describe("repository query contracts", () => {
     );
   });
 
-  it("uses the exact named baseline foreign key in the bundle select", async () => {
+  it("uses the PostgREST-compatible baseline column hint in the bundle select", async () => {
     enqueue("experiments", "select", { data: null, error: null });
 
     await expect(loadExperimentBundle(experiment.id)).resolves.toBeNull();
 
-    expect(trace("experiments", "select").selectCalls[0]).toContain(
+    const select = trace("experiments", "select").selectCalls[0];
+    expect(select).toContain(
+      "baseline:experiments!baseline_experiment_id(",
+    );
+    expect(select).not.toContain(
       "baseline:experiments!experiments_baseline_experiment_id_fkey(",
     );
   });

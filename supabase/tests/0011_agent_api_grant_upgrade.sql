@@ -71,6 +71,24 @@ select ok(
   )
     and has_column_privilege(
       'service_role',
+      'public.tasks',
+      'tags',
+      'update'
+    )
+    and has_column_privilege(
+      'service_role',
+      'public.tasks',
+      'priority',
+      'update'
+    )
+    and has_column_privilege(
+      'service_role',
+      'public.tasks',
+      'due_date',
+      'update'
+    )
+    and has_column_privilege(
+      'service_role',
       'public.experiments',
       'task_id',
       'insert'
@@ -149,7 +167,12 @@ select lives_ok(
     '30000000-0000-4000-8000-000000000011',
     (select updated_at from public.tasks where id =
       '30000000-0000-4000-8000-000000000011'),
-    '{"notes":"upgrade patch"}',
+    '{
+      "notes":"upgrade patch",
+      "tags":["NPU"],
+      "priority":"high",
+      "due_date":"2026-08-15"
+    }',
     'upgrade_task_patch'
   )$$,
   'Task PATCH executes after corrective ACL migration'

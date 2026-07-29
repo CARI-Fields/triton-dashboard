@@ -6,12 +6,14 @@ import {
   isMetrics,
   isObjectSpec,
 } from "@/lib/experiments/schema";
+import { isDateOnly } from "@/lib/agent-api/timestamps";
 import type {
   DecisionOutcome,
   Experiment,
   ExperimentStatus,
   Status,
   Task,
+  TaskPriority,
 } from "@/lib/types";
 
 const MAX_JSON_BYTES = 256 * 1024;
@@ -20,6 +22,12 @@ const TASK_STATUSES = new Set<Status>([
   "in_progress",
   "done",
   "blocked",
+]);
+const TASK_PRIORITIES = new Set<TaskPriority>([
+  "low",
+  "medium",
+  "high",
+  "urgent",
 ]);
 const EXPERIMENT_STATUSES = new Set<ExperimentStatus>([
   "planned",
@@ -67,6 +75,9 @@ const TASK_WRITABLE_FIELDS = new Set([
   "title",
   "status",
   "notes",
+  "tags",
+  "priority",
+  "due_date",
   "position",
 ]);
 const TASK_PROTECTED_FIELDS = new Set([
@@ -137,7 +148,16 @@ const ATTACHMENT_MIME_EXTENSIONS = new Map([
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 export type TaskPatch = Partial<
-  Pick<Task, "title" | "status" | "notes" | "position">
+  Pick<
+    Task,
+    | "title"
+    | "status"
+    | "notes"
+    | "tags"
+    | "priority"
+    | "due_date"
+    | "position"
+  >
 >;
 
 export type ExperimentPatch = Partial<
@@ -423,6 +443,23 @@ export function parseTaskPatch(body: unknown): TaskPatch {
       case "notes":
         if (typeof value !== "string") invalidField(field);
         parsed.notes = value;
+        break;
+      case "tags":
+        if (!isStringArray(value)) invalidField(field);
+        parsed.tags = [...value];
+        break;
+      case "priority":
+        if (
+          typeof value !== "string"
+          || !TASK_PRIORITIES.has(value as TaskPriority)
+        ) {
+          invalidField(field);
+        }
+        parsed.priority = value as TaskPriority;
+        break;
+      case "due_date":
+        if (value !== null && !isDateOnly(value)) invalidField(field);
+        parsed.due_date = value;
         break;
       case "position":
         if (typeof value !== "number" || !Number.isFinite(value)) {

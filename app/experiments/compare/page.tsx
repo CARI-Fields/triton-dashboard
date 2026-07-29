@@ -1,4 +1,3 @@
-import AuthGate from "@/components/AuthGate";
 import ExperimentCompare from "@/components/experiments/ExperimentCompare";
 import { parseCompareSearchParams } from "@/lib/experiments/compare-url";
 
@@ -11,9 +10,5 @@ export default async function ComparePage({
   }>;
 }) {
   const selection = parseCompareSearchParams(await searchParams);
-  return (
-    <AuthGate>
-      <ExperimentCompare initialSelection={selection} />
-    </AuthGate>
-  );
+  return <ExperimentCompare initialSelection={selection} />;
 }

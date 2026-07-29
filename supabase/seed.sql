@@ -16,11 +16,20 @@ insert into modules (name, kind, objective, position) values
   ('Skills Refinement',   'foundation', 'Evaluate the effectiveness of HQ skills, capture success / failure patterns, and keep making them better.', 1);
 
 -- Tasks, joined onto their module by name
-insert into tasks (module_id, title, status, assignees, position)
-select m.id, t.title, t.status, t.assignees, t.position
+insert into tasks (
+  module_id, title, status, assignees, tags, priority, due_date, position
+)
+select
+  m.id, t.title, t.status, t.assignees, '{}'::text[], 'medium', null, t.position
 from (values
-  ('SFT',                 'GLM + CC evaluation',          'in_progress', array['Bruce'],           0),
-  ('SFT',                 'SFT data processing',          'in_progress', array['Harish'],          1),
-  ('Harness Development', 'Automated harness evaluation', 'in_progress', array['Eason', 'Zahra'],  0)
+  ('SFT', 'GLM + CC evaluation', 'in_progress', array['Bruce'], 0),
+  ('SFT', 'SFT data processing', 'in_progress', array['Harish'], 1),
+  (
+    'Harness Development',
+    'Automated harness evaluation',
+    'in_progress',
+    array['Eason', 'Zahra'],
+    0
+  )
 ) as t(module_name, title, status, assignees, position)
 join modules m on m.name = t.module_name;

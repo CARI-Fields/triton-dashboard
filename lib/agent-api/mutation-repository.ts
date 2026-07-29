@@ -6,6 +6,7 @@ import type {
   ExperimentPatch,
   TaskPatch,
 } from "@/lib/agent-api/schemas";
+import { isDateOnly } from "@/lib/agent-api/timestamps";
 import type { AgentContext } from "@/lib/agent-api/types";
 import {
   isConfig,
@@ -22,6 +23,7 @@ import type {
   ExperimentStatus,
   Status,
   Task,
+  TaskPriority,
 } from "@/lib/types";
 
 const UUID_PATTERN =
@@ -31,6 +33,12 @@ const TASK_STATUSES = new Set<Status>([
   "in_progress",
   "done",
   "blocked",
+]);
+const TASK_PRIORITIES = new Set<TaskPriority>([
+  "low",
+  "medium",
+  "high",
+  "urgent",
 ]);
 const EXPERIMENT_STATUSES = new Set<ExperimentStatus>([
   "planned",
@@ -47,7 +55,20 @@ const DECISION_OUTCOMES = new Set<DecisionOutcome>([
   "inconclusive",
 ]);
 
-export type TaskMutationDto = Omit<Task, "assignees">;
+export type TaskMutationDto = Pick<
+  Task,
+  | "id"
+  | "module_id"
+  | "title"
+  | "status"
+  | "notes"
+  | "tags"
+  | "priority"
+  | "due_date"
+  | "position"
+  | "created_at"
+  | "updated_at"
+>;
 export type ExperimentMutationDto = Experiment;
 export type ActivityMutationDto = Activity;
 export type AttachmentMutationDto = Attachment;
@@ -204,12 +225,31 @@ function taskDto(value: unknown): TaskMutationDto {
   if (typeof status !== "string" || !TASK_STATUSES.has(status as Status)) {
     return invalidRpcData();
   }
+  const tags = value.tags;
+  if (
+    !Array.isArray(tags)
+    || !tags.every((item) => typeof item === "string")
+  ) {
+    return invalidRpcData();
+  }
+  const priority = value.priority;
+  if (
+    typeof priority !== "string"
+    || !TASK_PRIORITIES.has(priority as TaskPriority)
+  ) {
+    return invalidRpcData();
+  }
+  const dueDate = value.due_date;
+  if (dueDate !== null && !isDateOnly(dueDate)) return invalidRpcData();
   return {
     id: requiredUuid(value, "id"),
-    module_id: requiredUuid(value, "module_id"),
+    module_id: nullableUuid(value, "module_id"),
     title: requiredString(value, "title"),
     status: status as Status,
     notes: requiredString(value, "notes"),
+    tags: [...tags],
+    priority: priority as TaskPriority,
+    due_date: dueDate,
     position: requiredNumber(value, "position"),
     created_at: requiredString(value, "created_at"),
     updated_at: requiredString(value, "updated_at"),

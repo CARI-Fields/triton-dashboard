@@ -410,6 +410,9 @@ body 结构：
 - `title`
 - `status`
 - `notes`
+- `tags`
+- `priority`
+- `due_date`
 - `position`
 
 不可写的权限或父级字段：

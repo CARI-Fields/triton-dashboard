@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExperimentListRow } from "@/lib/types";
 import ExperimentCompare from "@/components/experiments/ExperimentCompare";
+import { ShareRequestAuthority } from "@/components/experiments/share-request-authority";
 import {
   listExperimentRows,
   watchExperimentIndex,
@@ -118,9 +119,36 @@ describe("ExperimentCompare", () => {
     vi.mocked(watchExperimentIndex).mockReturnValue(() => undefined);
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    window.history.replaceState(null, "", "/");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+  });
 
-  it("pins the Baseline first and renders raw plus neutral metric Delta columns", async () => {
+  it("uses a labelled table skeleton only for the initial comparison load", async () => {
+    const pending = deferred<ExperimentListRow[]>();
+    vi.mocked(listExperimentRows).mockReturnValue(pending.promise);
+    const view = render(
+      <ExperimentCompare
+        initialSelection={{ ids: [id(1)], baselineId: null }}
+      />,
+    );
+
+    const skeleton = screen.getByRole("status", {
+      name: "Loading Comparison",
+    });
+    expect(skeleton.classList).toContain("workspace-skeleton-table");
+    expect(skeleton.querySelectorAll(".skeleton-table > i")).toHaveLength(7);
+    expect(screen.queryByText("Loading comparison…")).toBeNull();
+
+    view.unmount();
+    await act(async () => pending.resolve([row(1)]));
+  });
+
+  it("keeps experiments as rows, pins the Baseline first, and exposes the scrollable schema table", async () => {
     const current = row(2, { metrics: { "pass@1": 0.25 } });
     const baseline = row(1, { metrics: { "pass@1": 0.1 } });
     vi.mocked(listExperimentRows).mockResolvedValue([current, baseline]);
@@ -138,17 +166,366 @@ describe("ExperimentCompare", () => {
     expect(deltaHeader.classList.contains("neutral-delta")).toBe(true);
     const tableRows = screen.getAllByRole("row");
     expect(within(tableRows[1]).getByText("EXP-0001")).toBeDefined();
+    expect(within(tableRows[2]).getByText("EXP-0002")).toBeDefined();
     expect(within(tableRows[1]).getByText("Baseline")).toBeDefined();
     expect(within(tableRows[2]).getByText("+0.15")).toBeDefined();
-    expect(screen.getByRole("columnheader", { name: /Experiment/ }).classList)
-      .toContain("compare-identity");
+    expect(screen.getByRole("columnheader", { name: /Dataset 1 Name/ }))
+      .toBeDefined();
+    expect(screen.queryByRole("rowheader", { name: /Dataset 1 Name/ }))
+      .toBeNull();
+    const experimentHeader = screen.getByRole("columnheader", {
+      name: /Experiment/,
+    });
+    expect(experimentHeader.classList).toContain("compare-identity");
+    expect(experimentHeader.classList).toContain("compare-experiment-column");
+    expect(screen.getByRole("columnheader", { name: "Task" }).classList)
+      .toContain("compare-task-column");
+    expect(screen.getByRole("columnheader", { name: "Status" }).classList)
+      .toContain("compare-status-column");
     const baselineIdentity = within(tableRows[1]).getByRole("rowheader");
     expect(baselineIdentity.getAttribute("scope")).toBe("row");
+    expect(baselineIdentity.classList).toContain("compare-identity");
     expect(baselineIdentity.classList)
-      .toContain("compare-identity");
+      .toContain("compare-experiment-column");
+    expect(tableRows[1].children[1].classList).toContain("compare-task-column");
+    const region = screen.getByRole("region", {
+      name: "Experiment comparison table",
+    });
+    expect(region.tabIndex).toBe(0);
+    expect(region.getAttribute("aria-describedby")).toBe("compare-table-help");
+    expect(document.getElementById("compare-table-help")?.textContent)
+      .toContain("Experiment schema");
+    expect(tableRows[1].children[2].classList).toContain("compare-status-column");
     expect(screen.getAllByRole("columnheader").every(
       (header) => header.getAttribute("scope") === "col",
     )).toBe(true);
+
+    const scrollRegion = screen.getByRole("region", {
+      name: "Experiment comparison table",
+    });
+    expect(scrollRegion.getAttribute("tabindex")).toBe("0");
+    expect(scrollRegion.getAttribute("aria-describedby")).toBe("compare-table-help");
+    const help = document.getElementById("compare-table-help");
+    expect(help?.textContent).toBe(
+      "Missing values are shown as —. Context fields are flattened from the Experiment schema; numeric Result deltas are current minus baseline.",
+    );
+  });
+
+  it("renders the baseline-ordered selected strip as the only Remove control", async () => {
+    const current = row(2);
+    const baseline = row(1);
+    vi.mocked(listExperimentRows).mockResolvedValue([current, baseline]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [current.id, baseline.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    const selection = await screen.findByLabelText("Selected experiments");
+    expect(within(selection).getByText("2 selected")).toBeDefined();
+    const selectedItems = within(selection).getAllByRole("listitem");
+    expect(selectedItems).toHaveLength(2);
+    expect(within(selectedItems[0]).getByText(/EXP-0001 · run-1 · Baseline/))
+      .toBeDefined();
+    expect(within(selectedItems[1]).getByText(/EXP-0002 · run-2/)).toBeDefined();
+    const removeButtons = screen.getAllByRole("button", { name: /Remove EXP-/ });
+    expect(removeButtons).toHaveLength(2);
+    expect(removeButtons.every((button) => selection.contains(button))).toBe(true);
+  });
+
+  it("uses a native field-group disclosure with an accessible group count", async () => {
+    vi.mocked(listExperimentRows).mockResolvedValue([row(1)]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [id(1)], baselineId: null }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    const summary = screen.getByText("Fields · 6 groups");
+    expect(summary.tagName).toBe("SUMMARY");
+    const disclosure = summary.parentElement;
+    expect(disclosure?.tagName).toBe("DETAILS");
+    expect(disclosure?.classList).toContain("field-groups");
+    expect(disclosure?.querySelectorAll('input[type="checkbox"]')).toHaveLength(6);
+  });
+
+  it("copies the current Share URL, blocks duplicate copies, and resets after selection changes", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const copy = deferred<void>();
+    const writeText = vi.fn(() => copy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const href = `/experiments/compare?ids=${encodeURIComponent(
+      `${baseline.id},${current.id}`,
+    )}&baseline=${baseline.id}`;
+    window.history.replaceState(null, "", href);
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    const copying = screen.getByRole("button", { name: "Copying…" });
+    expect((copying as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(copying);
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith(window.location.href);
+
+    await act(async () => copy.resolve());
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Compare Baseline" }), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText.mock.calls[1]?.[0]).toBe(
+      `${window.location.origin}/experiments/compare?ids=${encodeURIComponent(
+        `${baseline.id},${current.id}`,
+      )}`,
+    );
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+  });
+
+  it("copies the latest Add and Remove selections before navigation updates location", async () => {
+    const first = row(1);
+    const second = row(2);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    window.history.replaceState(
+      null,
+      "",
+      `/experiments/compare?ids=${first.id}`,
+    );
+    vi.mocked(listExperimentRows).mockResolvedValue([first, second]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{ ids: [first.id], baselineId: null }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Add experiment" }), {
+      target: { value: second.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(writeText.mock.calls[1]?.[0]).toBe(
+      `${window.location.origin}/experiments/compare?ids=${encodeURIComponent(
+        `${first.id},${second.id}`,
+      )}`,
+    );
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove EXP-0002" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(writeText.mock.calls[2]?.[0]).toBe(
+      `${window.location.origin}/experiments/compare?ids=${first.id}`,
+    );
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+  });
+
+  it("ignores an old Share resolution after the Baseline changes", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const copy = deferred<void>();
+    const writeText = vi.fn(() => copy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    expect(screen.getByRole("button", { name: "Copying…" })).toBeDefined();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Compare Baseline" }), {
+      target: { value: "" },
+    });
+    expect(await screen.findByRole("button", { name: "Share" })).toBeDefined();
+
+    await act(async () => copy.resolve());
+    expect(screen.getByRole("button", { name: "Share" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("ignores an old Share rejection after the selected experiments change", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const copy = deferred<void>();
+    const writeText = vi.fn(() => copy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    const selection = await screen.findByLabelText("Selected experiments");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove EXP-0002" }));
+    expect(await screen.findByRole("button", { name: "Share" })).toBeDefined();
+    expect(within(selection).getAllByRole("listitem")).toHaveLength(1);
+
+    await act(async () => copy.reject(new Error("Old permission failure.")));
+    expect(screen.getByRole("button", { name: "Share" })).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a newer Share request authoritative when an old request settles first", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const oldCopy = deferred<void>();
+    const newCopy = deferred<void>();
+    const writeText = vi.fn()
+      .mockImplementationOnce(() => oldCopy.promise)
+      .mockImplementationOnce(() => newCopy.promise);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    await screen.findByText("EXP-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Compare Baseline" }), {
+      target: { value: "" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Share" }));
+    expect(writeText).toHaveBeenCalledTimes(2);
+
+    await act(async () => oldCopy.resolve());
+    const copying = screen.getByRole("button", { name: "Copying…" });
+    expect((copying as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(async () => newCopy.resolve());
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeDefined();
+  });
+
+  it("disposes Share request authority when unmounted with a pending copy", async () => {
+    const experiment = row(1);
+    const copy = deferred<void>();
+    const writeText = vi.fn(() => copy.promise);
+    const dispose = vi.spyOn(ShareRequestAuthority.prototype, "dispose");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(listExperimentRows).mockResolvedValue([experiment]);
+
+    try {
+      const { unmount } = render(
+        <ExperimentCompare
+          initialSelection={{ ids: [experiment.id], baselineId: null }}
+        />,
+      );
+
+      await screen.findByText("EXP-0001");
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      expect(writeText).toHaveBeenCalledOnce();
+      unmount();
+
+      expect(dispose).toHaveBeenCalledOnce();
+      await act(async () => copy.resolve());
+    } finally {
+      dispose.mockRestore();
+    }
+  });
+
+  it("reports clipboard failure without changing the selection or its URL state", async () => {
+    const baseline = row(1);
+    const current = row(2);
+    const writeText = vi.fn().mockRejectedValue(new Error("Permission denied."));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const href = `/experiments/compare?ids=${encodeURIComponent(
+      `${baseline.id},${current.id}`,
+    )}&baseline=${baseline.id}`;
+    window.history.replaceState(null, "", href);
+    const initialHref = window.location.href;
+    vi.mocked(listExperimentRows).mockResolvedValue([baseline, current]);
+
+    render(
+      <ExperimentCompare
+        initialSelection={{
+          ids: [baseline.id, current.id],
+          baselineId: baseline.id,
+        }}
+      />,
+    );
+
+    const selection = await screen.findByLabelText("Selected experiments");
+    routerReplace.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not copy link",
+    );
+    expect(writeText).toHaveBeenCalledWith(initialHref);
+    expect(window.location.href).toBe(initialHref);
+    expect(routerReplace).not.toHaveBeenCalled();
+    expect(within(selection).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(selection).getByText(/EXP-0001 · run-1 · Baseline/))
+      .toBeDefined();
+    expect((screen.getByRole("combobox", {
+      name: "Compare Baseline",
+    }) as HTMLSelectElement).value).toBe(baseline.id);
   });
 
   it("removes every Delta column when Baseline is off", async () => {
@@ -543,8 +920,12 @@ describe("ExperimentCompare", () => {
         initialSelection={{ ids: [], baselineId: null }}
       />,
     );
-    expect(await screen.findByText("Add experiments to build a comparison."))
-      .toBeDefined();
+    const emptySelection = (await screen.findByText(
+      "Add experiments to build a comparison.",
+    )).closest(".experiment-empty") as HTMLElement;
+    expect(within(emptySelection).getByRole("link", {
+      name: "Back to experiments",
+    }).getAttribute("href")).toBe("/experiments");
     expect(screen.getByRole("option", { name: /EXP-0002/ })).toBeDefined();
 
     routerReplace.mockClear();

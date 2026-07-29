@@ -1,5 +1,5 @@
 begin;
-select plan(16);
+select plan(19);
 
 select has_function(
   'public',
@@ -79,7 +79,12 @@ select public.agent_api_patch_task(
     select updated_at from public.tasks
     where id = '30000000-0000-4000-8000-000000000001'
   ),
-  '{"title":"Retitled by Bruce"}',
+  '{
+    "title":"Retitled by Bruce",
+    "tags":["NPU","Verifier"],
+    "priority":"urgent",
+    "due_date":"2026-08-15"
+  }',
   'req_task_ok'
 );
 select is(
@@ -89,6 +94,30 @@ select is(
   ),
   'Retitled by Bruce',
   'Bruce can patch an assigned Task'
+);
+select is(
+  (
+    select tags from public.tasks
+    where id = '30000000-0000-4000-8000-000000000001'
+  ),
+  array['NPU', 'Verifier']::text[],
+  'Task PATCH replaces tags'
+);
+select is(
+  (
+    select priority from public.tasks
+    where id = '30000000-0000-4000-8000-000000000001'
+  ),
+  'urgent',
+  'Task PATCH updates priority'
+);
+select is(
+  (
+    select due_date from public.tasks
+    where id = '30000000-0000-4000-8000-000000000001'
+  ),
+  '2026-08-15'::date,
+  'Task PATCH updates due date'
 );
 
 select throws_ok(

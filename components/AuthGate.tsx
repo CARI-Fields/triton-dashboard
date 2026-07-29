@@ -1,12 +1,33 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { TEAM_EMAIL } from "@/lib/auth";
 
 const SESSION_VERIFICATION_ERROR =
   "Could not verify your session. Sign in again.";
+
+interface AuthActions {
+  logout: () => Promise<void>;
+}
+
+const AuthActionsContext = createContext<AuthActions | null>(null);
+
+export function useAuthActions(): AuthActions {
+  const context = useContext(AuthActionsContext);
+  if (!context) {
+    throw new Error("useAuthActions must be used within AuthGate");
+  }
+  return context;
+}
 
 /**
  * Gate that requires the shared team password before rendering anything.
@@ -82,12 +103,20 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function logout() {
+  const logout = useCallback(async () => {
     if (supabase) await supabase.auth.signOut();
-  }
+  }, []);
+
+  const authActions = useMemo(() => ({ logout }), [logout]);
 
   // Not configured yet -> let the child render its own setup screen.
-  if (!isSupabaseConfigured) return <>{children}</>;
+  if (!isSupabaseConfigured) {
+    return (
+      <AuthActionsContext.Provider value={authActions}>
+        {children}
+      </AuthActionsContext.Provider>
+    );
+  }
 
   if (!ready) {
     return (
@@ -122,11 +151,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <>
-      <button className="logout-btn" onClick={logout} title="Log out">
-        ⎋ Log out
-      </button>
+    <AuthActionsContext.Provider value={authActions}>
       {children}
-    </>
+    </AuthActionsContext.Provider>
   );
 }

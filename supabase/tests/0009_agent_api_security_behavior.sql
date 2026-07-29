@@ -162,6 +162,24 @@ select ok(
   )
     and has_column_privilege(
       'service_role',
+      'public.tasks',
+      'tags',
+      'update'
+    )
+    and has_column_privilege(
+      'service_role',
+      'public.tasks',
+      'priority',
+      'update'
+    )
+    and has_column_privilege(
+      'service_role',
+      'public.tasks',
+      'due_date',
+      'update'
+    )
+    and has_column_privilege(
+      'service_role',
       'public.experiments',
       'task_id',
       'insert'
@@ -375,6 +393,9 @@ select lives_ok(
     jsonb_build_object(
       'title', 'Patched task',
       'notes', 'Task notes',
+      'tags', '["NPU","Verifier"]'::jsonb,
+      'priority', 'urgent',
+      'due_date', '2026-08-15',
       'module_id', '10000000-0000-4000-8000-000000000099'
     ),
     'success_task_patch'
@@ -453,6 +474,9 @@ select ok(
   (
     select title = 'Patched task'
       and notes = 'Task notes'
+      and tags = array['NPU', 'Verifier']
+      and priority = 'urgent'
+      and due_date = '2026-08-15'::date
       and module_id = '10000000-0000-4000-8000-000000000009'
     from public.tasks
     where id = '30000000-0000-4000-8000-000000000009'

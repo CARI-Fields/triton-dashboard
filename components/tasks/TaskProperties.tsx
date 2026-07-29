@@ -160,15 +160,24 @@ export default function TaskProperties({
         </div>
       </div>
 
-      <fieldset className="task-property task-property-owner">
-        <legend>Owner</legend>
+      <div
+        className="task-property task-property-owner"
+        role="group"
+        aria-labelledby={`task-owner-label-${task.id}`}
+      >
+        <span
+          className="field-label"
+          id={`task-owner-label-${task.id}`}
+        >
+          Owner
+        </span>
         <OwnerPicker
           members={members}
           owners={ownerDraft}
           onCreateOwner={onCreateOwner}
           onChange={changeOwners}
         />
-      </fieldset>
+      </div>
 
       <div className="task-property">
         <label htmlFor={`task-priority-${task.id}`}>Priority</label>

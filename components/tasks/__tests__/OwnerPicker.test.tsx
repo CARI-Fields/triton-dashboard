@@ -149,8 +149,12 @@ describe("OwnerPicker", () => {
     expect(screen.getByText("Maya")).toBeDefined();
     expect(screen.queryByText("Theo")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Add owner" }));
+    const trigger = screen.getByRole("button", { name: "Add owner" });
+    fireEvent.click(trigger);
     const panel = screen.getByRole("dialog", { name: "Add owner" });
+    expect(trigger.parentElement?.classList.contains("owner-picker-anchor"))
+      .toBe(true);
+    expect(panel.parentElement).toBe(trigger.parentElement);
     expect(within(panel).getByRole("button", { name: "Add Theo" }))
       .toBeDefined();
     expect(within(panel).queryByRole("button", { name: "Add Maya" }))
@@ -345,8 +349,8 @@ describe("OwnerPicker", () => {
         if (this.classList.contains("drawer-body")) {
           return testRect({ top: 0, bottom: boundaryBottom });
         }
-        if (this.classList.contains("owner-picker")) {
-          return testRect({ top: 397, bottom: 445 });
+        if (this.classList.contains("owner-picker-trigger")) {
+          return testRect({ top: 411, bottom: 445 });
         }
         if (this.classList.contains("owner-picker-panel")) {
           return testRect({ top: 451, bottom: 804 });

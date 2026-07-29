@@ -405,8 +405,14 @@ export default function AddTaskDrawer({
           </div>
         </div>
 
-        <fieldset className="add-task-field owner-field">
-          <legend>Owner</legend>
+        <div
+          className="add-task-field owner-field"
+          role="group"
+          aria-labelledby="task-owner-label"
+        >
+          <span className="field-label" id="task-owner-label">
+            Owner
+          </span>
           <div className="field-control">
             <OwnerPicker
               members={members}
@@ -417,7 +423,7 @@ export default function AddTaskDrawer({
               onChange={(owners) => updateDraft("owners", owners)}
             />
           </div>
-        </fieldset>
+        </div>
 
         <div className="add-task-field">
           <label htmlFor="task-priority-input">Priority</label>

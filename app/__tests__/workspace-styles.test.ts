@@ -84,10 +84,14 @@ describe("workspace visual contracts", () => {
     const panel = ruleBody(globals, ".owner-picker-panel");
     expect(panel).toMatch(/position\s*:\s*absolute/);
     expect(panel).toMatch(/top\s*:\s*calc\(100%\s*\+\s*6px\)/);
-    expect(panel).toMatch(/right\s*:\s*0/);
+    expect(panel).toMatch(/left\s*:\s*0/);
     expect(panel).toMatch(
       /width\s*:\s*min\(360px,\s*calc\(100vw\s*-\s*32px\)\)/,
     );
+
+    const anchor = ruleBody(globals, ".owner-picker-anchor");
+    expect(anchor).toMatch(/position\s*:\s*relative/);
+    expect(anchor).toMatch(/width\s*:\s*100%/);
 
     const name = ruleBody(globals, ".selected-owner-name");
     expect(name).toMatch(/min-width\s*:\s*0/);

@@ -3,6 +3,13 @@ import { AgentApiError } from "@/lib/agent-api/errors";
 import { getServerSupabase } from "@/lib/agent-api/server";
 import type { AgentContext } from "@/lib/agent-api/types";
 import {
+  isConfig,
+  isDataSpec,
+  isEnvironmentSpec,
+  isMetrics,
+  isObjectSpec,
+} from "@/lib/experiments/schema";
+import {
   normalizeTaskRow,
   TASK_WITH_ASSIGNEES_SELECT,
   type TaskRelationRow,
@@ -446,22 +453,6 @@ function recordValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
-function nullableNumber(value: unknown): number | null {
-  return value === null || (typeof value === "number" && Number.isFinite(value))
-    ? value
-    : null;
-}
-
 function normalizedExperimentFields(
   row: Record<string, unknown>,
 ): Pick<
@@ -473,50 +464,69 @@ function normalizedExperimentFields(
   | "metrics"
   | "featured_metric_keys"
 > {
-  const data = recordValue(row.data_spec);
-  const object = recordValue(row.object_spec);
-  const environment = recordValue(row.environment_spec);
-  const datasets = Array.isArray(data.datasets)
-    ? data.datasets.map((value) => {
-      const dataset = recordValue(value);
-      return {
-        role: dataset.role === "evaluation" ? "evaluation" as const
-          : "training" as const,
-        name: stringValue(dataset.name),
-        split: stringValue(dataset.split),
-        revision: stringValue(dataset.revision),
-        task_count: nullableNumber(dataset.task_count),
-        samples_per_task: nullableNumber(dataset.samples_per_task),
+  const dataSpec: Experiment["data_spec"] = isDataSpec(row.data_spec)
+    ? {
+      datasets: row.data_spec.datasets.map((dataset) => ({
+        role: dataset.role,
+        name: dataset.name,
+        split: dataset.split,
+        revision: dataset.revision,
+        task_count: dataset.task_count,
+        samples_per_task: dataset.samples_per_task,
+      })),
+    }
+    : { datasets: [] };
+  const objectSpec: Experiment["object_spec"] = isObjectSpec(row.object_spec)
+    ? {
+      model: row.object_spec.model,
+      harness: row.object_spec.harness,
+      parent_harness: row.object_spec.parent_harness,
+      prompt: row.object_spec.prompt,
+      prompt_change: row.object_spec.prompt_change,
+      skills: [...row.object_spec.skills],
+      tools: [...row.object_spec.tools],
+    }
+    : {
+      model: "",
+      harness: "",
+      parent_harness: "",
+      prompt: "",
+      prompt_change: "",
+      skills: [],
+      tools: [],
+    };
+  const environmentSpec: Experiment["environment_spec"] =
+    isEnvironmentSpec(row.environment_spec)
+      ? {
+        platform: row.environment_spec.platform,
+        server: row.environment_spec.server,
+        devices: [...row.environment_spec.devices],
+        hardware: row.environment_spec.hardware,
+        evaluator: row.environment_spec.evaluator,
+        revision: row.environment_spec.revision,
+        precision_policy: row.environment_spec.precision_policy,
+      }
+      : {
+        platform: "",
+        server: "",
+        devices: [],
+        hardware: "",
+        evaluator: "",
+        revision: "",
+        precision_policy: "",
       };
-    })
-    : [];
-  const platform = environment.platform === "npu"
-    || environment.platform === "gpu"
-    ? environment.platform
-    : "";
+  const featuredMetricKeys = row.featured_metric_keys;
   return {
-    data_spec: { datasets },
-    object_spec: {
-      model: stringValue(object.model),
-      harness: stringValue(object.harness),
-      parent_harness: stringValue(object.parent_harness),
-      prompt: stringValue(object.prompt),
-      prompt_change: stringValue(object.prompt_change),
-      skills: stringArray(object.skills),
-      tools: stringArray(object.tools),
-    },
-    environment_spec: {
-      platform,
-      server: stringValue(environment.server),
-      devices: stringArray(environment.devices),
-      hardware: stringValue(environment.hardware),
-      evaluator: stringValue(environment.evaluator),
-      revision: stringValue(environment.revision),
-      precision_policy: stringValue(environment.precision_policy),
-    },
-    config: recordValue(row.config) as Experiment["config"],
-    metrics: recordValue(row.metrics) as Experiment["metrics"],
-    featured_metric_keys: stringArray(row.featured_metric_keys),
+    data_spec: dataSpec,
+    object_spec: objectSpec,
+    environment_spec: environmentSpec,
+    config: isConfig(row.config) ? { ...row.config } : {},
+    metrics: isMetrics(row.metrics) ? { ...row.metrics } : {},
+    featured_metric_keys:
+      Array.isArray(featuredMetricKeys)
+      && featuredMetricKeys.every((key) => typeof key === "string")
+        ? [...featuredMetricKeys]
+        : [],
   };
 }
 

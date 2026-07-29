@@ -324,3 +324,96 @@ The Supabase security/performance advisor reported only the repository's
 pre-existing mutable search paths on `set_experiment_status_timestamps` and
 `set_updated_at`, plus the pre-existing broad authenticated RLS policies. The
 two new RPCs produced no advisor warning.
+
+## Fix Round 2 — Validated Experiment JSON DTOs
+
+### Outcome
+
+Experiment list and detail now share one guard-based structured-field mapper:
+
+- `isDataSpec`, `isObjectSpec`, `isEnvironmentSpec`, `isConfig`, and
+  `isMetrics` are reused from the pure Experiment schema module;
+- a valid Data, Object, or Environment spec is reconstructed from its exact
+  public nested fields, stripping unknown keys without changing valid values;
+- valid config and metrics records are cloned because their keys are
+  user-defined by contract;
+- an invalid whole field receives its neutral API/dashboard default;
+- mixed-type featured metric keys receive `[]` rather than being partially
+  filtered;
+- invalid dataset roles never get converted into an invented `training`
+  role.
+
+Both list and detail regressions pass their returned writable JSON subset
+through the strict `parseExperimentPatch` parser.
+
+No SQL, migration, route, shared dashboard repository, or progress-file change
+was required.
+
+### RED evidence
+
+The two revised regressions failed against the previous mapper before the
+production edit:
+
+```text
+Test Files 1 failed (1)
+Tests 2 failed | 40 passed (42)
+```
+
+The list failure showed the invalid `validation` role rewritten to
+`training`, invalid Object/Environment arrays partially filtered while the
+rest of those invalid fields survived, and mixed featured keys reduced to
+`["latency"]`. The detail failure independently showed mixed featured keys
+partially retained.
+
+The fixtures also cover nested config, JSON-representable non-numeric metric
+values (`"NaN"` and `null`), invalid Object skills, invalid Environment
+devices, both valid dataset roles, valid config/metrics values, and unknown
+nested keys on otherwise valid specs.
+
+### GREEN evidence
+
+Focused repository regression:
+
+```text
+Test Files 1 passed (1)
+Tests 42 passed (42)
+```
+
+Repository, strict Agent schema, read routes, and dashboard Experiment
+repository normalization:
+
+```text
+Test Files 4 passed (4)
+Tests 178 passed (178)
+```
+
+Full application suite:
+
+```text
+Test Files 37 passed (37)
+Tests 562 passed (562)
+```
+
+Other gates:
+
+```text
+npx tsc --noEmit
+exit 0
+
+npm run build
+exit 0
+Next.js 16.2.10 compiled successfully
+all ten Agent read routes emitted
+
+npx supabase test db --local supabase/tests/0012_agent_api_reads.sql
+Files=1, Tests=20
+Result: PASS
+```
+
+### Final audit
+
+The scoped diff contains only the Agent read repository, its regression test,
+and this appended report. Production scans found no arbitrary structured
+Experiment JSON casts, partial string-array filtering, invented dataset-role
+branch, wildcard projection, secret projection, write operation, permissive
+CORS, or debug logging. `progress.md` remains untouched.

@@ -2,11 +2,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Task } from "@/lib/types";
 
 export const TASK_WITH_ASSIGNEES_SELECT = [
-  "*",
+  "id",
+  "module_id",
+  "title",
+  "status",
+  "notes",
+  "position",
+  "created_at",
+  "updated_at",
   "task_assignees(member_id,member:members(name))",
 ].join(",");
 
-export type TaskRelationRow = Task & {
+export type TaskRelationRow = Omit<Task, "assignees"> & {
   task_assignees: Array<{
     member_id: string;
     member: { name: string } | null;

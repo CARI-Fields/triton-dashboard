@@ -14,7 +14,6 @@ describe("normalizeTaskRow", () => {
       module_id: "module-1",
       title: "Kernel",
       status: "todo",
-      assignees: ["stale name"],
       notes: "",
       position: 0,
       created_at: "2026-07-28T00:00:00Z",
@@ -30,13 +29,28 @@ describe("normalizeTaskRow", () => {
     expect(TASK_WITH_ASSIGNEES_SELECT).toContain("task_assignees");
   });
 
+  it("selects only public Task storage fields and the UUID relation", () => {
+    expect(TASK_WITH_ASSIGNEES_SELECT).toBe([
+      "id",
+      "module_id",
+      "title",
+      "status",
+      "notes",
+      "position",
+      "created_at",
+      "updated_at",
+      "task_assignees(member_id,member:members(name))",
+    ].join(","));
+    expect(TASK_WITH_ASSIGNEES_SELECT).not.toContain("*");
+    expect(TASK_WITH_ASSIGNEES_SELECT).not.toMatch(/(^|,)assignees([,(]|$)/);
+  });
+
   it("skips relationships whose Member was deleted", () => {
     const task = normalizeTaskRow({
       id: "task-1",
       module_id: "module-1",
       title: "Kernel",
       status: "todo",
-      assignees: ["stale name"],
       notes: "",
       position: 0,
       created_at: "2026-07-28T00:00:00Z",

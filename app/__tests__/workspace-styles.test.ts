@@ -98,6 +98,9 @@ describe("workspace visual contracts", () => {
     expect(name).toMatch(/overflow\s*:\s*hidden/);
     expect(name).toMatch(/text-overflow\s*:\s*ellipsis/);
     expect(name).toMatch(/white-space\s*:\s*nowrap/);
+
+    const chip = ruleBody(globals, ".selected-owner-chip");
+    expect(chip).toMatch(/font-size\s*:\s*13px/);
     expect(globals).not.toMatch(/\.owner-options\s*\{/);
   });
 

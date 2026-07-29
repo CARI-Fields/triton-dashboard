@@ -21,7 +21,11 @@ const VIEW = {
 };
 
 const SECRET =
+  "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const INTERNAL_PREFIX_MISMATCH =
   "tb_live_CCCCCCCC_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const VIEW_PREFIX_MISMATCH =
+  "tb_live_BAECAwQF_BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
 describe("Admin key response DTO validators", () => {
   it("accepts only the exact ManagedKeyView response shape", () => {
@@ -52,6 +56,14 @@ describe("Admin key response DTO validators", () => {
 
   it("requires a strict generated secret and no extra fields", () => {
     expect(isManagedKeyWithSecret({ ...VIEW, secret: SECRET })).toBe(true);
+    expect(isManagedKeyWithSecret({
+      ...VIEW,
+      secret: INTERNAL_PREFIX_MISMATCH,
+    })).toBe(false);
+    expect(isManagedKeyWithSecret({
+      ...VIEW,
+      secret: VIEW_PREFIX_MISMATCH,
+    })).toBe(false);
     expect(isManagedKeyWithSecret(VIEW)).toBe(false);
     expect(isManagedKeyWithSecret({ ...VIEW, secret: "tb_live_bad" }))
       .toBe(false);

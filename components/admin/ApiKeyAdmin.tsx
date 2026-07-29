@@ -53,6 +53,9 @@ const ROTATION_UNCERTAIN_MESSAGE =
   + "invalid, and the new secret cannot be recovered. Refresh the list, then "
   + "rotate again if needed.";
 
+const SESSION_VERIFICATION_ERROR =
+  "Could not verify your session. Try again.";
+
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 function errorMessage(reason: unknown, fallback: string): string {
@@ -211,7 +214,13 @@ export default function ApiKeyAdmin() {
   ) => {
     if (reason instanceof AdminApiClientError && reason.status === 401) {
       if (!operation.token || !operation.isCurrent() || !supabase) return;
-      const sessionResult = await supabase.auth.getSession();
+      let sessionResult;
+      try {
+        sessionResult = await supabase.auth.getSession();
+      } catch {
+        if (operation.isCurrent()) setError(SESSION_VERIFICATION_ERROR);
+        return;
+      }
       if (
         !operation.isCurrent()
         || sessionResult.error
@@ -273,12 +282,22 @@ export default function ApiKeyAdmin() {
 
     try {
       const client = supabase;
-      const sessionPromise = client.auth.getSession();
+      let sessionPromise;
+      try {
+        sessionPromise = client.auth.getSession();
+      } catch {
+        throw new AdminRequestError(false, SESSION_VERIFICATION_ERROR);
+      }
       const membersPromise = client
         .from("members")
         .select("id,name")
         .order("position");
-      const sessionResult = await sessionPromise;
+      let sessionResult;
+      try {
+        sessionResult = await sessionPromise;
+      } catch {
+        throw new AdminRequestError(false, SESSION_VERIFICATION_ERROR);
+      }
       const token = sessionResult.data.session?.access_token;
       if (sessionResult.error || !token) {
         throw new Error("Your session has expired. Sign in again.");

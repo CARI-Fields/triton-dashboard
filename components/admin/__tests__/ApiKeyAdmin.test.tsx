@@ -43,9 +43,16 @@ const VIEW: ManagedKeyView = {
   created_at: "2026-07-29T12:00:00.000Z",
 };
 const CREATE_SECRET =
+  "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const INTERNAL_PREFIX_MISMATCH_SECRET =
   "tb_live_CCCCCCCC_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const ROTATE_PREFIX = "tb_live_BAECAwQF";
 const ROTATE_SECRET =
-  "tb_live_RRRRRRRR_BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+  "tb_live_BAECAwQF_BAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const ROTATED_VIEW: ManagedKeyView = {
+  ...VIEW,
+  key_prefix: ROTATE_PREFIX,
+};
 const { created_at: _missingCreatedAt, ...VIEW_WITHOUT_CREATED_AT } = VIEW;
 
 function envelope(data: unknown, status = 200): Response {
@@ -110,6 +117,7 @@ function installFetch(initial = [VIEW]) {
       .toBe("Bearer current-access-token");
     if (method === "GET") return envelope(rows);
     if (method === "POST" && url.endsWith("/rotate")) {
+      rows = [{ ...rows[0], key_prefix: ROTATE_PREFIX }];
       return envelope({ ...rows[0], secret: ROTATE_SECRET });
     }
     if (method === "POST" && url.endsWith("/revoke")) {
@@ -304,6 +312,25 @@ describe("ApiKeyAdmin", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Your session has expired");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("contains an initial session lookup rejection and allows retry", async () => {
+    mocks.getSession.mockRejectedValueOnce(
+      new Error("payload-secret-marker native session rejection"),
+    );
+    const fetchMock = installFetch();
+    render(<ApiKeyAdmin />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not verify your session.");
+    expect(alert.textContent).not.toContain("payload-secret-marker");
+    expect(alert.textContent).not.toContain("native session rejection");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry list" }));
+    expect(await screen.findByRole("article", {
+      name: "Bruce experiments",
+    })).toBeDefined();
   });
 
   it("prevents duplicate create submissions and ignores completion after unmount", async () => {
@@ -556,7 +583,7 @@ describe("ApiKeyAdmin", () => {
     expect(confirm).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await act(async () => rotate.resolve(envelope({
-      ...VIEW,
+      ...ROTATED_VIEW,
       secret: ROTATE_SECRET,
     })));
   });
@@ -691,6 +718,30 @@ describe("ApiKeyAdmin", () => {
     expect(screen.queryByText("payload-secret-marker")).toBeNull();
   });
 
+  it("treats a view-prefix-mismatched rotation as uncertain and hides it", async () => {
+    const fetchMock = installFetch();
+    fetchMock
+      .mockImplementationOnce(async () => envelope([VIEW]))
+      .mockImplementationOnce(async () => envelope({
+        ...VIEW,
+        secret: ROTATE_SECRET,
+      }));
+    render(<ApiKeyAdmin />);
+    await screen.findByRole("article", { name: "Bruce experiments" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/new secret cannot be recovered/i);
+    expect(alert.textContent).not.toContain(ROTATE_SECRET);
+    expect(screen.queryByText(ROTATE_SECRET)).toBeNull();
+    expect((screen.getByRole("button", {
+      name: "Rotate Bruce experiments",
+    }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("keeps a structured rotation 409 as a known failure", async () => {
     const fetchMock = installFetch();
     fetchMock
@@ -701,7 +752,7 @@ describe("ApiKeyAdmin", () => {
         "The key changed before rotation.",
       ))
       .mockImplementationOnce(async () => envelope({
-        ...VIEW,
+        ...ROTATED_VIEW,
         secret: ROTATE_SECRET,
       }));
     render(<ApiKeyAdmin />);
@@ -889,6 +940,77 @@ describe("ApiKeyAdmin", () => {
     expect(create.disabled).toBe(true);
     fireEvent.click(create);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("contains a current 401 session recheck rejection and recovers", async () => {
+    const fetchMock = installFetch([]);
+    fetchMock
+      .mockImplementationOnce(async () => envelope([]))
+      .mockImplementationOnce(async () => errorEnvelope(
+        401,
+        "INVALID_ADMIN_SESSION",
+        "Invalid Admin session.",
+      ));
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fillCreateDraft();
+    mocks.getSession
+      .mockResolvedValueOnce({
+        data: { session: { access_token: "current-access-token" } },
+        error: null,
+      })
+      .mockRejectedValueOnce(
+        new Error("payload-secret-marker native recheck rejection"),
+      );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not verify your session.");
+    expect(alert.textContent).not.toContain("payload-secret-marker");
+    expect(alert.textContent).not.toContain("native recheck rejection");
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", {
+      name: "Create API key",
+    }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+    expect(await screen.findByText(CREATE_SECRET)).toBeDefined();
+    expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+
+  it("contains a 401 session recheck rejection after unmount", async () => {
+    const recheck = deferred<{
+      data: { session: { access_token: string } };
+      error: null;
+    }>();
+    const fetchMock = installFetch([]);
+    fetchMock
+      .mockImplementationOnce(async () => envelope([]))
+      .mockImplementationOnce(async () => errorEnvelope(
+        401,
+        "INVALID_ADMIN_SESSION",
+        "Invalid Admin session.",
+      ));
+    const { unmount } = render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fillCreateDraft();
+    mocks.getSession
+      .mockResolvedValueOnce({
+        data: { session: { access_token: "current-access-token" } },
+        error: null,
+      })
+      .mockReturnValueOnce(recheck.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledTimes(3));
+
+    unmount();
+    await act(async () => recheck.reject(
+      new Error("payload-secret-marker native stale recheck rejection"),
+    ));
+
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("does not sign out when a mutation 401 arrives after unmount and a new session", async () => {
@@ -1146,6 +1268,26 @@ describe("ApiKeyAdmin", () => {
     expect(alert.textContent).not.toContain("payload-secret-marker");
     expect(screen.queryByRole("article")).toBeNull();
     expect(screen.queryByText("payload-secret-marker")).toBeNull();
+  });
+
+  it("rejects an internally mismatched generated secret after create", async () => {
+    const fetchMock = installFetch([]);
+    fetchMock
+      .mockImplementationOnce(async () => envelope([]))
+      .mockImplementationOnce(async () => envelope({
+        ...VIEW,
+        secret: INTERNAL_PREFIX_MISMATCH_SECRET,
+      }, 201));
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fillCreateDraft();
+    fireEvent.click(screen.getByRole("button", { name: "Create API key" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not create the API key.");
+    expect(alert.textContent).not.toContain(INTERNAL_PREFIX_MISMATCH_SECRET);
+    expect(screen.queryByText(INTERNAL_PREFIX_MISMATCH_SECRET)).toBeNull();
+    expect(screen.queryByRole("article")).toBeNull();
   });
 
   it("rejects an extra digest in a successful patch envelope", async () => {

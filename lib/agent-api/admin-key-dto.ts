@@ -8,7 +8,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY_PREFIX_PATTERN = /^tb_live_[A-Za-z0-9_-]{8}$/;
 const RAW_SECRET_PATTERN =
-  /^tb_live_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]{43}$/;
+  /^tb_live_([A-Za-z0-9_-]{8})_([A-Za-z0-9_-]{43})$/;
 const RFC3339_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const VALID_SCOPES = new Set<string>(API_SCOPES);
@@ -105,6 +105,14 @@ function hasValidViewFields(value: Record<string, unknown>): boolean {
     && isDateTime(value.created_at);
 }
 
+function hasValidGeneratedSecret(value: Record<string, unknown>): boolean {
+  if (typeof value.secret !== "string") return false;
+  const match = value.secret.match(RAW_SECRET_PATTERN);
+  return match !== null
+    && match[1] === match[2].slice(0, 8)
+    && value.key_prefix === `tb_live_${match[1]}`;
+}
+
 export function isManagedKeyView(value: unknown): value is ManagedKeyView {
   return isPlainObject(value)
     && hasExactKeys(value, VIEW_KEYS)
@@ -117,8 +125,7 @@ export function isManagedKeyWithSecret(
   return isPlainObject(value)
     && hasExactKeys(value, VIEW_WITH_SECRET_KEYS)
     && hasValidViewFields(value)
-    && typeof value.secret === "string"
-    && RAW_SECRET_PATTERN.test(value.secret);
+    && hasValidGeneratedSecret(value);
 }
 
 export function isManagedKeyViewArray(

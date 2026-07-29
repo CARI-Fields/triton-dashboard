@@ -294,3 +294,61 @@
   deprecation notice.
 - Next build still emits the existing multiple-lockfile workspace-root
   warning.
+
+## Fix Round 4
+
+### Review fixes
+
+- Tightened `ManagedKeyWithSecret` validation to parse the generated credential
+  with capture groups. The public prefix captured before the separator must
+  equal the first eight characters of the 43-character encoded secret, and the
+  response DTO's `key_prefix` must equal that same `tb_live_...` prefix.
+  Create and rotate fixtures now mirror the generator's real three-way
+  relationship; intentional mismatch fixtures are rejected and never rendered.
+- Contained rejection of the initial Admin-page session lookup in a
+  non-dispatched `AdminRequestError` with a fixed session-verification message.
+  Native rejection text cannot reach the DOM, and a later list retry remains
+  available.
+- Contained rejection of the fresh-token session recheck after an Admin 401.
+  A current operation receives the fixed safe verification message without
+  signing out or latching the session invalid; stale or unmounted operations
+  perform no state update. Both paths consume the rejected promise, and a later
+  valid mutation can recover normally.
+- Audited all three production `auth.getSession()` paths in
+  `ApiKeyAdmin.tsx`. Initial load, 401 recheck, and mutation preflight now each
+  contain both synchronous throws and rejected promises.
+
+### TDD evidence
+
+1. Secret consistency RED: the direct DTO assertion accepted an internally
+   mismatched prefix, while create and rotate rendered well-shaped but
+   inconsistent secrets instead of using safe failure paths.
+2. Session rejection RED: the initial lookup exposed the native rejection
+   message, the current 401 recheck never produced the safe alert, and Vitest
+   reported two unhandled rejections for current and post-unmount rechecks.
+   The combined RED run had 5 failed assertions and 2 unhandled errors.
+3. Capture validation and rejection containment made the targeted DTO/UI run
+   pass 57/57 with no unhandled errors. The current 401 test then successfully
+   retried create, proving the error does not latch an invalid session.
+
+### Fresh verification
+
+- Focused Task 6/Fix Round 4 tests: 6 files, 81/81 passed, preserving all prior
+  76 focused tests plus five new regressions.
+- Full Vitest suite: 34 files, 489/489 passed.
+- `npx tsc --noEmit`: exit 0.
+- Next.js 16.2.10 production build: exit 0; the Admin page and four Admin API
+  routes were generated.
+- Supabase rollback-only schema regression: 20/20 passed.
+- `git diff --check`: exit 0.
+- Production `getSession()` audit found no uncontained await/rejection path.
+- Production secret, browser persistence, Authorization logging, and debug
+  scans: clean.
+- `progress.md` remains unchanged.
+
+### Concerns
+
+- Vitest still emits the repository's existing `vite-tsconfig-paths`
+  deprecation notice.
+- Next build still emits the existing multiple-lockfile workspace-root
+  warning.

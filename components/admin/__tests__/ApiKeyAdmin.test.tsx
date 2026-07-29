@@ -138,6 +138,7 @@ function installFetch(initial = [VIEW]) {
         name: body.name,
         member: MEMBERS.find((member) => member.id === body.member_id)!,
         scopes: body.scopes,
+        expires_at: body.expires_at,
       }];
       return envelope({ ...rows[0], secret: CREATE_SECRET }, 201);
     }
@@ -221,10 +222,16 @@ describe("ApiKeyAdmin", () => {
   });
 
   it("creates a Bruce key, copies its one-time secret, then forgets it", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse("2026-07-29T12:00:00.000Z"),
+    );
     const fetchMock = installFetch([]);
     const storageWrite = vi.spyOn(Storage.prototype, "setItem");
     render(<ApiKeyAdmin />);
     await screen.findByText("No API keys yet.");
+    expect(
+      (screen.getByLabelText("Expires after") as HTMLSelectElement).value,
+    ).toBe("30d");
 
     fireEvent.change(screen.getByLabelText("Key name"), {
       target: { value: "Bruce experiments" },
@@ -248,7 +255,7 @@ describe("ApiKeyAdmin", () => {
       name: "Bruce experiments",
       member_id: BRUCE_ID,
       scopes: ["board:read", "experiments:write"],
-      expires_at: null,
+      expires_at: "2026-08-28T12:00:00.000Z",
     });
     fireEvent.click(screen.getByRole("button", { name: "Copy secret" }));
     await waitFor(() => {
@@ -263,6 +270,126 @@ describe("ApiKeyAdmin", () => {
       name: "Edit Bruce experiments",
     }));
     expect(screen.queryByText(CREATE_SECRET)).toBeNull();
+  });
+
+  it.each([
+    ["never", null],
+    ["1d", "2026-07-30T12:00:00.000Z"],
+    ["7d", "2026-08-05T12:00:00.000Z"],
+    ["90d", "2026-10-27T12:00:00.000Z"],
+  ] as const)(
+    "serializes the %s create expiry choice",
+    async (choice, expectedExpiry) => {
+      vi.spyOn(Date, "now").mockReturnValue(
+        Date.parse("2026-07-29T12:00:00.000Z"),
+      );
+      const fetchMock = installFetch([]);
+      render(<ApiKeyAdmin />);
+      await screen.findByText("No API keys yet.");
+
+      fillCreateDraft(`Bruce ${choice}`);
+      fireEvent.change(screen.getByLabelText("Expires after"), {
+        target: { value: choice },
+      });
+      fireEvent.click(screen.getByRole("button", {
+        name: "Create API key",
+      }));
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      const createCall = fetchMock.mock.calls.find(([, init]) => (
+        init?.method === "POST"
+      ));
+      expect(JSON.parse(String(createCall?.[1]?.body)).expires_at)
+        .toBe(expectedExpiry);
+    },
+  );
+
+  it("rejects an unsupported expiry choice before creating a key", async () => {
+    const fetchMock = installFetch([]);
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fillCreateDraft();
+
+    const select = screen.getByLabelText(
+      "Expires after",
+    ) as HTMLSelectElement;
+    const unsupported = document.createElement("option");
+    unsupported.value = "unsupported";
+    unsupported.textContent = "Unsupported";
+    select.append(unsupported);
+    fireEvent.change(select, {
+      target: { value: "unsupported" },
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Create API key",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Expiry option is invalid.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects the edit-only keep expiry before creating a key", async () => {
+    const fetchMock = installFetch([]);
+    render(<ApiKeyAdmin />);
+    await screen.findByText("No API keys yet.");
+    fillCreateDraft();
+
+    const select = screen.getByLabelText(
+      "Expires after",
+    ) as HTMLSelectElement;
+    const keep = document.createElement("option");
+    keep.value = "keep";
+    keep.textContent = "Keep current expiration";
+    select.append(keep);
+    fireEvent.change(select, {
+      target: { value: "keep" },
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Create API key",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Expiry option is invalid.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the current expiry when an edit does not choose a new duration", async () => {
+    const originalExpiry = "2026-08-15T16:30:00.000Z";
+    const fetchMock = installFetch([{
+      ...VIEW,
+      expires_at: originalExpiry,
+    }]);
+    render(<ApiKeyAdmin />);
+    await screen.findByRole("article", { name: "Bruce experiments" });
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Edit Bruce experiments",
+    }));
+    expect(
+      (
+        screen.getByLabelText(
+          "Expires after for Bruce experiments",
+        ) as HTMLSelectElement
+      ).value,
+    ).toBe("keep");
+    fireEvent.change(screen.getByLabelText(
+      "Key name for Bruce experiments",
+    ), {
+      target: { value: "Renamed without expiry reset" },
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Save key changes",
+    }));
+
+    expect(await screen.findByRole("article", {
+      name: "Renamed without expiry reset",
+    })).toBeDefined();
+    const patchCall = fetchMock.mock.calls.find(([, init]) => (
+      init?.method === "PATCH"
+    ));
+    expect(JSON.parse(String(patchCall?.[1]?.body)).expires_at)
+      .toBe(originalExpiry);
   });
 
   it("patches, rotates, and revokes a key with guarded controls", async () => {
@@ -510,9 +637,9 @@ describe("ApiKeyAdmin", () => {
       name: "Edit Bruce experiments",
     }));
     fireEvent.change(screen.getByLabelText(
-      "Expires at for Bruce experiments",
+      "Expires after for Bruce experiments",
     ), {
-      target: { value: "2026-07-29T08:02" },
+      target: { value: "1d" },
     });
 
     await act(async () => {
@@ -534,7 +661,7 @@ describe("ApiKeyAdmin", () => {
     })).toBeDefined();
 
     act(() => {
-      vi.advanceTimersByTime(119_000);
+      vi.advanceTimersByTime(86_400_000 - 1_000);
     });
     expect(within(card).getByText("Expired")).toBeDefined();
     expect(within(card).queryByRole("button", {

@@ -32,20 +32,40 @@ interface ApiEnvelope<T> {
   error?: { code?: string; message?: string };
 }
 
+const DAY_MS = 86_400_000;
+
+const EXPIRY_PRESETS = [
+  { value: "never", label: "Never", days: null },
+  { value: "1d", label: "1 day", days: 1 },
+  { value: "7d", label: "7 days", days: 7 },
+  { value: "30d", label: "30 days", days: 30 },
+  { value: "90d", label: "90 days", days: 90 },
+] as const;
+
+type ExpiryPreset = (typeof EXPIRY_PRESETS)[number]["value"];
+type ExpiryChoice = "keep" | ExpiryPreset;
+
 interface KeyDraft {
   name: string;
   member_id: string;
   scopes: ApiScope[];
-  expires_at: string;
+  expiry: ExpiryChoice;
 }
 
 export type ManagedKeyStatus = "active" | "expired" | "revoked";
 
-const EMPTY_DRAFT: KeyDraft = {
+const EMPTY_CREATE_DRAFT: KeyDraft = {
   name: "",
   member_id: "",
   scopes: [],
-  expires_at: "",
+  expiry: "30d",
+};
+
+const EMPTY_EDIT_DRAFT: KeyDraft = {
+  name: "",
+  member_id: "",
+  scopes: [],
+  expiry: "keep",
 };
 
 const ROTATION_UNCERTAIN_MESSAGE =
@@ -124,21 +144,22 @@ async function readEnvelope<T>(
   return body.data;
 }
 
-function expiryForApi(value: string): string | null {
-  if (!value) return null;
-  const timestamp = new Date(value);
-  if (!Number.isFinite(timestamp.valueOf())) {
-    throw new Error("Expiry must be a valid date and time.");
+function expiryForApi(
+  value: ExpiryChoice,
+  currentExpiresAt: string | null,
+  mode: "create" | "edit",
+): string | null {
+  if (value === "keep") {
+    if (mode === "create") throw new Error("Expiry option is invalid.");
+    return currentExpiresAt;
   }
-  return timestamp.toISOString();
-}
-
-function expiryForInput(value: string | null): string {
-  if (value === null) return "";
-  const timestamp = new Date(value);
-  if (!Number.isFinite(timestamp.valueOf())) return "";
-  const local = new Date(timestamp.valueOf() - timestamp.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
+  const preset = EXPIRY_PRESETS.find(
+    (candidate) => candidate.value === value,
+  );
+  if (!preset) throw new Error("Expiry option is invalid.");
+  if (preset.days === null) return null;
+  const now = Date.now();
+  return new Date(now + preset.days * DAY_MS).toISOString();
 }
 
 function formatDate(value: string): string {
@@ -189,10 +210,12 @@ export default function ApiKeyAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [rotationUncertain, setRotationUncertain] = useState(false);
-  const [createDraft, setCreateDraft] = useState<KeyDraft>(EMPTY_DRAFT);
+  const [createDraft, setCreateDraft] = useState<KeyDraft>(
+    EMPTY_CREATE_DRAFT,
+  );
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<KeyDraft>(EMPTY_DRAFT);
+  const [editDraft, setEditDraft] = useState<KeyDraft>(EMPTY_EDIT_DRAFT);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [oneTimeSecret, setOneTimeSecret] = useState<{
     value: string;
@@ -500,7 +523,7 @@ export default function ApiKeyAdmin() {
         name: createDraft.name.trim(),
         member_id: createDraft.member_id,
         scopes: [...createDraft.scopes],
-        expires_at: expiryForApi(createDraft.expires_at),
+        expires_at: expiryForApi(createDraft.expiry, null, "create"),
       };
       const created = await adminRequest<ManagedKeyWithSecret>(
         "/api/admin/v1/api-keys",
@@ -515,7 +538,7 @@ export default function ApiKeyAdmin() {
         view,
         ...current.filter((key) => key.id !== view.id),
       ]);
-      setCreateDraft(EMPTY_DRAFT);
+      setCreateDraft(EMPTY_CREATE_DRAFT);
       setOneTimeSecret({ value: created.secret, source: "created" });
     } catch (reason) {
       await handleRequestFailure(
@@ -535,7 +558,7 @@ export default function ApiKeyAdmin() {
       name: key.name,
       member_id: key.member?.id ?? "",
       scopes: [...key.scopes],
-      expires_at: expiryForInput(key.expires_at),
+      expiry: "keep",
     });
   }
 
@@ -561,7 +584,7 @@ export default function ApiKeyAdmin() {
         name: editDraft.name.trim(),
         member_id: editDraft.member_id,
         scopes: [...editDraft.scopes],
-        expires_at: expiryForApi(editDraft.expires_at),
+        expires_at: expiryForApi(editDraft.expiry, key.expires_at, "edit"),
       };
       const updated = await adminRequest<ManagedKeyView>(
         `/api/admin/v1/api-keys/${key.id}`,
@@ -784,15 +807,20 @@ export default function ApiKeyAdmin() {
               </select>
             </label>
             <label>
-              <span>Expires at (optional)</span>
-              <input
-                type="datetime-local"
-                value={createDraft.expires_at}
+              <span>Expires after</span>
+              <select
+                value={createDraft.expiry}
                 onChange={(event) => setCreateDraft({
                   ...createDraft,
-                  expires_at: event.target.value,
+                  expiry: event.target.value as ExpiryChoice,
                 })}
-              />
+              >
+                {EXPIRY_PRESETS.map((preset) => (
+                  <option key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
           <fieldset>
@@ -925,16 +953,22 @@ export default function ApiKeyAdmin() {
                         </select>
                       </label>
                       <label>
-                        <span>Expires at (optional)</span>
-                        <input
-                          type="datetime-local"
-                          aria-label={`Expires at for ${key.name}`}
-                          value={editDraft.expires_at}
+                        <span>Expires after</span>
+                        <select
+                          aria-label={`Expires after for ${key.name}`}
+                          value={editDraft.expiry}
                           onChange={(event) => setEditDraft({
                             ...editDraft,
-                            expires_at: event.target.value,
+                            expiry: event.target.value as ExpiryChoice,
                           })}
-                        />
+                        >
+                          <option value="keep">Keep current expiration</option>
+                          {EXPIRY_PRESETS.map((preset) => (
+                            <option key={preset.value} value={preset.value}>
+                              {preset.label}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                     </div>
                     <fieldset>

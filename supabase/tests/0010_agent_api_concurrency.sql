@@ -1,4 +1,5 @@
 begin;
+set local client_min_messages = warning;
 create extension if not exists dblink;
 select plan(10);
 
@@ -140,16 +141,56 @@ select ok(
 select ok(
   (
     select count(*) = 1
-    from public.experiments
-    where name = 'Concurrent experiment'
+      and bool_and(
+        experiment.id::text = (
+          select result #>> '{data,id}'
+          from concurrency_results
+          where writer = 'writer_a'
+        )
+        and experiment.task_id =
+          '30000000-0000-4000-8000-000000000020'
+        and experiment.owner_id =
+          '20000000-0000-4000-8000-000000000020'
+        and experiment.name = 'Concurrent experiment'
+        and experiment.status = 'planned'
+      )
+    from public.experiments experiment
+    where experiment.name = 'Concurrent experiment'
   )
     and (
       select count(*) = 1
-      from public.agent_api_audit_log
-      where idempotency_key =
+        and bool_and(
+          audit.request_id = 'concurrent_idempotency_a'
+          and audit.resource_type = 'experiment'
+          and audit.resource_id::text = (
+            select result #>> '{data,id}'
+            from concurrency_results
+            where writer = 'writer_a'
+          )
+          and audit.task_id =
+            '30000000-0000-4000-8000-000000000020'
+          and audit.action = 'create'
+          and audit.response_status = 201
+          and audit.idempotency_key =
+            '60000000-0000-4000-8000-000000000020'
+          and audit.request_hash = repeat('4', 64)
+          and audit.before_state is null
+          and audit.after_state = (
+            select to_jsonb(experiment.*)
+            from public.experiments experiment
+            where experiment.id = audit.resource_id
+          )
+        )
+      from public.agent_api_audit_log audit
+      where audit.idempotency_key =
         '60000000-0000-4000-8000-000000000020'
+    )
+    and not exists (
+      select 1
+      from public.agent_api_audit_log
+      where request_id = 'concurrent_idempotency_b'
     ),
-  'concurrent identical creates write one resource and one audit'
+  'the admitted create has exact Experiment derivation and audit linkage'
 );
 
 select dblink_exec(
@@ -238,26 +279,47 @@ select matches(
 );
 select dblink_exec('writer_b', 'rollback');
 select is(
-  (
-    select count(*)::integer
-    from public.agent_api_audit_log
-    where api_key_id = '40000000-0000-4000-8000-000000000020'
-  ),
+  (select count(*)::integer
+   from public.agent_api_audit_log
+   where api_key_id = '40000000-0000-4000-8000-000000000020'),
   30,
-  'parallel quota decisions admit exactly the thirtieth write'
+  'parallel quota decisions produce exactly 30 successful audits'
 );
 select ok(
   (
     select count(*) = 1
-    from public.activity
-    where text in ('Concurrent quota A', 'Concurrent quota B')
+      and bool_and(
+        admitted.task_id = '30000000-0000-4000-8000-000000000020'
+        and admitted.text = 'Concurrent quota A'
+        and admitted.kind = 'comment'
+        and audit.request_id = 'concurrent_quota_a'
+        and audit.resource_type = 'activity'
+        and audit.resource_id = admitted.id
+        and audit.task_id = admitted.task_id
+        and audit.action = 'create'
+        and audit.response_status = 201
+        and audit.idempotency_key =
+          '60000000-0000-4000-8000-000000000021'
+        and audit.request_hash = repeat('5', 64)
+        and audit.before_state is null
+        and audit.after_state = to_jsonb(admitted.*)
+      )
+    from public.activity admitted
+    join public.agent_api_audit_log audit
+      on audit.resource_id = admitted.id
+    where admitted.text = 'Concurrent quota A'
   )
+    and not exists (
+      select 1
+      from public.activity
+      where text = 'Concurrent quota B'
+    )
     and not exists (
       select 1
       from public.agent_api_audit_log
       where request_id = 'concurrent_quota_b'
     ),
-  'the rejected parallel write creates no business or audit row'
+  'Writer A is exactly audited and Writer B leaves no business or audit row'
 );
 
 select dblink_exec(

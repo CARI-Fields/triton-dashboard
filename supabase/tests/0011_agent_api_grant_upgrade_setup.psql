@@ -1,0 +1,9 @@
+grant insert, update, delete on
+  public.tasks,
+  public.experiments,
+  public.activity,
+  public.attachments
+to service_role;
+
+grant select on sequence public.experiments_experiment_no_seq
+  to service_role;

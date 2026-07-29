@@ -1,0 +1,11 @@
+delete from public.agent_api_audit_log
+where api_key_id = '40000000-0000-4000-8000-000000000020';
+
+delete from public.api_keys
+where id = '40000000-0000-4000-8000-000000000020';
+
+delete from public.modules
+where id = '10000000-0000-4000-8000-000000000020';
+
+delete from public.members
+where id = '20000000-0000-4000-8000-000000000020';

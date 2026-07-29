@@ -1,5 +1,5 @@
 begin;
-select plan(35);
+select plan(41);
 
 insert into public.modules (id, name)
 values ('10000000-0000-4000-8000-000000000009', 'Agent API Security');
@@ -75,11 +75,48 @@ insert into public.api_keys (
   ),
   (
     '40000000-0000-4000-8000-000000000012',
-    'Missing scope key',
-    'tb_live_scope',
+    'Missing Task scope key',
+    'tb_live_scope_task',
     repeat('c', 64),
     '20000000-0000-4000-8000-000000000009',
-    array['board:read'],
+    array[
+      'experiments:write',
+      'activity:append',
+      'attachments:write'
+    ],
+    null,
+    null,
+    '50000000-0000-4000-8000-000000000009'
+  ),
+  (
+    '40000000-0000-4000-8000-000000000013',
+    'Missing Experiment scope key',
+    'tb_live_scope_experiment',
+    repeat('d', 64),
+    '20000000-0000-4000-8000-000000000009',
+    array['tasks:write', 'activity:append', 'attachments:write'],
+    null,
+    null,
+    '50000000-0000-4000-8000-000000000009'
+  ),
+  (
+    '40000000-0000-4000-8000-000000000014',
+    'Missing Activity scope key',
+    'tb_live_scope_activity',
+    repeat('e', 64),
+    '20000000-0000-4000-8000-000000000009',
+    array['tasks:write', 'experiments:write', 'attachments:write'],
+    null,
+    null,
+    '50000000-0000-4000-8000-000000000009'
+  ),
+  (
+    '40000000-0000-4000-8000-000000000015',
+    'Missing Attachment scope key',
+    'tb_live_scope_attachment',
+    repeat('f', 64),
+    '20000000-0000-4000-8000-000000000009',
+    array['tasks:write', 'experiments:write', 'activity:append'],
     null,
     null,
     '50000000-0000-4000-8000-000000000009'
@@ -525,6 +562,114 @@ select ok(
       and attachment_patch.request_id = 'success_attachment_patch'
   ),
   'Activity and Attachment audits store exact snapshot content'
+);
+
+select throws_ok(
+  attempted.sql,
+  'P0001',
+  'TASK_SCOPE_FORBIDDEN',
+  attempted.label
+)
+from (
+  values
+    (
+      $$select public.agent_api_create_experiment(
+        '40000000-0000-4000-8000-000000000013',
+        '20000000-0000-4000-8000-000000000009',
+        '30000000-0000-4000-8000-000000000009',
+        'Scope denied experiment',
+        '60000000-0000-4000-8000-000000000015',
+        repeat('7', 64),
+        'scope_experiment_create'
+      )$$,
+      'Experiment create requires experiments:write'
+    ),
+    (
+      $$select public.agent_api_patch_experiment(
+        '40000000-0000-4000-8000-000000000013',
+        '20000000-0000-4000-8000-000000000009',
+        (select id from public.experiments
+          where name = 'Security experiment'),
+        (select updated_at from public.experiments
+          where name = 'Security experiment'),
+        '{"notes":"scope denied"}',
+        'scope_experiment_patch'
+      )$$,
+      'Experiment PATCH requires experiments:write'
+    ),
+    (
+      $$select public.agent_api_create_activity(
+        '40000000-0000-4000-8000-000000000014',
+        '20000000-0000-4000-8000-000000000009',
+        '30000000-0000-4000-8000-000000000009',
+        'Scope denied activity',
+        '60000000-0000-4000-8000-000000000016',
+        repeat('8', 64),
+        'scope_activity_create'
+      )$$,
+      'Activity create requires activity:append'
+    ),
+    (
+      $$select public.agent_api_create_attachment(
+        '40000000-0000-4000-8000-000000000015',
+        '20000000-0000-4000-8000-000000000009',
+        (select id from public.experiments
+          where name = 'Security experiment'),
+        'scope/denied/attachment',
+        'https://example.test/scope-denied',
+        '',
+        '60000000-0000-4000-8000-000000000017',
+        repeat('0', 64),
+        'scope_attachment_create'
+      )$$,
+      'Attachment create requires attachments:write'
+    ),
+    (
+      $$select public.agent_api_patch_attachment(
+        '40000000-0000-4000-8000-000000000015',
+        '20000000-0000-4000-8000-000000000009',
+        (select id from public.attachments where path = 'security/path'),
+        (select updated_at from public.attachments
+          where path = 'security/path'),
+        'Scope denied caption',
+        'scope_attachment_patch'
+      )$$,
+      'Attachment PATCH requires attachments:write'
+    )
+) as attempted(sql, label);
+
+select ok(
+  not exists (
+    select 1
+    from public.agent_api_audit_log
+    where request_id like 'scope_%'
+  )
+    and not exists (
+      select 1
+      from public.experiments
+      where name = 'Scope denied experiment'
+    )
+    and not exists (
+      select 1
+      from public.activity
+      where text = 'Scope denied activity'
+    )
+    and not exists (
+      select 1
+      from public.attachments
+      where path = 'scope/denied/attachment'
+    )
+    and (
+      select notes = 'Experiment notes'
+      from public.experiments
+      where name = 'Security experiment'
+    )
+    and (
+      select caption = 'After caption'
+      from public.attachments
+      where path = 'security/path'
+    ),
+  'missing fixed scopes create no business or audit side effects'
 );
 
 select throws_ok(

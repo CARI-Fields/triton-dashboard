@@ -488,15 +488,16 @@ export async function deleteManagedKey(
   id: string,
 ): Promise<DeletedManagedKey> {
   validateId(id);
-  const existing = await store.get(id);
+  const canonicalId = id.toLowerCase();
+  const existing = await store.get(canonicalId);
   if (!existing) throw notFound();
   assertDeleteEligible(checkedRow(existing));
 
-  const result = await store.deleteUnusedRevoked(id);
+  const result = await store.deleteUnusedRevoked(canonicalId);
   if (result.kind === "deleted") return { id: result.id };
   if (result.kind === "audit_conflict") throw hasAuditHistory();
 
-  const current = await store.get(id);
+  const current = await store.get(canonicalId);
   if (!current) throw notFound();
   assertDeleteEligible(checkedRow(current));
   throw new Error("API key deletion failed.");

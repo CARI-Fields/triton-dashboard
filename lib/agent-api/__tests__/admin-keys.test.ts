@@ -16,7 +16,7 @@ import {
 const BRUCE_ID = "20000000-0000-4000-8000-000000000001";
 const ALICE_ID = "20000000-0000-4000-8000-000000000002";
 const ADMIN_ID = "50000000-0000-4000-8000-000000000001";
-const KEY_ID = "40000000-0000-4000-8000-000000000001";
+const KEY_ID = "40000000-0000-4000-8000-00000000000a";
 const CREATED_AT = "2026-07-29T12:00:00.000Z";
 
 type PersistedManagedKeyRow = ManagedKeyRow & { key_digest: string };
@@ -330,6 +330,20 @@ describe("Admin API key lifecycle", () => {
     expect(Object.keys(deleted)).toEqual(["id"]);
     expect(store.rows.has(KEY_ID)).toBe(false);
     expect(JSON.stringify(deleted)).not.toContain("key_digest");
+  });
+
+  it("canonicalizes an uppercase UUID before deleting the key", async () => {
+    const store = new MemoryManagedKeyStore();
+    await createManagedKey(store, { userId: ADMIN_ID }, input());
+    await revokeManagedKey(store, KEY_ID, "2026-07-29T13:00:00.000Z");
+
+    const deleted = await deleteManagedKey(
+      store,
+      "40000000-0000-4000-8000-00000000000A",
+    );
+
+    expect(deleted).toEqual({ id: KEY_ID });
+    expect(store.rows.has(KEY_ID)).toBe(false);
   });
 
   it("rejects deleting active, expired-only, and previously used keys", async () => {

@@ -142,4 +142,62 @@ describe("Supabase managed key store", () => {
       new Error("Admin API key query failed."),
     );
   });
+
+  it("conditionally deletes only a revoked never-used key and returns its id", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: { id: KEY_ID },
+      error: null,
+    });
+    const select = vi.fn().mockReturnValue({ maybeSingle });
+    const is = vi.fn().mockReturnValue({ select });
+    const not = vi.fn().mockReturnValue({ is });
+    const eq = vi.fn().mockReturnValue({ not });
+    const remove = vi.fn().mockReturnValue({ eq });
+    const from = vi.fn().mockReturnValue({ delete: remove });
+    const store = createSupabaseManagedKeyStore({
+      from,
+    } as unknown as SupabaseClient);
+
+    await expect(store.deleteUnusedRevoked(KEY_ID)).resolves.toEqual({
+      kind: "deleted",
+      id: KEY_ID,
+    });
+    expect(from).toHaveBeenCalledWith("api_keys");
+    expect(remove).toHaveBeenCalledWith();
+    expect(eq).toHaveBeenCalledWith("id", KEY_ID);
+    expect(not).toHaveBeenCalledWith("revoked_at", "is", null);
+    expect(is).toHaveBeenCalledWith("last_used_at", null);
+    expect(select).toHaveBeenCalledWith("id");
+  });
+
+  it("distinguishes no match, audit conflict, and safe internal failure", async () => {
+    function storeFor(result: {
+      data: { id: string } | null;
+      error: { code: string; message: string } | null;
+    }) {
+      const maybeSingle = vi.fn().mockResolvedValue(result);
+      const select = vi.fn().mockReturnValue({ maybeSingle });
+      const is = vi.fn().mockReturnValue({ select });
+      const not = vi.fn().mockReturnValue({ is });
+      const eq = vi.fn().mockReturnValue({ not });
+      const remove = vi.fn().mockReturnValue({ eq });
+      return createSupabaseManagedKeyStore({
+        from: vi.fn().mockReturnValue({ delete: remove }),
+      } as unknown as SupabaseClient);
+    }
+
+    await expect(storeFor({ data: null, error: null })
+      .deleteUnusedRevoked(KEY_ID))
+      .resolves.toEqual({ kind: "not_deleted" });
+    await expect(storeFor({
+      data: null,
+      error: { code: "23503", message: "private FK detail" },
+    }).deleteUnusedRevoked(KEY_ID))
+      .resolves.toEqual({ kind: "audit_conflict" });
+    await expect(storeFor({
+      data: null,
+      error: { code: "XX000", message: "private database detail" },
+    }).deleteUnusedRevoked(KEY_ID))
+      .rejects.toEqual(new Error("Admin API key query failed."));
+  });
 });

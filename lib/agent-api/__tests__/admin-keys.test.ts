@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { digestApiKey } from "@/lib/agent-api/auth";
 import {
   createManagedKey,
+  deleteManagedKey,
   listManagedKeys,
   patchManagedKey,
   revokeManagedKey,
   rotateManagedKey,
+  type ManagedKeyDeleteResult,
   type ManagedKeyInput,
   type ManagedKeyRow,
   type ManagedKeyStore,
@@ -27,6 +29,8 @@ class MemoryManagedKeyStore implements ManagedKeyStore {
   readonly rows = new Map<string, PersistedManagedKeyRow>();
   inserted: Record<string, unknown> | null = null;
   updateCount = 0;
+  deleteResult: ManagedKeyDeleteResult | null = null;
+  beforeDelete: (() => void) | null = null;
 
   async list(): Promise<ManagedKeyRow[]> {
     return [...this.rows.values()].map((row) => this.project(row));
@@ -89,6 +93,21 @@ class MemoryManagedKeyStore implements ManagedKeyStore {
     };
     this.rows.set(id, updated);
     return this.project(updated);
+  }
+
+  async deleteUnusedRevoked(id: string): Promise<ManagedKeyDeleteResult> {
+    this.beforeDelete?.();
+    if (this.deleteResult !== null) return this.deleteResult;
+    const row = this.rows.get(id);
+    if (
+      !row
+      || row.revoked_at === null
+      || row.last_used_at !== null
+    ) {
+      return { kind: "not_deleted" };
+    }
+    this.rows.delete(id);
+    return { kind: "deleted", id };
   }
 
   private project(row: PersistedManagedKeyRow): ManagedKeyRow {
@@ -298,5 +317,101 @@ describe("Admin API key lifecycle", () => {
         code: "API_KEY_NOT_FOUND",
       });
     }
+  });
+
+  it("deletes a revoked never-used key and returns only its id", async () => {
+    const store = new MemoryManagedKeyStore();
+    await createManagedKey(store, { userId: ADMIN_ID }, input());
+    await revokeManagedKey(store, KEY_ID, "2026-07-29T13:00:00.000Z");
+
+    const deleted = await deleteManagedKey(store, KEY_ID);
+
+    expect(deleted).toEqual({ id: KEY_ID });
+    expect(Object.keys(deleted)).toEqual(["id"]);
+    expect(store.rows.has(KEY_ID)).toBe(false);
+    expect(JSON.stringify(deleted)).not.toContain("key_digest");
+  });
+
+  it("rejects deleting active, expired-only, and previously used keys", async () => {
+    const active = new MemoryManagedKeyStore();
+    await createManagedKey(active, { userId: ADMIN_ID }, input());
+    await expect(deleteManagedKey(active, KEY_ID)).rejects.toMatchObject({
+      status: 409,
+      code: "API_KEY_NOT_REVOKED",
+    });
+
+    active.rows.get(KEY_ID)!.expires_at = "2026-07-28T12:00:00.000Z";
+    await expect(deleteManagedKey(active, KEY_ID)).rejects.toMatchObject({
+      status: 409,
+      code: "API_KEY_NOT_REVOKED",
+    });
+
+    active.rows.get(KEY_ID)!.revoked_at = "2026-07-29T13:00:00.000Z";
+    active.rows.get(KEY_ID)!.last_used_at = "2026-07-29T12:30:00.000Z";
+    await expect(deleteManagedKey(active, KEY_ID)).rejects.toMatchObject({
+      status: 409,
+      code: "API_KEY_WAS_USED",
+    });
+    expect(active.rows.has(KEY_ID)).toBe(true);
+  });
+
+  it("returns safe validation and not-found errors before deletion", async () => {
+    const store = new MemoryManagedKeyStore();
+
+    await expect(deleteManagedKey(store, "not-a-uuid"))
+      .rejects.toMatchObject({
+        status: 422,
+        code: "INVALID_FIELD",
+        details: { field: "id" },
+      });
+    await expect(deleteManagedKey(
+      store,
+      "40000000-0000-4000-8000-000000000099",
+    )).rejects.toMatchObject({
+      status: 404,
+      code: "API_KEY_NOT_FOUND",
+    });
+  });
+
+  it("maps an audit foreign-key conflict to a safe domain conflict", async () => {
+    const store = new MemoryManagedKeyStore();
+    await createManagedKey(store, { userId: ADMIN_ID }, input());
+    await revokeManagedKey(store, KEY_ID, "2026-07-29T13:00:00.000Z");
+    store.deleteResult = { kind: "audit_conflict" };
+
+    await expect(deleteManagedKey(store, KEY_ID)).rejects.toMatchObject({
+      status: 409,
+      code: "API_KEY_HAS_AUDIT_HISTORY",
+      message: "API keys with audit history cannot be deleted.",
+    });
+    expect(store.rows.has(KEY_ID)).toBe(true);
+  });
+
+  it("reclassifies a concurrent eligibility change after a zero-row delete", async () => {
+    const store = new MemoryManagedKeyStore();
+    await createManagedKey(store, { userId: ADMIN_ID }, input());
+    await revokeManagedKey(store, KEY_ID, "2026-07-29T13:00:00.000Z");
+    store.beforeDelete = () => {
+      store.rows.get(KEY_ID)!.last_used_at = "2026-07-29T13:30:00.000Z";
+    };
+
+    await expect(deleteManagedKey(store, KEY_ID)).rejects.toMatchObject({
+      status: 409,
+      code: "API_KEY_WAS_USED",
+    });
+  });
+
+  it("returns not found when another request deletes the key first", async () => {
+    const store = new MemoryManagedKeyStore();
+    await createManagedKey(store, { userId: ADMIN_ID }, input());
+    await revokeManagedKey(store, KEY_ID, "2026-07-29T13:00:00.000Z");
+    store.beforeDelete = () => {
+      store.rows.delete(KEY_ID);
+    };
+
+    await expect(deleteManagedKey(store, KEY_ID)).rejects.toMatchObject({
+      status: 404,
+      code: "API_KEY_NOT_FOUND",
+    });
   });
 });

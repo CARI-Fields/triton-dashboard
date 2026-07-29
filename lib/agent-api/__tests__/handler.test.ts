@@ -15,12 +15,13 @@ import {
 } from "@/lib/agent-api/handler";
 import type { AgentContext } from "@/lib/agent-api/types";
 
-const RAW_KEY = "tb_live_abcdefgh_abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+const RAW_KEY =
+  "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const SUPABASE_SECRET = "sb_secret_do_not_expose";
 
 const context: AgentContext = {
   apiKeyId: "40000000-0000-4000-8000-000000000001",
-  keyPrefix: "tb_live_abcdefgh",
+  keyPrefix: "tb_live_AAECAwQF",
   memberId: "20000000-0000-4000-8000-000000000001",
   memberName: "Bruce",
   scopes: new Set(["board:read"]),

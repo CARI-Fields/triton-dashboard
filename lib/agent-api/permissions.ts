@@ -66,29 +66,46 @@ export async function requireAttachmentCollaboration(
 ): Promise<string> {
   const { data, error } = await getServerSupabase()
     .from("attachments")
-    .select("experiment:experiments!inner(task_id)")
+    .select("task_id,experiment_id,experiment:experiments(task_id)")
     .eq("id", attachmentId)
     .maybeSingle();
   if (error) throw new Error("Attachment parent lookup failed.");
-
-  const row: unknown = data;
-  const experiment = typeof row === "object" && row !== null
-    && "experiment" in row
-    ? row.experiment
-    : null;
-  const taskId = !Array.isArray(experiment)
-    && typeof experiment === "object"
-    && experiment !== null
-    && "task_id" in experiment
-    && typeof experiment.task_id === "string"
-    ? experiment.task_id
-    : null;
-  if (taskId === null) {
+  if (data === null) {
     throw new AgentApiError(
       404,
       "ATTACHMENT_NOT_FOUND",
       "Attachment not found.",
     );
+  }
+
+  const row: unknown = data;
+  if (
+    typeof row !== "object"
+    || row === null
+    || !("task_id" in row)
+    || typeof row.task_id !== "string"
+    || !("experiment_id" in row)
+    || (
+      row.experiment_id !== null
+      && typeof row.experiment_id !== "string"
+    )
+  ) {
+    throw new Error("Attachment parent relationship is invalid.");
+  }
+
+  let taskId = row.task_id;
+  if (row.experiment_id !== null) {
+    const experiment = "experiment" in row ? row.experiment : null;
+    if (
+      Array.isArray(experiment)
+      || typeof experiment !== "object"
+      || experiment === null
+      || !("task_id" in experiment)
+      || typeof experiment.task_id !== "string"
+    ) {
+      throw new Error("Attachment parent relationship is invalid.");
+    }
+    taskId = experiment.task_id;
   }
 
   await requireTaskCollaboration(context, taskId);

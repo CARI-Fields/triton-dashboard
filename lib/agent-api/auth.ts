@@ -17,7 +17,7 @@ const API_KEY_SELECT = [
   "member:members(id,name)",
 ].join(",");
 const API_KEY_PATTERN =
-  /^tb_live_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]+$/;
+  /^tb_live_([A-Za-z0-9_-]{8})_([A-Za-z0-9_-]{43})$/;
 const VALID_SCOPES = new Set<string>(API_SCOPES);
 const LAST_USED_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -63,8 +63,22 @@ function readBearerToken(request: Request): string | null {
   return match?.[1] ?? null;
 }
 
+function isValidApiKey(raw: string): boolean {
+  const match = raw.match(API_KEY_PATTERN);
+  return match !== null && match[1] === match[2].slice(0, 8);
+}
+
 function invalidApiKey(): AgentApiError {
   return new AgentApiError(401, "INVALID_API_KEY", "Invalid API key.");
+}
+
+class ServerConfigurationError extends Error {
+  readonly code = "SERVER_MISCONFIGURED";
+
+  constructor() {
+    super("Server authentication configuration is missing.");
+    this.name = "ServerConfigurationError";
+  }
 }
 
 function invalidAdminSession(): AgentApiError {
@@ -129,7 +143,7 @@ export async function authenticateAgent(
   request: Request,
 ): Promise<AgentContext> {
   const raw = readBearerToken(request);
-  if (raw === null || !API_KEY_PATTERN.test(raw)) {
+  if (raw === null || !isValidApiKey(raw)) {
     throw invalidApiKey();
   }
 
@@ -161,12 +175,15 @@ export async function authenticateAgent(
 export async function authenticateAdmin(
   request: Request,
 ): Promise<{ userId: string }> {
+  const adminUserId = process.env.TRITON_BOARD_ADMIN_USER_ID;
+  if (!adminUserId?.trim()) throw new ServerConfigurationError();
+
   const token = readBearerToken(request);
   if (token === null) throw invalidAdminSession();
 
   const { data, error } = await getServerSupabase().auth.getUser(token);
   if (error || !data.user) throw invalidAdminSession();
-  if (data.user.id !== process.env.TRITON_BOARD_ADMIN_USER_ID) {
+  if (data.user.id !== adminUserId) {
     throw new AgentApiError(
       403,
       "ADMIN_FORBIDDEN",

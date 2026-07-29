@@ -11,9 +11,13 @@ import {
   digestApiKey,
   generateApiKey,
 } from "@/lib/agent-api/auth";
+import { withAuthenticatedAgent } from "@/lib/agent-api/handler";
 import { getServerSupabase } from "@/lib/agent-api/server";
 
-const RAW_KEY = "tb_live_abcdefgh_abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+const RAW_KEY =
+  "tb_live_AAECAwQF_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+const RAW_KEY_SUFFIX =
+  "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const KEY_ID = "40000000-0000-4000-8000-000000000001";
 const MEMBER_ID = "20000000-0000-4000-8000-000000000001";
 const ADMIN_ID = "50000000-0000-4000-8000-000000000001";
@@ -40,7 +44,7 @@ interface KeyRow {
 function validKeyRow(overrides: Partial<KeyRow> = {}): KeyRow {
   return {
     id: KEY_ID,
-    key_prefix: "tb_live_abcdefgh",
+    key_prefix: "tb_live_AAECAwQF",
     member_id: MEMBER_ID,
     scopes: ["board:read", "experiments:write"],
     expires_at: "2099-01-01T00:00:00.000Z",
@@ -108,15 +112,18 @@ describe("Agent API key authentication", () => {
   it("generates a prefixed 256-bit key and hashes the complete raw key", () => {
     const generated = generateApiKey();
     const digest = digestApiKey(generated.raw);
+    const match = generated.raw.match(
+      /^tb_live_([A-Za-z0-9_-]{8})_([A-Za-z0-9_-]{43})$/,
+    );
 
-    expect(generated.raw)
-      .toMatch(/^tb_live_[A-Za-z0-9_-]{8}_[A-Za-z0-9_-]+$/);
+    expect(match).not.toBeNull();
+    expect(match?.[1]).toBe(match?.[2].slice(0, 8));
     expect(generated.keyPrefix).toMatch(/^tb_live_[A-Za-z0-9_-]{8}$/);
     expect(generated.raw.startsWith(`${generated.keyPrefix}_`)).toBe(true);
     expect(generated.secretBytes).toBe(32);
     expect(digest).toMatch(/^[a-f0-9]{64}$/);
     expect(digestApiKey(RAW_KEY)).toBe(
-      "7d315737e8890e063a3b778c652c3c2845044710df077e5db8a251f9a338efae",
+      "adf90f36dbc93e711ddc755ef6888a75fda4ea424a3d98ebc366dc35f2282ed5",
     );
     expect(generated.raw).not.toContain(digest);
   });
@@ -129,6 +136,10 @@ describe("Agent API key authentication", () => {
     `Bearer  ${RAW_KEY}`,
     `Bearer ${RAW_KEY} trailing`,
     `Bearer\t${RAW_KEY}`,
+    `Bearer tb_live_AAECAwQF_${RAW_KEY_SUFFIX.slice(0, 42)}`,
+    `Bearer tb_live_AAECAwQF_${RAW_KEY_SUFFIX}A`,
+    `Bearer tb_live_ZAECAwQF_${RAW_KEY_SUFFIX}`,
+    `Bearer tb_live_AAECAwQF_${RAW_KEY_SUFFIX.slice(0, 42)}*`,
   ])("rejects missing or malformed Bearer credentials %#", async (header) => {
     const getClient = vi.mocked(getServerSupabase);
 
@@ -142,10 +153,6 @@ describe("Agent API key authentication", () => {
   });
 
   it.each([
-    {
-      label: "unknown digest",
-      result: { data: null, error: null },
-    },
     {
       label: "revoked key",
       result: {
@@ -186,6 +193,22 @@ describe("Agent API key authentication", () => {
     );
   });
 
+  it("queries an unknown well-formed Key before returning the safe 401", async () => {
+    const { client, readQuery } = keyClient({ data: null, error: null });
+    vi.mocked(getServerSupabase).mockReturnValue(client);
+
+    await authenticateAgent(request(`Bearer ${RAW_KEY}`)).then(
+      () => {
+        throw new Error("Expected authentication to fail.");
+      },
+      expectInvalidApiKey,
+    );
+    expect(readQuery.eq).toHaveBeenCalledWith(
+      "key_digest",
+      digestApiKey(RAW_KEY),
+    );
+  });
+
   it("selects only public identity fields and returns scopes as a Set", async () => {
     const { client, from, readQuery, updateQuery } = keyClient({
       data: validKeyRow(),
@@ -197,7 +220,7 @@ describe("Agent API key authentication", () => {
 
     expect(context).toEqual({
       apiKeyId: KEY_ID,
-      keyPrefix: "tb_live_abcdefgh",
+      keyPrefix: "tb_live_AAECAwQF",
       memberId: MEMBER_ID,
       memberName: "Bruce",
       scopes: new Set(["board:read", "experiments:write"]),
@@ -289,5 +312,65 @@ describe("Admin authentication", () => {
 
     await expect(authenticateAdmin(request("Bearer session-token")))
       .resolves.toEqual({ userId: ADMIN_ID });
+  });
+
+  it.each([undefined, ""])(
+    "treats missing Admin UUID configuration %s as a server error",
+    async (configuredAdminId) => {
+      if (configuredAdminId === undefined) {
+        delete process.env.TRITON_BOARD_ADMIN_USER_ID;
+      } else {
+        process.env.TRITON_BOARD_ADMIN_USER_ID = configuredAdminId;
+      }
+      const getUser = vi.fn().mockResolvedValue({
+        data: { user: { id: ADMIN_ID } },
+        error: null,
+      });
+      vi.mocked(getServerSupabase).mockReturnValue({
+        auth: { getUser },
+      } as unknown as SupabaseClient);
+
+      await expect(authenticateAdmin(request("Bearer session-token")))
+        .rejects.toMatchObject({
+          name: "ServerConfigurationError",
+          code: "SERVER_MISCONFIGURED",
+        });
+      expect(getUser).not.toHaveBeenCalled();
+    },
+  );
+
+  it("turns missing Admin configuration into a generic safe handler 500", async () => {
+    delete process.env.TRITON_BOARD_ADMIN_USER_ID;
+    const { client } = keyClient({
+      data: validKeyRow(),
+      error: null,
+    });
+    const getUser = vi.fn().mockResolvedValue({
+      data: { user: { id: ADMIN_ID } },
+      error: null,
+    });
+    Object.assign(client, { auth: { getUser } });
+    vi.mocked(getServerSupabase).mockReturnValue(client);
+
+    const response = await withAuthenticatedAgent(
+      request(`Bearer ${RAW_KEY}`),
+      async () => {
+        await authenticateAdmin(request("Bearer private-admin-token"));
+        return new Response(null, { status: 204 });
+      },
+    );
+    const serialized = JSON.stringify(await response.json());
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(serialized)).toMatchObject({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "An internal error occurred.",
+      },
+    });
+    expect(serialized).not.toContain("private-admin-token");
+    expect(serialized).not.toContain("TRITON_BOARD_ADMIN_USER_ID");
+    expect(serialized).not.toContain(RAW_KEY);
+    expect(getUser).not.toHaveBeenCalled();
   });
 });

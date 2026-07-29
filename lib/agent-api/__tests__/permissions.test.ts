@@ -18,6 +18,7 @@ const TASK_ID = "30000000-0000-4000-8000-000000000001";
 const MEMBER_ID = "20000000-0000-4000-8000-000000000001";
 const EXPERIMENT_ID = "60000000-0000-4000-8000-000000000001";
 const ATTACHMENT_ID = "70000000-0000-4000-8000-000000000001";
+const OTHER_TASK_ID = "30000000-0000-4000-8000-000000000099";
 
 const context: AgentContext = {
   apiKeyId: "40000000-0000-4000-8000-000000000001",
@@ -156,9 +157,13 @@ describe("Agent API permissions", () => {
       .rejects.toEqual(expect.not.objectContaining({ status: 404 }));
   });
 
-  it("resolves an Attachment's Task through its database Experiment", async () => {
+  it("resolves a linked Attachment through its database Experiment", async () => {
     const attachment = selectClient("attachments", {
-      data: { experiment: { task_id: TASK_ID } },
+      data: {
+        task_id: OTHER_TASK_ID,
+        experiment_id: EXPERIMENT_ID,
+        experiment: { task_id: TASK_ID },
+      },
       error: null,
     });
     const assignment = selectClient("task_assignees", {
@@ -175,10 +180,57 @@ describe("Agent API permissions", () => {
     await expect(requireAttachmentCollaboration(context, ATTACHMENT_ID))
       .resolves.toBe(TASK_ID);
     expect(attachment.query.select).toHaveBeenCalledWith(
-      "experiment:experiments!inner(task_id)",
+      "task_id,experiment_id,experiment:experiments(task_id)",
     );
     expect(attachment.query.eq).toHaveBeenCalledWith("id", ATTACHMENT_ID);
     expect(assignment.query.eq).toHaveBeenCalledWith("task_id", TASK_ID);
+    expect(assignment.query.eq).not.toHaveBeenCalledWith(
+      "task_id",
+      OTHER_TASK_ID,
+    );
+  });
+
+  it("resolves a direct legacy Attachment from its own database Task", async () => {
+    const attachment = selectClient("attachments", {
+      data: {
+        task_id: TASK_ID,
+        experiment_id: null,
+        experiment: null,
+      },
+      error: null,
+    });
+    const assignment = selectClient("task_assignees", {
+      data: { task_id: TASK_ID },
+      error: null,
+    });
+    const from = vi.fn()
+      .mockImplementationOnce(attachment.from)
+      .mockImplementationOnce(assignment.from);
+    vi.mocked(getServerSupabase).mockReturnValue({
+      from,
+    } as unknown as SupabaseClient);
+
+    await expect(requireAttachmentCollaboration(context, ATTACHMENT_ID))
+      .resolves.toBe(TASK_ID);
+    expect(assignment.query.eq).toHaveBeenCalledWith("task_id", TASK_ID);
+  });
+
+  it("fails safely when a linked Attachment has no Experiment relation", async () => {
+    const { client } = selectClient("attachments", {
+      data: {
+        task_id: TASK_ID,
+        experiment_id: EXPERIMENT_ID,
+        experiment: null,
+      },
+      error: null,
+    });
+    vi.mocked(getServerSupabase).mockReturnValue(client);
+
+    await expect(requireAttachmentCollaboration(context, ATTACHMENT_ID))
+      .rejects.toMatchObject({
+        name: "Error",
+        message: "Attachment parent relationship is invalid.",
+      });
   });
 
   it("returns 404 when the Attachment resource is missing", async () => {
@@ -204,5 +256,33 @@ describe("Agent API permissions", () => {
 
     await expect(requireAttachmentCollaboration(context, ATTACHMENT_ID))
       .rejects.toEqual(expect.not.objectContaining({ status: 404 }));
+  });
+
+  it("returns 403 when the linked Attachment Task is not assigned", async () => {
+    const attachment = selectClient("attachments", {
+      data: {
+        task_id: OTHER_TASK_ID,
+        experiment_id: EXPERIMENT_ID,
+        experiment: { task_id: TASK_ID },
+      },
+      error: null,
+    });
+    const assignment = selectClient("task_assignees", {
+      data: null,
+      error: null,
+    });
+    const from = vi.fn()
+      .mockImplementationOnce(attachment.from)
+      .mockImplementationOnce(assignment.from);
+    vi.mocked(getServerSupabase).mockReturnValue({
+      from,
+    } as unknown as SupabaseClient);
+
+    await expect(requireAttachmentCollaboration(context, ATTACHMENT_ID))
+      .rejects.toMatchObject({
+        status: 403,
+        code: "TASK_SCOPE_FORBIDDEN",
+      });
+    expect(assignment.query.eq).toHaveBeenCalledWith("task_id", TASK_ID);
   });
 });

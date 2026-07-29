@@ -147,9 +147,17 @@ export default function TaskCard({
   return (
     <article className="task-card">
       <div className="task-card-head">
-        <Link href={`/task/${task.id}`} className="task-card-title">
-          {task.title}
-        </Link>
+        <div className="task-card-heading">
+          <span
+            className={`task-card-type ${type ? "" : "is-empty"}`}
+            title={type?.name ?? "No type"}
+          >
+            {type?.name ?? "No type"}
+          </span>
+          <Link href={`/task/${task.id}`} className="task-card-title">
+            {task.title}
+          </Link>
+        </div>
         <div className="task-card-menu" ref={actionsRef}>
           <button
             ref={triggerRef}
@@ -199,8 +207,6 @@ export default function TaskCard({
         </div>
       </div>
 
-      <div className="task-card-type">{type?.name ?? "No type"}</div>
-
       {task.tags.length > 0 ? (
         <div className="task-card-tags">
           {task.tags.map((tag) => (
@@ -226,13 +232,15 @@ export default function TaskCard({
             <span className="no-owner">No owner yet</span>
           ) : null}
         </div>
-        {showStatus ? (
-          <StatusDot status={task.status} label={statusLabel(task.status)} />
-        ) : null}
+        <div className="task-card-meta">
+          {showStatus ? (
+            <StatusDot status={task.status} label={statusLabel(task.status)} />
+          ) : null}
+          <time className="task-card-updated" dateTime={task.updated_at}>
+            Updated {relTime(task.updated_at)}
+          </time>
+        </div>
       </div>
-      <time className="task-card-updated" dateTime={task.updated_at}>
-        Updated {relTime(task.updated_at)}
-      </time>
 
       {editing ? (
         <section

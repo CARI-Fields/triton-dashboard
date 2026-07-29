@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import TaskCard from "@/components/tasks/TaskCard";
@@ -99,6 +100,51 @@ function openQuickEdit() {
 afterEach(cleanup);
 
 describe("TaskCard", () => {
+  it("places Type above the title and keeps freshness in the footer", () => {
+    render(
+      <TaskCard
+        task={task}
+        type={taskType}
+        types={[taskType]}
+        members={members}
+        showStatus
+        onPatch={vi.fn().mockResolvedValue(undefined)}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const card = screen.getByRole("article");
+    const heading = card.querySelector(".task-card-heading");
+    const typeLabel = within(card).getByText("Kernel");
+    const title = within(card).getByRole("link", {
+      name: "Validate NPU kernels",
+    });
+    expect(Array.from(heading?.children ?? [])).toEqual([typeLabel, title]);
+
+    const footer = card.querySelector(".task-card-foot");
+    const metadata = card.querySelector(".task-card-meta");
+    const updated = within(card).getByText(/^Updated /);
+    expect(footer?.contains(metadata)).toBe(true);
+    expect(metadata?.contains(updated)).toBe(true);
+    expect(within(metadata as HTMLElement).getByText("To do")).toBeDefined();
+  });
+
+  it("renders an unassigned Type with the neutral treatment hook", () => {
+    render(
+      <TaskCard
+        task={{ ...task, typeId: null }}
+        type={null}
+        types={[taskType]}
+        members={members}
+        showStatus={false}
+        onPatch={vi.fn().mockResolvedValue(undefined)}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText("No type").classList.contains("is-empty")).toBe(true);
+  });
+
   it("moves focus into Quick edit and restores the disclosure trigger on Escape", async () => {
     renderCard();
     const trigger = screen.getByRole("button", {

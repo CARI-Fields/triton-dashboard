@@ -65,6 +65,34 @@ function contrastRatio(first: Rgb, second: Rgb): number {
 }
 
 describe("workspace visual contracts", () => {
+  it("uses a compact two-line Type-first heading and one metadata row", () => {
+    const heading = ruleBody(globals, ".task-card-heading");
+    expect(heading).toMatch(/display\s*:\s*grid/);
+    expect(heading).toMatch(/min-width\s*:\s*0/);
+    expect(heading).toMatch(/gap\s*:\s*4px/);
+
+    const type = ruleBody(globals, ".task-card-type");
+    expect(type).toMatch(
+      /max-width\s*:\s*min\(112px,\s*40%\)/,
+    );
+    expect(type).toMatch(/font-variant-caps\s*:\s*all-small-caps/);
+    expect(type).toMatch(/background\s*:\s*var\(--accent-subtle\)/);
+    expect(type).toMatch(/text-overflow\s*:\s*ellipsis/);
+
+    const emptyType = ruleBody(globals, ".task-card-type.is-empty");
+    expect(emptyType).toMatch(/background\s*:\s*var\(--surface-hover\)/);
+    expect(emptyType).toMatch(/color\s*:\s*var\(--text-tertiary\)/);
+
+    const metadata = ruleBody(globals, ".task-card-meta");
+    expect(metadata).toMatch(/display\s*:\s*flex/);
+    expect(metadata).toMatch(/margin-left\s*:\s*auto/);
+    expect(metadata).toMatch(/flex\s*:\s*0\s+0\s+auto/);
+
+    const updated = ruleBody(globals, ".task-card-updated");
+    expect(updated).toMatch(/margin\s*:\s*0/);
+    expect(updated).toMatch(/white-space\s*:\s*nowrap/);
+  });
+
   it("gives owner names and the add-owner panel the available field width", () => {
     const picker = ruleBody(globals, ".owner-picker");
     expect(picker).toMatch(/position\s*:\s*relative/);

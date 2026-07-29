@@ -139,10 +139,12 @@ import {
   deleteExperimentAttachment,
   duplicateExperiment,
   loadExperimentBundle,
+  loadExperimentReferenceData,
   loadExperimentsForCompare,
   updateExperiment,
   uploadExperimentAttachment,
   watchExperiment,
+  watchExperimentIndex,
 } from "@/lib/experiments/repository";
 
 const experiment = {
@@ -410,6 +412,36 @@ describe("required experiment inputs", () => {
 });
 
 describe("repository query contracts", () => {
+  it("normalizes Task assignees from UUID relationships", async () => {
+    enqueue("tasks", "select", {
+      data: [{
+        id: experiment.task_id,
+        module_id: "00000000-0000-4000-8000-000000000011",
+        title: "Task",
+        status: "todo",
+        assignees: ["stale name"],
+        notes: "",
+        position: 0,
+        created_at: "2026-07-24T00:00:00.000Z",
+        updated_at: "2026-07-24T00:00:00.000Z",
+        task_assignees: [{
+          member_id: experiment.owner_id,
+          member: { name: "Owner" },
+        }],
+      }],
+      error: null,
+    });
+    enqueue("members", "select", { data: [], error: null });
+
+    const referenceData = await loadExperimentReferenceData();
+
+    expect(referenceData.tasks[0].assignees).toEqual(["Owner"]);
+    expect(referenceData.tasks[0]).not.toHaveProperty("task_assignees");
+    expect(trace("tasks", "select").selectCalls[0]).toContain(
+      "task_assignees",
+    );
+  });
+
   it("uses the exact named baseline foreign key in the bundle select", async () => {
     enqueue("experiments", "select", { data: null, error: null });
 
@@ -547,6 +579,21 @@ describe("experiment realtime subscriptions", () => {
         table: "attachments",
         filter: `experiment_id=eq.${experiment.id}`,
       },
+    ]);
+
+    unsubscribe();
+
+    expect(mocks.removeChannel).toHaveBeenCalledWith(mocks.channel);
+  });
+
+  it("reloads Task references when UUID assignments change", () => {
+    const unsubscribe = watchExperimentIndex(vi.fn());
+
+    expect(mocks.registrations.map(({ filter }) => filter)).toEqual([
+      { event: "*", schema: "public", table: "experiments" },
+      { event: "*", schema: "public", table: "tasks" },
+      { event: "*", schema: "public", table: "task_assignees" },
+      { event: "*", schema: "public", table: "members" },
     ]);
 
     unsubscribe();

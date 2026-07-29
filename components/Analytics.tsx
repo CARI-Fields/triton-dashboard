@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { STATUS_OPTIONS } from "@/lib/status";
+import {
+  normalizeTaskRow,
+  TASK_WITH_ASSIGNEES_SELECT,
+  type TaskRelationRow,
+} from "@/lib/tasks/assignees";
 import type { Member, Module, Status, Task } from "@/lib/types";
 
 const STATUS_COLOR: Record<Status, string> = {
@@ -29,11 +34,16 @@ export default function Analytics() {
     if (!supabase) return;
     const [m, t, mem] = await Promise.all([
       supabase.from("modules").select("*").order("position"),
-      supabase.from("tasks").select("*").order("position"),
+      supabase
+        .from("tasks")
+        .select(TASK_WITH_ASSIGNEES_SELECT)
+        .order("position"),
       supabase.from("members").select("*").order("position"),
     ]);
     setModules((m.data ?? []) as Module[]);
-    setTasks((t.data ?? []) as Task[]);
+    setTasks(
+      ((t.data ?? []) as unknown as TaskRelationRow[]).map(normalizeTaskRow),
+    );
     setMembers((mem.data ?? []) as Member[]);
     setLoading(false);
   }, []);
@@ -49,6 +59,11 @@ export default function Analytics() {
       .channel("analytics-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "modules" }, reload)
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, reload)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "task_assignees" },
+        reload,
+      )
       .on("postgres_changes", { event: "*", schema: "public", table: "members" }, reload)
       .subscribe();
     return () => {

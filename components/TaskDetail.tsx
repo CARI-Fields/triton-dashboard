@@ -7,6 +7,13 @@ import TaskExperimentsPanel from "@/components/experiments/TaskExperimentsPanel"
 import { supabase } from "@/lib/supabase";
 import { KIND_COLOR, logActivity } from "@/lib/activity";
 import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
+import {
+  assignTaskMember,
+  normalizeTaskRow,
+  TASK_WITH_ASSIGNEES_SELECT,
+  type TaskRelationRow,
+  unassignTaskMember,
+} from "@/lib/tasks/assignees";
 import { fmtDate, relTime } from "@/lib/time";
 import type {
   Activity,
@@ -216,6 +223,7 @@ export default function TaskDetail({ id }: { id: string }) {
   const retryTokenRef = useRef<RetryToken | null>(null);
   const mutationQueuesRef = useRef(new Map<string, Promise<void>>());
   const assigneeCoordinatorRef = useRef<AssigneeCoordinator | null>(null);
+  const membersRef = useRef<Member[]>([]);
   const experimentIdsRef = useRef(new Set<string>());
   const activityIdsRef = useRef(new Set<string>());
   const timelineSubmissionRef = useRef<TimelineSubmission | null>(null);
@@ -276,7 +284,7 @@ export default function TaskDetail({ id }: { id: string }) {
     try {
       const taskResult = await supabase
         .from("tasks")
-        .select("*")
+        .select(TASK_WITH_ASSIGNEES_SELECT)
         .eq("id", requestedVisit.id)
         .maybeSingle();
       if (!isCurrentRequest(requestedVisit, requestVersion)) return;
@@ -298,7 +306,9 @@ export default function TaskDetail({ id }: { id: string }) {
         return;
       }
 
-      const nextTask = taskResult.data as Task;
+      const nextTask = normalizeTaskRow(
+        taskResult.data as unknown as TaskRelationRow,
+      );
       const [moduleResult, experimentsResult, membersResult, activityResult] =
         await Promise.all([
           supabase
@@ -345,7 +355,9 @@ export default function TaskDetail({ id }: { id: string }) {
       experimentIdsRef.current = new Set(
         nextExperiments.map((experiment) => experiment.id),
       );
-      setMembers((membersResult.data ?? []) as Member[]);
+      const nextMembers = (membersResult.data ?? []) as Member[];
+      membersRef.current = nextMembers;
+      setMembers(nextMembers);
       setActivity(nextActivity);
       activityIdsRef.current = new Set(
         nextActivity.map((event) => event.id),
@@ -372,6 +384,7 @@ export default function TaskDetail({ id }: { id: string }) {
     requestVersionRef.current += 1;
     retryTokenRef.current = null;
     assigneeCoordinatorRef.current = null;
+    membersRef.current = [];
     experimentIdsRef.current = new Set();
     activityIdsRef.current = new Set();
     timelineSubmissionRef.current = null;
@@ -493,6 +506,16 @@ export default function TaskDetail({ id }: { id: string }) {
       .on(
         "postgres_changes",
         {
+          event: "*",
+          schema: "public",
+          table: "task_assignees",
+          filter: `task_id=eq.${visit.id}`,
+        },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        {
           event: "INSERT",
           schema: "public",
           table: "experiments",
@@ -580,7 +603,7 @@ export default function TaskDetail({ id }: { id: string }) {
     const client = supabase;
     const requestedVisit = visitRef.current;
     if (!requestedVisit) return;
-    const field: MutationField = Object.hasOwn(patch, "assignees")
+    const field: MutationField = activityEvent
       ? "assignees"
       : Object.hasOwn(patch, "status")
         ? "status"
@@ -599,7 +622,6 @@ export default function TaskDetail({ id }: { id: string }) {
           return next;
         });
       }
-      let effectivePatch = patch;
       let nextConfirmedAssignees: string[] | null = null;
       let assigneeChangeIsNoOp = false;
       if (activityEvent) {
@@ -611,10 +633,6 @@ export default function TaskDetail({ id }: { id: string }) {
           activityEvent.coordinator.confirmed,
           activityEvent.change,
         );
-        effectivePatch = {
-          ...patch,
-          assignees: nextConfirmedAssignees,
-        };
       }
       const settleAssigneeChange = (succeeded: boolean) => {
         if (!activityEvent) return;
@@ -630,13 +648,24 @@ export default function TaskDetail({ id }: { id: string }) {
         settleAssigneeChange(false);
         return;
       }
-      let result;
       try {
-        result = await client
-          .from("tasks")
-          .update(effectivePatch)
-          .eq("id", requestedVisit.id);
-        throwIfError(result.error);
+        if (activityEvent) {
+          const member = membersRef.current.find(
+            (candidate) => candidate.name === activityEvent.change.name,
+          );
+          if (!member) throw new Error("Assignee no longer exists.");
+          if (activityEvent.change.assigned) {
+            await assignTaskMember(client, requestedVisit.id, member.id);
+          } else {
+            await unassignTaskMember(client, requestedVisit.id, member.id);
+          }
+        } else {
+          const result = await client
+            .from("tasks")
+            .update(patch)
+            .eq("id", requestedVisit.id);
+          throwIfError(result.error);
+        }
       } catch (caught) {
         settleAssigneeChange(false);
         if (visitRef.current === requestedVisit) {
@@ -730,7 +759,7 @@ export default function TaskDetail({ id }: { id: string }) {
     };
     coordinator.pending.push(change);
     void updateTask(
-      { assignees: [] },
+      {},
       {
         text: `${hadAssignee ? "Unassigned" : "Assigned"} ${name}`,
         kind: "assign",

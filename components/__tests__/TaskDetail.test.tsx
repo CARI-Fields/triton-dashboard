@@ -49,6 +49,7 @@ interface MutationCall {
   table: string;
   kind: "update" | "insert" | "delete";
   payload: unknown;
+  filters: Array<[string, unknown]>;
 }
 
 const supabaseState = vi.hoisted(() => ({
@@ -77,7 +78,13 @@ vi.mock("@/lib/supabase", () => {
         throw new Error(`No ${table} query result was queued.`);
       }
       const builder: Record<string, unknown> = {};
-      for (const method of ["select", "eq", "maybeSingle"]) {
+      let mutation: MutationCall | null = null;
+      builder.select = vi.fn(() => builder);
+      builder.eq = vi.fn((column: string, value: unknown) => {
+        mutation?.filters.push([column, value]);
+        return builder;
+      });
+      for (const method of ["maybeSingle"]) {
         builder[method] = vi.fn(() => builder);
       }
       builder.order = vi.fn((
@@ -89,7 +96,8 @@ vi.mock("@/lib/supabase", () => {
       });
       for (const kind of ["update", "insert", "delete"] as const) {
         builder[kind] = vi.fn((payload?: unknown) => {
-          supabaseState.mutations.push({ table, kind, payload });
+          mutation = { table, kind, payload, filters: [] };
+          supabaseState.mutations.push(mutation);
           return builder;
         });
       }
@@ -258,13 +266,29 @@ function enqueueRelated(
   enqueue("activity", ok(activities));
 }
 
+function taskRow(task: Task, members: Member[] = [member]) {
+  return {
+    ...task,
+    task_assignees: task.assignees.map((name) => {
+      const assignedMember = members.find((candidate) => candidate.name === name);
+      if (!assignedMember) {
+        throw new Error(`Missing Member fixture for assignee ${name}.`);
+      }
+      return {
+        member_id: assignedMember.id,
+        member: { name: assignedMember.name },
+      };
+    }),
+  };
+}
+
 function enqueueLoad(
   task: Task,
   experiments: Experiment[] = [],
   activities: Activity[] = [],
   members: Member[] = [member],
 ) {
-  enqueue("tasks", ok(task));
+  enqueue("tasks", ok(taskRow(task, members)));
   enqueueRelated(experiments, activities, members);
 }
 
@@ -272,6 +296,20 @@ function taskUpdates() {
   return supabaseState.mutations.filter(
     (call) => call.table === "tasks" && call.kind === "update",
   );
+}
+
+function taskAssigneeMutations() {
+  return supabaseState.mutations.filter(
+    (call) => call.table === "task_assignees",
+  );
+}
+
+function legacyAssigneeWrites() {
+  return taskUpdates().filter((call) => (
+    typeof call.payload === "object"
+    && call.payload !== null
+    && Object.hasOwn(call.payload, "assignees")
+  ));
 }
 
 function activityInserts() {
@@ -392,7 +430,7 @@ describe("TaskDetail orchestration", () => {
     view.rerender(<TaskDetail id={taskB.id} />);
     expect(await screen.findByRole("button", { name: "Task B" })).toBeDefined();
 
-    await act(async () => staleRecovery.resolve(ok(taskA)));
+    await act(async () => staleRecovery.resolve(ok(taskRow(taskA))));
     expect(screen.getByRole("button", { name: "Task B" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Task A" })).toBeNull();
   });
@@ -415,7 +453,7 @@ describe("TaskDetail orchestration", () => {
     fireEvent.click(retrying);
     expect(supabaseState.fromCalls.filter((table) => table === "tasks")).toHaveLength(2);
 
-    await act(async () => retryTask.resolve(ok(taskA)));
+    await act(async () => retryTask.resolve(ok(taskRow(taskA))));
     expect(await screen.findByText("Recovered run")).toBeDefined();
     expect(screen.getByText("Recovered activity")).toBeDefined();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -438,10 +476,10 @@ describe("TaskDetail orchestration", () => {
     trigger(`task-${taskA.id}`, "activity");
     expect(await screen.findByText("Newest run")).toBeDefined();
 
-    await act(async () => olderSuccess.resolve(ok({
+    await act(async () => olderSuccess.resolve(ok(taskRow({
       ...taskA,
       title: "Stale Task A",
-    })));
+    }))));
     expect(screen.getByText("Newest run")).toBeDefined();
     expect(screen.getByText("Newest activity")).toBeDefined();
     expect(screen.queryByText("Stale Task A")).toBeNull();
@@ -503,7 +541,7 @@ describe("TaskDetail orchestration", () => {
     const retry = screen.getByRole("button", { name: "Retry" });
     expect((retry as HTMLButtonElement).disabled).toBe(false);
 
-    await act(async () => staleRetry.resolve(ok(taskA)));
+    await act(async () => staleRetry.resolve(ok(taskRow(taskA))));
     expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
     expect(screen.getByText("Last-good run")).toBeDefined();
   });
@@ -525,7 +563,7 @@ describe("TaskDetail orchestration", () => {
     expect(await screen.findByText("Current A run")).toBeDefined();
 
     await act(async () => {
-      oldA.resolve(ok({ ...taskA, title: "Old Task A" }));
+      oldA.resolve(ok(taskRow({ ...taskA, title: "Old Task A" })));
       pendingB.resolve(failure("Old B failed."));
     });
     expect(screen.getByText("Current A run")).toBeDefined();
@@ -557,7 +595,7 @@ describe("TaskDetail orchestration", () => {
     view.rerender(<TaskDetail id={taskB.id} />);
     expect(await screen.findByRole("button", { name: "Task B" })).toBeDefined();
 
-    await act(async () => staleMutation.resolve(ok(taskA)));
+    await act(async () => staleMutation.resolve(ok(taskRow(taskA))));
     expect(screen.getByRole("button", { name: "Task B" })).toBeDefined();
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -654,14 +692,20 @@ describe("TaskDetail orchestration", () => {
 
     const firstWrite = deferred<QueryResult>();
     const secondWrite = deferred<QueryResult>();
-    enqueue("tasks", firstWrite.promise);
+    enqueue("task_assignees", firstWrite.promise);
     fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
     fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
     fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
 
-    expect(taskUpdates().map((call) => call.payload)).toEqual([
-      { assignees: ["Alice"] },
+    expect(taskAssigneeMutations()).toEqual([
+      {
+        table: "task_assignees",
+        kind: "insert",
+        payload: { task_id: taskA.id, member_id: alice.id },
+        filters: [],
+      },
     ]);
+    expect(legacyAssigneeWrites()).toEqual([]);
 
     enqueue("activity", ok(null));
     enqueueLoad({ ...taskA, assignees: ["Alice"] }, [], [], [
@@ -669,7 +713,7 @@ describe("TaskDetail orchestration", () => {
       alice,
       bob,
     ]);
-    enqueue("tasks", secondWrite.promise);
+    enqueue("task_assignees", secondWrite.promise);
     enqueue("activity", ok(null));
     enqueueLoad({ ...taskA, assignees: ["Alice", "Bob"] }, [], [], [
       member,
@@ -678,10 +722,21 @@ describe("TaskDetail orchestration", () => {
     ]);
     await act(async () => firstWrite.resolve(ok(null)));
 
-    await waitFor(() => expect(taskUpdates().map((call) => call.payload)).toEqual([
-      { assignees: ["Alice"] },
-      { assignees: ["Alice", "Bob"] },
+    await waitFor(() => expect(taskAssigneeMutations()).toEqual([
+      {
+        table: "task_assignees",
+        kind: "insert",
+        payload: { task_id: taskA.id, member_id: alice.id },
+        filters: [],
+      },
+      {
+        table: "task_assignees",
+        kind: "insert",
+        payload: { task_id: taskA.id, member_id: bob.id },
+        filters: [],
+      },
     ]));
+    expect(legacyAssigneeWrites()).toEqual([]);
     await act(async () => secondWrite.resolve(ok(null)));
   });
 
@@ -692,15 +747,21 @@ describe("TaskDetail orchestration", () => {
 
     const aliceWrite = deferred<QueryResult>();
     const bobWrite = deferred<QueryResult>();
-    enqueue("tasks", aliceWrite.promise);
+    enqueue("task_assignees", aliceWrite.promise);
     fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
     fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
     fireEvent.click(screen.getByRole("button", { name: /Bob/ }));
-    expect(taskUpdates().map((call) => call.payload)).toEqual([
-      { assignees: ["Alice"] },
+    expect(taskAssigneeMutations()).toEqual([
+      {
+        table: "task_assignees",
+        kind: "insert",
+        payload: { task_id: taskA.id, member_id: alice.id },
+        filters: [],
+      },
     ]);
+    expect(legacyAssigneeWrites()).toEqual([]);
 
-    enqueue("tasks", bobWrite.promise);
+    enqueue("task_assignees", bobWrite.promise);
     enqueue("activity", ok(null));
     enqueueLoad({ ...taskA, assignees: ["Bob"] }, [], [], [
       member,
@@ -709,10 +770,21 @@ describe("TaskDetail orchestration", () => {
     ]);
     await act(async () => aliceWrite.resolve(failure("Alice update denied.")));
 
-    await waitFor(() => expect(taskUpdates().map((call) => call.payload)).toEqual([
-      { assignees: ["Alice"] },
-      { assignees: ["Bob"] },
+    await waitFor(() => expect(taskAssigneeMutations()).toEqual([
+      {
+        table: "task_assignees",
+        kind: "insert",
+        payload: { task_id: taskA.id, member_id: alice.id },
+        filters: [],
+      },
+      {
+        table: "task_assignees",
+        kind: "insert",
+        payload: { task_id: taskA.id, member_id: bob.id },
+        filters: [],
+      },
     ]));
+    expect(legacyAssigneeWrites()).toEqual([]);
     await act(async () => bobWrite.resolve(ok(null)));
 
     expect(await screen.findByRole("button", { name: "Unassign Bob" }))
@@ -734,20 +806,26 @@ describe("TaskDetail orchestration", () => {
     await screen.findByRole("button", { name: "Task A" });
 
     const assignWrite = deferred<QueryResult>();
-    enqueue("tasks", assignWrite.promise);
+    enqueue("task_assignees", assignWrite.promise);
     fireEvent.click(screen.getByRole("button", { name: "Assign people" }));
     fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
     fireEvent.click(screen.getByRole("button", { name: /Alice/ }));
 
-    enqueue("tasks", ok(null));
+    enqueue("task_assignees", ok(null));
     enqueue("activity", ok(null));
     enqueueLoad(taskA, [], [], [member, alice]);
     await act(async () => assignWrite.resolve(failure("Assign denied.")));
 
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(taskUpdates().map((call) => call.payload)).toEqual([
-      { assignees: ["Alice"] },
+    expect(taskAssigneeMutations()).toEqual([
+      {
+        table: "task_assignees",
+        kind: "insert",
+        payload: { task_id: taskA.id, member_id: alice.id },
+        filters: [],
+      },
     ]);
+    expect(legacyAssigneeWrites()).toEqual([]);
     expect(activityInserts()).toHaveLength(0);
     expect(screen.queryByRole("button", { name: "Unassign Alice" })).toBeNull();
   });
@@ -759,19 +837,28 @@ describe("TaskDetail orchestration", () => {
     await screen.findByRole("button", { name: "Unassign Alice" });
 
     const unassignWrite = deferred<QueryResult>();
-    enqueue("tasks", unassignWrite.promise);
+    enqueue("task_assignees", unassignWrite.promise);
     fireEvent.click(screen.getByRole("button", { name: "Unassign Alice" }));
     fireEvent.click(screen.getByRole("button", { name: "Unassign Alice" }));
 
-    enqueue("tasks", ok(null));
+    enqueue("task_assignees", ok(null));
     enqueue("activity", ok(null));
     enqueueLoad(assignedTask, [], [], [member, alice]);
     await act(async () => unassignWrite.resolve(failure("Unassign denied.")));
 
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(taskUpdates().map((call) => call.payload)).toEqual([
-      { assignees: [] },
+    expect(taskAssigneeMutations()).toEqual([
+      {
+        table: "task_assignees",
+        kind: "delete",
+        payload: undefined,
+        filters: [
+          ["task_id", taskA.id],
+          ["member_id", alice.id],
+        ],
+      },
     ]);
+    expect(legacyAssigneeWrites()).toEqual([]);
     expect(activityInserts()).toHaveLength(0);
     expect(screen.getByRole("button", { name: "Unassign Alice" })).toBeDefined();
   });
@@ -885,6 +972,12 @@ describe("TaskDetail orchestration", () => {
       },
       { event: "DELETE", schema: "public", table: "tasks" },
       {
+        event: "*",
+        schema: "public",
+        table: "task_assignees",
+        filter: `task_id=eq.${taskA.id}`,
+      },
+      {
         event: "INSERT",
         schema: "public",
         table: "experiments",
@@ -997,7 +1090,7 @@ describe("TaskDetail orchestration", () => {
     await screen.findByRole("button", { name: "Task A" });
 
     const oldModule = deferred<QueryResult>();
-    enqueue("tasks", ok(taskA));
+    enqueue("tasks", ok(taskRow(taskA)));
     enqueue("modules", oldModule.promise);
     enqueue("experiments", ok([inserted]));
     enqueue("members", ok([member]));
@@ -1035,7 +1128,7 @@ describe("TaskDetail orchestration", () => {
     await screen.findByRole("button", { name: "Task A" });
 
     const oldModule = deferred<QueryResult>();
-    enqueue("tasks", ok(taskA));
+    enqueue("tasks", ok(taskRow(taskA)));
     enqueue("modules", oldModule.promise);
     enqueue("experiments", ok([]));
     enqueue("members", ok([member]));
@@ -1072,7 +1165,7 @@ describe("TaskDetail orchestration", () => {
     const view = render(<TaskDetail id={taskA.id} />);
     view.unmount();
 
-    await act(async () => pending.resolve(ok(taskA)));
+    await act(async () => pending.resolve(ok(taskRow(taskA))));
     expect(supabaseState.fromCalls).toEqual(["tasks"]);
     expect(supabaseState.removeChannel).toHaveBeenCalledTimes(1);
   });

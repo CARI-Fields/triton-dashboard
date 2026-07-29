@@ -12,6 +12,13 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import MarkdownField from "@/components/MarkdownField";
 import { logActivity } from "@/lib/activity";
 import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
+import {
+  assignTaskMember,
+  normalizeTaskRow,
+  TASK_WITH_ASSIGNEES_SELECT,
+  type TaskRelationRow,
+  unassignTaskMember,
+} from "@/lib/tasks/assignees";
 import { relTime } from "@/lib/time";
 import type { ActivityKind, Member, Module, Task } from "@/lib/types";
 
@@ -487,7 +494,10 @@ export default function Board() {
     if (!supabase) return;
     const [m, t, mem] = await Promise.all([
       supabase.from("modules").select("*").order("position"),
-      supabase.from("tasks").select("*").order("position"),
+      supabase
+        .from("tasks")
+        .select(TASK_WITH_ASSIGNEES_SELECT)
+        .order("position"),
       supabase.from("members").select("*").order("position"),
     ]);
     const firstError = m.error || t.error || mem.error;
@@ -495,7 +505,9 @@ export default function Board() {
       setErrorMsg(firstError.message);
     } else {
       setModules((m.data ?? []) as Module[]);
-      setTasks((t.data ?? []) as Task[]);
+      setTasks(
+        ((t.data ?? []) as unknown as TaskRelationRow[]).map(normalizeTaskRow),
+      );
       setMembers((mem.data ?? []) as Member[]);
       setErrorMsg(null);
     }
@@ -513,6 +525,11 @@ export default function Board() {
       .channel("board-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "modules" }, reload)
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, reload)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "task_assignees" },
+        reload,
+      )
       .on("postgres_changes", { event: "*", schema: "public", table: "members" }, reload)
       .subscribe();
     return () => {
@@ -565,7 +582,6 @@ export default function Board() {
           module_id: moduleId,
           title: "New task",
           status: "todo",
-          assignees: [],
           position: topPos,
         })
         .select("id")
@@ -608,11 +624,14 @@ export default function Board() {
       if (!supabase) return;
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
+      const member = members.find((candidate) => candidate.name === name);
+      if (!member) throw new Error(`Unknown member: ${name}`);
       const had = task.assignees.includes(name);
-      const next = had
-        ? task.assignees.filter((a) => a !== name)
-        : [...task.assignees, name];
-      await supabase.from("tasks").update({ assignees: next }).eq("id", taskId);
+      if (had) {
+        await unassignTaskMember(supabase, taskId, member.id);
+      } else {
+        await assignTaskMember(supabase, taskId, member.id);
+      }
       recordActivity(
         taskId,
         `${had ? "Unassigned" : "Assigned"} ${name}`,
@@ -620,7 +639,7 @@ export default function Board() {
       );
       reload();
     },
-    [recordActivity, tasks, reload]
+    [members, recordActivity, tasks, reload]
   );
 
   const addMember = useCallback(
@@ -641,17 +660,23 @@ export default function Board() {
       if (!supabase) return;
       const n = name.trim();
       if (!n) return;
-      if (!members.some((m) => m.name === n)) {
-        await supabase
+      let member = members.find((candidate) => candidate.name === n);
+      if (!member) {
+        const { data, error } = await supabase
           .from("members")
-          .insert({ name: n, initials: initialsFromName(n), position: nextPosition(members) });
+          .insert({
+            name: n,
+            initials: initialsFromName(n),
+            position: nextPosition(members),
+          })
+          .select("*")
+          .single();
+        if (error) throw new Error(error.message);
+        member = data as Member;
       }
       const task = tasks.find((t) => t.id === taskId);
       if (task && !task.assignees.includes(n)) {
-        await supabase
-          .from("tasks")
-          .update({ assignees: [...task.assignees, n] })
-          .eq("id", taskId);
+        await assignTaskMember(supabase, taskId, member.id);
         recordActivity(taskId, `Assigned ${n}`, "assign");
       }
       reload();
@@ -664,18 +689,9 @@ export default function Board() {
       if (!supabase) return;
       if (!window.confirm(`Remove ${member.name} from the team?`)) return;
       await supabase.from("members").delete().eq("id", member.id);
-      const affected = tasks.filter((t) => t.assignees.includes(member.name));
-      await Promise.all(
-        affected.map((t) =>
-          supabase!
-            .from("tasks")
-            .update({ assignees: t.assignees.filter((a) => a !== member.name) })
-            .eq("id", t.id)
-        )
-      );
       reload();
     },
-    [tasks, reload]
+    [reload]
   );
 
   /* ---- derived ---- */

@@ -23,6 +23,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    let observedAuthEvent = false;
     if (!supabase) {
       setReady(true);
       return;
@@ -32,7 +33,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       try {
         const { data, error: sessionError } =
           await client.auth.getSession();
-        if (!active) return;
+        if (!active || observedAuthEvent) return;
         if (sessionError) {
           setSession(null);
           setError(SESSION_VERIFICATION_ERROR);
@@ -41,11 +42,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         setSession(data.session);
         if (data.session) setError(null);
       } catch {
-        if (!active) return;
+        if (!active || observedAuthEvent) return;
         setSession(null);
         setError(SESSION_VERIFICATION_ERROR);
       } finally {
-        if (active) setReady(true);
+        if (active && !observedAuthEvent) setReady(true);
       }
     };
     void readInitialSession();
@@ -53,8 +54,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       data: { subscription },
     } = client.auth.onAuthStateChange((_event, nextSession) => {
       if (!active) return;
+      observedAuthEvent = true;
       setSession(nextSession);
       if (nextSession) setError(null);
+      setReady(true);
     });
     return () => {
       active = false;

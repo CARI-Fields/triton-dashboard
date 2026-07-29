@@ -149,6 +149,68 @@ describe("AuthGate", () => {
     expect(screen.queryByText("Enter the team password")).toBeNull();
   });
 
+  it.each(["null session", "error"] as const)(
+    "keeps SIGNED_IN authoritative after a late initial %s",
+    async (outcome) => {
+      const initial = deferred<{
+        data: { session: Session | null };
+        error: Error | null;
+      }>();
+      mocks.getSession.mockReturnValueOnce(initial.promise);
+      renderGate();
+      expect(screen.getByText("Loading…")).toBeDefined();
+
+      emitAuth("SIGNED_IN", SESSION);
+      expect(await screen.findByText("Protected child")).toBeDefined();
+
+      await act(async () => {
+        if (outcome === "null session") {
+          initial.resolve({ data: { session: null }, error: null });
+        } else {
+          initial.reject(new Error("token-native-marker late rejection"));
+        }
+      });
+
+      expect(screen.getByText("Protected child")).toBeDefined();
+      expect(screen.queryByText("Enter the team password")).toBeNull();
+      expect(screen.queryByText(
+        "Could not verify your session. Sign in again.",
+      )).toBeNull();
+      expect(document.body.textContent).not.toContain("token-native-marker");
+    },
+  );
+
+  it.each(["valid session", "error"] as const)(
+    "keeps SIGNED_OUT authoritative after a late initial %s",
+    async (outcome) => {
+      const initial = deferred<{
+        data: { session: Session | null };
+        error: Error | null;
+      }>();
+      mocks.getSession.mockReturnValueOnce(initial.promise);
+      renderGate();
+      expect(screen.getByText("Loading…")).toBeDefined();
+
+      emitAuth("SIGNED_OUT", null);
+      expect(await screen.findByText("Enter the team password")).toBeDefined();
+
+      await act(async () => {
+        if (outcome === "valid session") {
+          initial.resolve({ data: { session: SESSION }, error: null });
+        } else {
+          initial.reject(new Error("token-native-marker late rejection"));
+        }
+      });
+
+      expect(screen.getByText("Enter the team password")).toBeDefined();
+      expect(screen.queryByText("Protected child")).toBeNull();
+      expect(screen.queryByText(
+        "Could not verify your session. Sign in again.",
+      )).toBeNull();
+      expect(document.body.textContent).not.toContain("token-native-marker");
+    },
+  );
+
   it.each(["resolve", "reject"])(
     "ignores a late initial session %s after unmount",
     async (outcome) => {

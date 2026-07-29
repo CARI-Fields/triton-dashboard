@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity as ReactActivity,
   useCallback,
   useEffect,
   useMemo,
@@ -10,6 +11,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import MarkdownField from "@/components/MarkdownField";
+import { Icon } from "@/components/ui/Icons";
 import PageHeader from "@/components/ui/PageHeader";
 import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import TaskProperties from "@/components/tasks/TaskProperties";
@@ -258,6 +260,7 @@ export default function TaskDetail({ id }: { id: string }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [activityOpen, setActivityOpen] = useState(true);
   const [draftNote, setDraftNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -1158,8 +1161,16 @@ export default function TaskDetail({ id }: { id: string }) {
   }
 
   return (
-    <div className="record-page task-detail-page">
-      <div className="record-main">
+    <div
+      className="record-page task-detail-page"
+      data-activity-collapsed={!activityOpen}
+    >
+      <div
+        className="record-main task-detail-scroll-region"
+        role="region"
+        aria-label="Task details"
+        tabIndex={0}
+      >
         <Link href="/" className="back-link">← Task Board</Link>
 
         {mutationError && (
@@ -1267,55 +1278,82 @@ export default function TaskDetail({ id }: { id: string }) {
         </section>
       </div>
 
-      <aside className="activity-rail" aria-label="Task activity">
-        <h2>Activity</h2>
-        <div className="timeline-add">
-          <input
-            value={draftNote}
-            placeholder="Add a note to the timeline…"
-            onChange={(event) => setDraftNote(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void addTimelineNote();
-            }}
-            aria-label="Add a note to the timeline"
-          />
+      <aside
+        className="activity-rail task-activity-panel"
+        aria-label="Task activity"
+      >
+        <div className="activity-rail-header">
+          {activityOpen ? <h2>Activity</h2> : null}
           <button
             type="button"
-            className="btn primary"
-            onClick={() => void addTimelineNote()}
-            disabled={notePending}
+            className="activity-rail-toggle"
+            aria-controls="task-activity-content"
+            aria-expanded={activityOpen}
+            aria-label={activityOpen ? "Hide activity" : "Show activity"}
+            title={activityOpen ? "Hide activity" : "Show activity"}
+            onClick={() => setActivityOpen((current) => !current)}
           >
-            {notePending ? "Adding…" : "Add note"}
+            <Icon
+              name={activityOpen ? "chevron-right" : "chevron-left"}
+              size={16}
+            />
           </button>
         </div>
-        {activity.length === 0 ? (
-          <p className="muted">No activity yet.</p>
-        ) : (
-          <div className="timeline">
-            {activity.map((event, index) => (
-              <div className="tl-row" key={event.id}>
-                <div className="tl-rail">
-                  <span
-                    className="tl-dot"
-                    style={{
-                      background:
-                        KIND_COLOR[event.kind] ?? "var(--status-todo)",
-                    }}
-                  />
-                  {index < activity.length - 1 && (
-                    <span className="tl-line" />
-                  )}
-                </div>
-                <div className="tl-body">
-                  <div className="tl-text">{event.text}</div>
-                  <div className="tl-time">
-                    {relTime(event.created_at)} · {fmtDate(event.created_at)}
+        <ReactActivity mode={activityOpen ? "visible" : "hidden"}>
+          <div
+            className="activity-rail-content task-activity-scroll-region"
+            id="task-activity-content"
+            tabIndex={0}
+          >
+            <div className="timeline-add">
+              <input
+                value={draftNote}
+                placeholder="Add a note to the timeline…"
+                onChange={(event) => setDraftNote(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void addTimelineNote();
+                }}
+                aria-label="Add a note to the timeline"
+              />
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => void addTimelineNote()}
+                disabled={notePending}
+              >
+                {notePending ? "Adding…" : "Add note"}
+              </button>
+            </div>
+            {activity.length === 0 ? (
+              <p className="muted">No activity yet.</p>
+            ) : (
+              <div className="timeline">
+                {activity.map((event, index) => (
+                  <div className="tl-row" key={event.id}>
+                    <div className="tl-rail">
+                      <span
+                        className="tl-dot"
+                        style={{
+                          background:
+                            KIND_COLOR[event.kind] ?? "var(--status-todo)",
+                        }}
+                      />
+                      {index < activity.length - 1 ? (
+                        <span className="tl-line" />
+                      ) : null}
+                    </div>
+                    <div className="tl-body">
+                      <div className="tl-text">{event.text}</div>
+                      <div className="tl-time">
+                        {relTime(event.created_at)} · {fmtDate(event.created_at)}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
+        </ReactActivity>
       </aside>
     </div>
   );

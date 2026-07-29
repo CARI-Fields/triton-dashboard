@@ -414,6 +414,59 @@ describe("workspace visual contracts", () => {
     expect(sidebar).toMatch(/height\s*:\s*100dvh/);
   });
 
+  it("gives Task Detail one visible main scrollbar and hidden fixed-rail scrollbars", () => {
+    const nav = ruleBody(globals, ".app-sidebar > nav");
+    expect(nav).toMatch(/overflow-y\s*:\s*auto/);
+    expect(nav).toMatch(/scrollbar-width\s*:\s*none/);
+    expect(ruleBody(globals, ".app-sidebar > nav::-webkit-scrollbar"))
+      .toMatch(/display\s*:\s*none/);
+
+    const taskHost = ruleBody(
+      globals,
+      ".app-content:has(.task-detail-page)",
+    );
+    expect(taskHost).toMatch(/overflow\s*:\s*hidden/);
+    expect(taskHost).toMatch(/padding-inline\s*:\s*0/);
+    expect(taskHost).toMatch(/scrollbar-gutter\s*:\s*auto/);
+
+    const middle = ruleBody(globals, ".task-detail-scroll-region");
+    expect(middle).toMatch(/height\s*:\s*100%/);
+    expect(middle).toMatch(/overflow-y\s*:\s*auto/);
+    expect(middle).toMatch(/scrollbar-gutter\s*:\s*stable/);
+    expect(middle).toMatch(/scrollbar-width\s*:\s*thin/);
+
+    const activity = ruleBody(
+      globals,
+      ".task-detail-page .task-activity-scroll-region",
+    );
+    expect(activity).toMatch(/min-height\s*:\s*0/);
+    expect(activity).toMatch(/overflow-y\s*:\s*auto/);
+    expect(activity).toMatch(/scrollbar-width\s*:\s*none/);
+    expect(
+      ruleBody(
+        globals,
+        ".task-detail-page .task-activity-scroll-region::-webkit-scrollbar",
+      ),
+    ).toMatch(/display\s*:\s*none/);
+
+    const activityRail = ruleBody(
+      globals,
+      ".task-detail-page .task-activity-panel",
+    );
+    expect(activityRail).toMatch(
+      /grid-template-rows\s*:\s*auto\s+minmax\(0,\s*1fr\)/,
+    );
+    expect(activityRail).toMatch(/overflow\s*:\s*hidden/);
+
+    const collapsed = ruleBody(
+      globals,
+      '.record-page.task-detail-page[data-activity-collapsed="true"]',
+    );
+    expect(collapsed).toMatch(/--activity-rail-width\s*:\s*48px/);
+    expect(ruleBody(globals, ".task-detail-page .experiment-table-scroll"))
+      .toMatch(/max-height\s*:\s*none/);
+  });
+
   it("keeps Drawer content in one scrollable body row with a stable footer row", () => {
     const panel = ruleBody(globals, ".drawer-panel");
     expect(panel).toMatch(

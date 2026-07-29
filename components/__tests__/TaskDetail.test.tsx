@@ -420,13 +420,43 @@ describe("TaskDetail orchestration", () => {
       .toBeDefined();
     const recordMain = container.querySelector(".record-main");
     expect(recordMain?.tagName).toBe("DIV");
+    expect(screen.getByRole("region", { name: "Task details" }))
+      .toBe(recordMain);
     expect(container.querySelector("main")).toBeNull();
     expect(screen.getByRole("heading", { name: "Description" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Experiments" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Attachments" })).toBeDefined();
     expect(screen.getByRole("complementary", { name: "Task activity" }))
       .toBeDefined();
+    const activityContent = container.querySelector(
+      "#task-activity-content",
+    ) as HTMLElement;
+    expect(activityContent.getAttribute("tabindex")).toBe("0");
     expect(screen.getByRole("heading", { name: "Activity" })).toBeDefined();
+    const hideActivity = screen.getByRole("button", {
+      name: "Hide activity",
+    });
+    expect(hideActivity.getAttribute("aria-expanded")).toBe("true");
+    expect(hideActivity.getAttribute("aria-controls"))
+      .toBe("task-activity-content");
+    const timelineInput = screen.getByLabelText("Add a note to the timeline");
+    fireEvent.change(timelineInput, { target: { value: "Preserve this note" } });
+
+    fireEvent.click(hideActivity);
+    expect(
+      container.querySelector(".task-detail-page")?.getAttribute(
+        "data-activity-collapsed",
+      ),
+    ).toBe("true");
+    expect(activityContent.style.display).toBe("none");
+    const showActivity = screen.getByRole("button", {
+      name: "Show activity",
+    });
+    expect(showActivity.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(showActivity);
+    expect(screen.getByRole("heading", { name: "Activity" })).toBeDefined();
+    expect(timelineInput).toHaveProperty("value", "Preserve this note");
     expect(screen.queryByRole("menu")).toBeNull();
     expect(screen.queryByRole("menuitem")).toBeNull();
     expect(screen.queryByText("Module")).toBeNull();

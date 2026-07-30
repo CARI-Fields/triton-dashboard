@@ -10,11 +10,13 @@ export default function BaselinePicker({
   candidates,
   value,
   onChange,
+  compact = false,
 }: {
   current: Experiment;
   candidates: ExperimentListRow[];
   value: string | null;
   onChange: (id: string | null) => void;
+  compact?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const selected = value && value !== current.id
@@ -48,9 +50,9 @@ export default function BaselinePicker({
   }, [candidates, current.id, current.task_id, search, selected]);
 
   return (
-    <div className="baseline-picker">
+    <div className={`baseline-picker ${compact ? "baseline-picker-compact" : ""}`}>
       <label>
-        <span>Baseline</span>
+        {compact ? null : <span>Baseline</span>}
         <select
           aria-label="Baseline"
           value={selected?.id ?? ""}

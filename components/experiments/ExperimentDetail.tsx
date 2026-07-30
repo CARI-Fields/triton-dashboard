@@ -14,7 +14,6 @@ import { fmtDate } from "@/lib/time";
 import MarkdownField from "@/components/MarkdownField";
 import ActivityDrawer from "@/components/ui/ActivityDrawer";
 import { Icon } from "@/components/ui/Icons";
-import PageHeader from "@/components/ui/PageHeader";
 import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import {
   clearSessionExperimentDraft,
@@ -49,6 +48,7 @@ import DataEditor from "@/components/experiments/DataEditor";
 import DecisionEditor from "@/components/experiments/DecisionEditor";
 import DuplicateExperimentDialog from "@/components/experiments/DuplicateExperimentDialog";
 import EnvironmentEditor from "@/components/experiments/EnvironmentEditor";
+import ExperimentDisclosure from "@/components/experiments/ExperimentDisclosure";
 import ExperimentSection from "@/components/experiments/ExperimentSection";
 import ExperimentStatusBadge from "@/components/experiments/ExperimentStatusBadge";
 import ExperimentTimeline from "@/components/experiments/ExperimentTimeline";
@@ -79,14 +79,65 @@ function isSameExperimentRevision(
 }
 
 const EXPERIMENT_SECTION_LINKS = [
-  { id: "data", label: "Data" },
-  { id: "object", label: "Object" },
-  { id: "environment", label: "Environment" },
-  { id: "config", label: "Config" },
+  { id: "overview", label: "Overview" },
   { id: "result", label: "Result" },
   { id: "decision", label: "Decision" },
+  { id: "datasets", label: "Datasets" },
+  { id: "setup", label: "Setup" },
   { id: "note", label: "Note" },
 ] as const;
+
+const COUNT_FORMATTER = new Intl.NumberFormat("en-US");
+
+function datasetSummary(dataSpec: Experiment["data_spec"]): string {
+  const first = dataSpec.datasets[0];
+  if (!first) return "No datasets recorded";
+
+  const role = first.role === "training" ? "Training" : "Evaluation";
+  const name = first.name.trim() || "Unnamed dataset";
+  const split = first.split.trim();
+  const datasetName = split ? `${name} / ${split}` : name;
+  const taskCount = first.task_count === null
+    ? null
+    : `${COUNT_FORMATTER.format(first.task_count)} tasks`;
+  const summary = [role, datasetName, taskCount].filter(Boolean).join(" · ");
+
+  return dataSpec.datasets.length > 1
+    ? `${summary} · ${dataSpec.datasets.length} datasets`
+    : summary;
+}
+
+function objectSummary(objectSpec: Experiment["object_spec"]): string {
+  const summary = [
+    objectSpec.model.trim(),
+    objectSpec.harness.trim(),
+  ].filter(Boolean).join(" · ");
+  return summary || "No model or Harness recorded";
+}
+
+function environmentSummary(
+  environmentSpec: Experiment["environment_spec"],
+): string {
+  const placement = environmentSpec.hardware.trim()
+    || environmentSpec.devices.map((device) => device.trim()).filter(Boolean)
+      .join(", ");
+  const summary = [
+    environmentSpec.platform.toUpperCase(),
+    placement,
+    environmentSpec.server.trim(),
+  ].filter(Boolean).join(" · ");
+  return summary || "No environment recorded";
+}
+
+function configSummary(config: Experiment["config"]): string {
+  const entries = Object.entries(config);
+  if (entries.length === 0) return "No parameters";
+  const [firstKey, firstValue] = entries[0];
+  const count = `${entries.length} ${entries.length === 1
+    ? "parameter"
+    : "parameters"}`;
+  return `${firstKey} ${String(firstValue)} · ${count}`;
+}
 
 function ExperimentActionMenu({
   deleting,
@@ -851,6 +902,14 @@ export default function ExperimentDetail({ id }: { id: string }) {
     baselineId: baseline?.id ?? null,
   });
   const taskHref = bundle.task ? `/task/${bundle.task.id}` : "/experiments";
+  const showSaveBar = dirty
+    || markdownEditing
+    || issues.length > 0
+    || saving
+    || deleting
+    || reloadingLatest
+    || Boolean(remoteConflict)
+    || remoteDeleted;
 
   return (
     <div
@@ -863,352 +922,427 @@ export default function ExperimentDetail({ id }: { id: string }) {
         aria-label="Experiment details"
         tabIndex={0}
       >
-        <Link href={taskHref} className="back-link">
-          ← {bundle.task?.title ?? "Experiments"}
-        </Link>
+        <div className="experiment-document-layout">
+          <main className="experiment-document">
+            {(remoteConflict || remoteDeleted || detailError) && (
+              <div className="experiment-document-alerts">
+                {(remoteConflict || remoteDeleted) && (
+                  <div className="conflict-banner" role="alert">
+                    <div>
+                      <strong>
+                        {remoteDeleted
+                          ? "This experiment was deleted remotely."
+                          : "This experiment changed remotely."}
+                      </strong>
+                      <p>Your local draft was not overwritten.</p>
+                      {remoteConflict && (
+                        <p>
+                          Remote: {remoteConflict.name} ·{" "}
+                          {EXPERIMENT_STATUS_LABELS[remoteConflict.status]}
+                          {" "}· updated {fmtDate(remoteConflict.updated_at)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="workspace-actions">
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={saving || deleting || reloadingLatest}
+                        onClick={() =>
+                          void refreshConflictComparison(visitRef.current)}
+                      >
+                        Keep editing / refresh comparison
+                      </button>
+                      {remoteConflict && (
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={saving || deleting || reloadingLatest}
+                          onClick={() => void loadLatest()}
+                        >
+                          {reloadingLatest
+                            ? "Loading latest…"
+                            : "Load latest"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {detailError && (
+                  <div className="error-banner" role="alert">
+                    <span>{detailError.message}</span>
+                    {detailError.retry && (
+                      <button type="button" className="btn" onClick={retry}>
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
-        {(remoteConflict || remoteDeleted) && (
-          <div className="conflict-banner" role="alert">
-            <div>
-              <strong>
-                {remoteDeleted
-                  ? "This experiment was deleted remotely."
-                  : "This experiment changed remotely."}
-              </strong>
-              <p>Your local draft was not overwritten.</p>
-              {remoteConflict && (
-                <p>
-                  Remote: {remoteConflict.name} ·{" "}
-                  {EXPERIMENT_STATUS_LABELS[remoteConflict.status]} · updated{" "}
-                  {fmtDate(remoteConflict.updated_at)}
-                </p>
-              )}
-            </div>
-            <div className="workspace-actions">
-              <button
-                type="button"
-                className="btn"
-                disabled={saving || deleting || reloadingLatest}
-                onClick={() => void refreshConflictComparison(visitRef.current)}
+            <section
+              id="overview"
+              className="experiment-overview experiment-section-canvas"
+              aria-labelledby="overview-title"
+            >
+              <nav
+                className="section-anchors"
+                aria-label="Experiment sections"
               >
-                Keep editing / refresh comparison
-              </button>
-              {remoteConflict && (
+                {EXPERIMENT_SECTION_LINKS.map((section) => (
+                  <a key={section.id} href={`#${section.id}`}>
+                    {section.label}
+                  </a>
+                ))}
+              </nav>
+
+              <header className="experiment-document-header">
+                <div className="experiment-document-heading">
+                  <Link href={taskHref} className="back-link">
+                    ← {bundle.task?.title ?? "Experiments"}
+                  </Link>
+                  <h1 id="overview-title">
+                    <textarea
+                      className="experiment-title-input"
+                      aria-label="Experiment Name"
+                      rows={1}
+                      value={draft.name}
+                      onChange={(event) =>
+                        patchDraft({ name: event.target.value })}
+                    />
+                  </h1>
+                  <div className="experiment-title-metadata">
+                    <span className="experiment-id">
+                      {formatExperimentId(draft.experiment_no)}
+                    </span>
+                    <span className="experiment-metadata-divider" />
+                    <span>Saved · updated {fmtDate(server.updated_at)}</span>
+                  </div>
+                </div>
+
+                <div className="experiment-header-actions">
+                  <Link
+                    className={`btn ${compareBlocked ? "disabled" : ""}`}
+                    aria-disabled={compareBlocked}
+                    title={reloadingLatest
+                      ? "Wait for the latest saved data before comparing."
+                      : hasLocalChanges
+                        ? "Finish and save changes before comparing."
+                        : "Compare saved data."}
+                    href={compareBlocked
+                      ? `/experiments/${draft.id}`
+                      : `/experiments/compare?${compareQuery}`}
+                    onClick={(event) => {
+                      if (compareBlocked) event.preventDefault();
+                    }}
+                  >
+                    Compare
+                  </Link>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={
+                      hasLocalChanges
+                      || saving
+                      || deleting
+                      || reloadingLatest
+                      || Boolean(remoteConflict)
+                      || remoteDeleted
+                    }
+                    title={hasLocalChanges
+                      ? "Finish and save changes before duplicating."
+                      : "Duplicate saved context."}
+                    onClick={() => setDuplicateOpen(true)}
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    ref={activityTriggerRef}
+                    type="button"
+                    className="btn activity-drawer-trigger"
+                    aria-controls="experiment-activity-drawer"
+                    aria-expanded={activityOpen}
+                    aria-label={activityOpen
+                      ? "Hide activity"
+                      : "Show activity"}
+                    onClick={() => setActivityOpen(true)}
+                  >
+                    <Icon name="activity" size={16} />
+                    Activity
+                  </button>
+                  <ExperimentActionMenu
+                    key={draft.id}
+                    deleting={deleting}
+                    disabled={saving || deleting || reloadingLatest}
+                    onDelete={() => void removeExperiment()}
+                  />
+                </div>
+              </header>
+
+              <section
+                className="experiment-properties"
+                aria-label="Experiment properties"
+              >
+                <div className="experiment-property">
+                  <span>Task</span>
+                  <Link href={taskHref}>
+                    {bundle.task?.title ?? "Deleted task"}
+                  </Link>
+                </div>
+                <label className="experiment-property">
+                  <span>Owner</span>
+                  <select
+                    aria-label="Experiment Owner"
+                    value={draft.owner_id ?? ""}
+                    onChange={(event) => patchDraft({
+                      owner_id: event.target.value || null,
+                    })}
+                  >
+                    <option value="">Choose an Owner</option>
+                    {bundle.members.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="experiment-property">
+                  <span>Status</span>
+                  <div className="experiment-property-control">
+                    <select
+                      aria-label="Experiment Status"
+                      value={draft.status}
+                      onChange={(event) => patchDraft({
+                        status: event.target.value as Experiment["status"],
+                      })}
+                    >
+                      {allowedTargets(server.status).map((status) => (
+                        <option key={status} value={status}>
+                          {EXPERIMENT_STATUS_LABELS[status]}
+                        </option>
+                      ))}
+                    </select>
+                    {draft.status !== server.status && (
+                      <span className="saved-status-context">
+                        Saved as{" "}
+                        <ExperimentStatusBadge status={server.status} />
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="experiment-property">
+                  <span>Baseline</span>
+                  <details className="baseline-property">
+                    <summary>
+                      <span>
+                        {baseline
+                          ? `${formatExperimentId(baseline.experiment_no)} · ${baseline.name}`
+                          : "No baseline"}
+                      </span>
+                      <span aria-hidden="true">Edit</span>
+                    </summary>
+                    <div className="baseline-property-editor">
+                      <BaselinePicker
+                        compact
+                        current={draft}
+                        candidates={bundle.candidates}
+                        value={draft.baseline_experiment_id}
+                        onChange={(baselineId) => patchDraft({
+                          baseline_experiment_id: baselineId,
+                        })}
+                      />
+                    </div>
+                  </details>
+                </div>
+                <p className="experiment-lifecycle">
+                  Created {fmtDate(server.created_at)} · Started{" "}
+                  {fmtDate(server.started_at) || "—"} · Completed{" "}
+                  {fmtDate(server.completed_at) || "—"}
+                </p>
+              </section>
+            </section>
+
+            <ExperimentSection id="result" title="Result" tone="subtle">
+              <ResultEditor
+                metrics={draft.metrics}
+                featuredMetricKeys={draft.featured_metric_keys}
+                resultSummary={draft.result_summary}
+                onChange={(result) => patchDraft({
+                  metrics: result.metrics,
+                  featured_metric_keys: result.featuredMetricKeys,
+                  result_summary: result.resultSummary,
+                })}
+              />
+              <AttachmentGallery
+                scope={{
+                  taskId: server.task_id,
+                  experimentId: server.id,
+                }}
+                visitKey={`experiment:${server.id}`}
+                attachments={bundle.attachments}
+                title="Plots & images"
+                emptyMessage="No plots or images attached."
+                altFallback="Experiment plot"
+                onChanged={() => void loadRelated(visitRef.current)}
+              />
+              {baseline && (
+                <BaselineSummary current={draft} baseline={baseline} />
+              )}
+            </ExperimentSection>
+
+            <ExperimentSection id="decision" title="Decision">
+              <DecisionEditor
+                key={`${draft.id}-decision-${markdownEpoch}`}
+                outcome={draft.decision_outcome}
+                notes={draft.decision_notes}
+                onChange={(decision_outcome, decision_notes) => patchDraft({
+                  decision_outcome,
+                  decision_notes,
+                })}
+                onEditingChange={(editing) =>
+                  setMarkdownEditor("decision", editing)}
+              />
+            </ExperimentSection>
+
+            <ExperimentSection id="datasets" title="Datasets" tone="subtle">
+              <ExperimentDisclosure
+                title="Dataset"
+                summary={datasetSummary(draft.data_spec)}
+                actionLabel="Edit data"
+              >
+                <DataEditor
+                  value={draft.data_spec}
+                  onChange={(data_spec) => patchDraft({ data_spec })}
+                />
+              </ExperimentDisclosure>
+            </ExperimentSection>
+
+            <ExperimentSection id="setup" title="Setup">
+              <div className="experiment-setup-disclosures">
+                <ExperimentDisclosure
+                  title="Object"
+                  summary={objectSummary(draft.object_spec)}
+                >
+                  <ObjectEditor
+                    value={draft.object_spec}
+                    onChange={(object_spec) => patchDraft({ object_spec })}
+                  />
+                </ExperimentDisclosure>
+                <ExperimentDisclosure
+                  title="Environment"
+                  summary={environmentSummary(draft.environment_spec)}
+                >
+                  <EnvironmentEditor
+                    value={draft.environment_spec}
+                    onChange={(environment_spec) =>
+                      patchDraft({ environment_spec })}
+                  />
+                </ExperimentDisclosure>
+                <ExperimentDisclosure
+                  title="Config"
+                  summary={configSummary(draft.config)}
+                >
+                  <ConfigEditor
+                    value={draft.config}
+                    onChange={(config) => patchDraft({ config })}
+                  />
+                </ExperimentDisclosure>
+              </div>
+            </ExperimentSection>
+
+            <ExperimentSection id="note" title="Note" tone="subtle">
+              <div className="stacked-field">
+                <span>Experiment Note</span>
+                <MarkdownField
+                  key={`${draft.id}-note-${markdownEpoch}`}
+                  value={draft.notes}
+                  minHeight={180}
+                  onSave={(notes) => patchDraft({ notes })}
+                  onDraftChange={(notes) => patchDraft({ notes })}
+                  onEditingChange={(editing) =>
+                    setMarkdownEditor("note", editing)}
+                  placeholder="Observations, caveats, links, and follow-up ideas"
+                />
+              </div>
+            </ExperimentSection>
+
+            {issues.length > 0 && (
+              <div className="validation-summary" role="alert">
+                <strong>Resolve these fields before saving:</strong>
+                <ul>
+                  {issues.map((issue) => (
+                    <li key={`${issue.field}-${issue.message}`}>
+                      {issue.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {showSaveBar && (
+              <div className="experiment-save-bar">
+                <span>
+                  {markdownEditing
+                    ? "Finish Markdown editing before saving"
+                    : dirty
+                      ? "Unsaved changes"
+                      : "Review the current experiment state"}
+                </span>
                 <button
                   type="button"
                   className="btn"
-                  disabled={saving || deleting || reloadingLatest}
-                  onClick={() => void loadLatest()}
+                  disabled={
+                    !dirty
+                    || saving
+                    || deleting
+                    || reloadingLatest
+                    || markdownEditing
+                  }
+                  onClick={() => {
+                    setDraft(structuredClone(server));
+                    draftRef.current = server;
+                    draftRevisionRef.current = 0;
+                    setDirty(false);
+                    dirtyRef.current = false;
+                    clearSessionExperimentDraft(
+                      getSessionExperimentDraftStorage(),
+                      server.id,
+                    );
+                    setIssues([]);
+                  }}
                 >
-                  {reloadingLatest ? "Loading latest…" : "Load latest"}
+                  Discard
                 </button>
-              )}
-            </div>
-          </div>
-        )}
-        {detailError && (
-          <div className="error-banner" role="alert">
-            <span>{detailError.message}</span>
-            {detailError.retry && (
-              <button type="button" className="btn" onClick={retry}>Retry</button>
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={
+                    !dirty
+                    || saving
+                    || deleting
+                    || reloadingLatest
+                    || markdownEditing
+                    || Boolean(remoteConflict)
+                    || remoteDeleted
+                  }
+                  onClick={() => void save()}
+                >
+                  {saving ? "Saving…" : "Save changes"}
+                </button>
+              </div>
             )}
-          </div>
-        )}
+          </main>
 
-        <PageHeader
-          eyebrow={formatExperimentId(draft.experiment_no)}
-          title={
-            <input
-              className="experiment-title-input"
-              aria-label="Experiment Name"
-              value={draft.name}
-              onChange={(event) => patchDraft({ name: event.target.value })}
-            />
-          }
-          actions={
-            <>
-              <Link
-                className={`btn ${compareBlocked ? "disabled" : ""}`}
-                aria-disabled={compareBlocked}
-                title={reloadingLatest
-                  ? "Wait for the latest saved data before comparing."
-                  : hasLocalChanges
-                    ? "Finish and save changes before comparing."
-                    : "Compare saved data."}
-                href={compareBlocked
-                  ? `/experiments/${draft.id}`
-                  : `/experiments/compare?${compareQuery}`}
-                onClick={(event) => {
-                  if (compareBlocked) event.preventDefault();
-                }}
-              >
-                Compare
-              </Link>
-              <button
-                type="button"
-                className="btn"
-                disabled={
-                  hasLocalChanges
-                  || saving
-                  || deleting
-                  || reloadingLatest
-                  || Boolean(remoteConflict)
-                  || remoteDeleted
-                }
-                title={hasLocalChanges
-                  ? "Finish and save changes before duplicating."
-                  : "Duplicate saved context."}
-                onClick={() => setDuplicateOpen(true)}
-              >
-                Duplicate
-              </button>
-              <button
-                ref={activityTriggerRef}
-                type="button"
-                className="btn activity-drawer-trigger"
-                aria-controls="experiment-activity-drawer"
-                aria-expanded={activityOpen}
-                aria-label={activityOpen ? "Hide activity" : "Show activity"}
-                onClick={() => setActivityOpen(true)}
-              >
-                <Icon name="activity" size={16} />
-                Activity
-              </button>
-              <ExperimentActionMenu
-                key={draft.id}
-                deleting={deleting}
-                disabled={saving || deleting || reloadingLatest}
-                onDelete={() => void removeExperiment()}
-              />
-            </>
-          }
-        />
-
-        <section className="experiment-properties" aria-label="Experiment properties">
-          <label>
-            <span>Task</span>
-            <Link href={taskHref}>{bundle.task?.title ?? "Deleted task"}</Link>
-          </label>
-          <label>
-            <span>Owner</span>
-            <select
-              aria-label="Experiment Owner"
-              value={draft.owner_id ?? ""}
-              onChange={(event) => patchDraft({
-                owner_id: event.target.value || null,
-              })}
-            >
-              <option value="">Choose an Owner</option>
-              {bundle.members.map((member) => (
-                <option key={member.id} value={member.id}>{member.name}</option>
+          <aside className="experiment-outline">
+            <nav aria-label="Experiment outline">
+              {EXPERIMENT_SECTION_LINKS.map((section) => (
+                <a key={section.id} href={`#${section.id}`}>
+                  {section.label}
+                </a>
               ))}
-            </select>
-          </label>
-          <label>
-            <span>Status</span>
-            <select
-              aria-label="Experiment Status"
-              value={draft.status}
-              onChange={(event) => patchDraft({
-                status: event.target.value as Experiment["status"],
-              })}
-            >
-              {allowedTargets(server.status).map((status) => (
-                <option key={status} value={status}>
-                  {EXPERIMENT_STATUS_LABELS[status]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div>
-            <span>Current status</span>
-            <ExperimentStatusBadge status={server.status} />
-          </div>
-          <div><span>Created</span><strong>{fmtDate(server.created_at)}</strong></div>
-          <div><span>Started</span><strong>{fmtDate(server.started_at) || "—"}</strong></div>
-          <div><span>Completed</span><strong>{fmtDate(server.completed_at) || "—"}</strong></div>
-          <BaselinePicker
-            current={draft}
-            candidates={bundle.candidates}
-            value={draft.baseline_experiment_id}
-            onChange={(baselineId) => patchDraft({
-              baseline_experiment_id: baselineId,
-            })}
-          />
-        </section>
-
-        <nav className="section-anchors" aria-label="Experiment sections">
-          {EXPERIMENT_SECTION_LINKS.map((section) => (
-            <a key={section.id} href={`#${section.id}`}>
-              {section.label}
-            </a>
-          ))}
-        </nav>
-
-        <ExperimentSection
-          id="data"
-          title="Data"
-          description="Training and evaluation datasets used by this run."
-        >
-          <DataEditor
-            value={draft.data_spec}
-            onChange={(data_spec) => patchDraft({ data_spec })}
-          />
-        </ExperimentSection>
-        <ExperimentSection
-          id="object"
-          title="Object"
-          description="Model plus the Prompt, Skills, and Tools that make up the Harness."
-        >
-          <ObjectEditor
-            value={draft.object_spec}
-            onChange={(object_spec) => patchDraft({ object_spec })}
-          />
-        </ExperimentSection>
-        <ExperimentSection
-          id="environment"
-          title="Environment"
-          description="NPU or GPU placement and evaluator context."
-        >
-          <EnvironmentEditor
-            value={draft.environment_spec}
-            onChange={(environment_spec) => patchDraft({ environment_spec })}
-          />
-        </ExperimentSection>
-        <ExperimentSection
-          id="config"
-          title="Config"
-          description="Typed experiment parameters; values are stored as structured JSON properties."
-        >
-          <ConfigEditor
-            value={draft.config}
-            onChange={(config) => patchDraft({ config })}
-          />
-        </ExperimentSection>
-        <ExperimentSection
-          id="result"
-          title="Result"
-          description="Manual numeric metrics, qualitative summary, plots, and captions."
-        >
-          <ResultEditor
-            metrics={draft.metrics}
-            featuredMetricKeys={draft.featured_metric_keys}
-            resultSummary={draft.result_summary}
-            onChange={(result) => patchDraft({
-              metrics: result.metrics,
-              featured_metric_keys: result.featuredMetricKeys,
-              result_summary: result.resultSummary,
-            })}
-          />
-          <AttachmentGallery
-            scope={{
-              taskId: server.task_id,
-              experimentId: server.id,
-            }}
-            visitKey={`experiment:${server.id}`}
-            attachments={bundle.attachments}
-            title="Plots & images"
-            emptyMessage="No plots or images attached."
-            altFallback="Experiment plot"
-            onChanged={() => void loadRelated(visitRef.current)}
-          />
-        </ExperimentSection>
-        <ExperimentSection
-          id="decision"
-          title="Decision"
-          description="A structured outcome and the reasoning that should guide the Task."
-        >
-          <DecisionEditor
-            key={`${draft.id}-decision-${markdownEpoch}`}
-            outcome={draft.decision_outcome}
-            notes={draft.decision_notes}
-            onChange={(decision_outcome, decision_notes) => patchDraft({
-              decision_outcome,
-              decision_notes,
-            })}
-            onEditingChange={(editing) => setMarkdownEditor("decision", editing)}
-          />
-        </ExperimentSection>
-        <ExperimentSection
-          id="note"
-          title="Note"
-          description="Freeform experiment-specific Markdown source."
-        >
-          <div className="stacked-field">
-            <span>Experiment Note</span>
-            <MarkdownField
-              key={`${draft.id}-note-${markdownEpoch}`}
-              value={draft.notes}
-              minHeight={180}
-              onSave={(notes) => patchDraft({ notes })}
-              onDraftChange={(notes) => patchDraft({ notes })}
-              onEditingChange={(editing) => setMarkdownEditor("note", editing)}
-              placeholder="Observations, caveats, links, and follow-up ideas"
-            />
-          </div>
-        </ExperimentSection>
-
-        {baseline && <BaselineSummary current={draft} baseline={baseline} />}
-
-        {issues.length > 0 && (
-          <div className="validation-summary" role="alert">
-            <strong>Resolve these fields before saving:</strong>
-            <ul>
-              {issues.map((issue) => (
-                <li key={`${issue.field}-${issue.message}`}>{issue.message}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <div className="experiment-save-bar">
-          <span>
-            {markdownEditing
-              ? "Finish Markdown editing before saving"
-              : dirty
-                ? "Unsaved changes"
-                : `Saved · updated ${fmtDate(server.updated_at)}`}
-          </span>
-          <button
-            type="button"
-            className="btn"
-            disabled={
-              !dirty ||
-              saving ||
-              deleting ||
-              reloadingLatest ||
-              markdownEditing
-            }
-            onClick={() => {
-              setDraft(structuredClone(server));
-              draftRef.current = server;
-              draftRevisionRef.current = 0;
-              setDirty(false);
-              dirtyRef.current = false;
-              clearSessionExperimentDraft(
-                getSessionExperimentDraftStorage(),
-                server.id,
-              );
-              setIssues([]);
-            }}
-          >
-            Discard
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={
-              !dirty ||
-              saving ||
-              deleting ||
-              reloadingLatest ||
-              markdownEditing ||
-              Boolean(remoteConflict) ||
-              remoteDeleted
-            }
-            onClick={() => void save()}
-          >
-            {saving ? "Saving…" : "Save changes"}
-          </button>
+            </nav>
+          </aside>
         </div>
       </div>
 

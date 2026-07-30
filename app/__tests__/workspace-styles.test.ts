@@ -309,7 +309,7 @@ describe("workspace visual contracts", () => {
     const css = workspaceCss();
     for (const selector of [
       ".section-anchors a:focus-visible",
-      '.section-anchors:has(~ #note:target) a[href="#note"]',
+      '.experiment-document:has(#note:target) .section-anchors a[href="#note"]',
       ".experiment-section:target .experiment-section-heading h2",
       ".attachment-preview:hover",
     ]) {
@@ -322,7 +322,7 @@ describe("workspace visual contracts", () => {
     );
     expect(ruleBody(
       css,
-      '.section-anchors:has(~ #note:target) a[href="#note"]',
+      '.experiment-document:has(#note:target) .section-anchors a[href="#note"]',
     )).toMatch(/border-bottom-color\s*:\s*var\(--accent\)/);
   });
 
@@ -366,6 +366,20 @@ describe("workspace visual contracts", () => {
           `${name} metadata contrast on ${property}`,
         ).toBeGreaterThanOrEqual(4.5);
       }
+    }
+  });
+
+  it("keeps Experiment document metadata AA-readable in dark mode", () => {
+    const css = workspaceCss();
+    for (const selector of [
+      ".experiment-title-metadata",
+      ".experiment-properties .experiment-property > span",
+      ".experiment-lifecycle",
+      ".experiment-outline a",
+    ]) {
+      expect(ruleBody(css, selector), selector).toMatch(
+        /color\s*:\s*var\(--text-secondary\)/,
+      );
     }
   });
 
@@ -594,7 +608,7 @@ describe("workspace visual contracts", () => {
       .toMatch(/max-height\s*:\s*none/);
   });
 
-  it("gives detail titles the full row and keeps metadata and controls centered in normal flow", () => {
+  it("keeps detail titles readable and centers the Experiment document flow", () => {
     const taskHeader = ruleBody(globals, ".task-detail-page .page-header");
     expect(taskHeader).toMatch(/position\s*:\s*relative/);
     expect(taskHeader).toMatch(/display\s*:\s*block/);
@@ -619,33 +633,37 @@ describe("workspace visual contracts", () => {
     expect(taskMetadata).toMatch(/margin\s*:\s*[^;]*auto/);
 
     const css = workspaceCss();
+    const experimentLayout = ruleBody(css, ".experiment-document-layout");
+    expect(experimentLayout).toMatch(
+      /grid-template-columns\s*:\s*minmax\(0,\s*800px\)/,
+    );
+    expect(experimentLayout).toMatch(/justify-content\s*:\s*center/);
+
     const experimentTitle = ruleBody(
       css,
-      ".experiment-detail-page .page-header h1",
+      ".experiment-title-input",
     );
     expect(experimentTitle).toMatch(/width\s*:\s*100%/);
-    expect(experimentTitle).toMatch(/max-width\s*:\s*none/);
-    expect(experimentTitle).toMatch(/text-wrap\s*:\s*wrap/);
+    expect(experimentTitle).toMatch(/border\s*:\s*0/);
+    expect(experimentTitle).toMatch(/background\s*:\s*transparent/);
 
     const experimentMetadata = ruleBody(css, ".experiment-properties");
     expect(experimentMetadata).toMatch(
-      /width\s*:\s*min\(880px,\s*100%\)/,
+      /width\s*:\s*min\(660px,\s*100%\)/,
     );
-    expect(experimentMetadata).toMatch(/margin\s*:\s*[^;]*auto/);
+    expect(experimentMetadata).toMatch(/margin\s*:\s*46px\s+0\s+0/);
 
     const anchors = ruleBody(css, ".section-anchors");
-    expect(anchors).toMatch(/position\s*:\s*static/);
-    expect(anchors).toMatch(/width\s*:\s*min\(880px,\s*100%\)/);
-    expect(anchors).toMatch(/margin\s*:\s*[^;]*auto/);
+    expect(anchors).toMatch(/display\s*:\s*flex/);
+    expect(anchors).toMatch(/border-bottom\s*:\s*1px\s+solid\s+var\(--border\)/);
     expect(anchors).not.toMatch(/\btop\s*:/);
     expect(anchors).not.toMatch(/\bz-index\s*:/);
 
     const saveBar = ruleBody(css, ".experiment-save-bar");
-    expect(saveBar).toMatch(/position\s*:\s*static/);
-    expect(saveBar).toMatch(/width\s*:\s*min\(880px,\s*100%\)/);
-    expect(saveBar).toMatch(/margin\s*:\s*[^;]*auto/);
-    expect(saveBar).not.toMatch(/\bbottom\s*:/);
-    expect(saveBar).not.toMatch(/\bz-index\s*:/);
+    expect(saveBar).toMatch(/position\s*:\s*fixed/);
+    expect(saveBar).toMatch(/width\s*:\s*max-content/);
+    expect(saveBar).toMatch(/bottom\s*:\s*28px/);
+    expect(saveBar).toMatch(/z-index\s*:\s*35/);
   });
 
   it("pins the desktop Task Board and gives every column a hidden independent scrollbar", () => {

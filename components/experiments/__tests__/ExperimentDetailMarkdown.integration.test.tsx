@@ -160,7 +160,7 @@ describe("ExperimentDetail Markdown draft integration", () => {
     fireEvent.click(await screen.findByRole("button", {
       name: "Observations, caveats, links, and follow-up ideas",
     }));
-    const editor = firstVisit.container.querySelector("textarea");
+    const editor = firstVisit.container.querySelector(".md-textarea");
     expect(editor).not.toBeNull();
     fireEvent.change(editor!, {
       target: { value: "Keystroke-safe **Markdown**" },

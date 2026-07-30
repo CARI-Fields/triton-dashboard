@@ -3,6 +3,7 @@ import Script from "next/script";
 import AuthGate from "@/components/AuthGate";
 import Navbar from "@/components/Navbar";
 import ThemeProvider from "@/components/theme/ThemeProvider";
+import { ibmPlexMono, ibmPlexSans } from "@/app/fonts";
 import "./globals.css";
 import "./experiment-workspace.css";
 
@@ -28,7 +29,11 @@ export default function RootLayout({
   children: React.ReactNode;
   }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${ibmPlexSans.variable} ${ibmPlexMono.variable}`}
+      suppressHydrationWarning
+    >
       <body>
         <Script id="theme-init" strategy="beforeInteractive">
           {themeScript}

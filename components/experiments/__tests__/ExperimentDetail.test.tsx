@@ -261,7 +261,42 @@ describe("ExperimentDetail orchestration", () => {
   });
 
   it("renders the approved document record layout", async () => {
-    const current = experiment();
+    const current = experiment({
+      data_spec: {
+        datasets: [{
+          role: "evaluation",
+          name: "ImageNet-1k",
+          split: "val",
+          revision: "v2.1",
+          task_count: 50_000,
+          samples_per_task: 1,
+        }],
+      },
+      object_spec: {
+        model: "ResNet-50-v2",
+        harness: "VisionLab-Harness",
+        parent_harness: "",
+        prompt: "",
+        prompt_change: "",
+        skills: [],
+        tools: [],
+      },
+      environment_spec: {
+        platform: "gpu",
+        server: "lab-03",
+        devices: ["8× A100 80GB"],
+        hardware: "",
+        evaluator: "",
+        revision: "",
+        precision_policy: "",
+      },
+      config: {
+        learning_rate: 0.001,
+        epochs: 50,
+        batch_size: 128,
+        fused: true,
+      },
+    });
     const saveRequest = deferred<ExperimentUpdateResult>();
     vi.mocked(loadExperimentBundle).mockResolvedValue(bundle(current));
     vi.mocked(updateExperiment).mockReturnValue(saveRequest.promise);
@@ -269,22 +304,48 @@ describe("ExperimentDetail orchestration", () => {
     render(<ExperimentDetail id={current.id} />);
 
     const nameInput = await screen.findByLabelText("Experiment Name");
-    expect(screen.getByRole("navigation", { name: "Experiment sections" }))
-      .toBeDefined();
+    expect(nameInput.tagName).toBe("TEXTAREA");
+    const sectionNavigation = screen.getByRole("navigation", {
+      name: "Experiment sections",
+    });
+    const outlineNavigation = screen.getByRole("navigation", {
+      name: "Experiment outline",
+    });
     for (const [name, id] of [
-      ["Data", "data"],
-      ["Object", "object"],
-      ["Environment", "environment"],
-      ["Config", "config"],
+      ["Overview", "overview"],
       ["Result", "result"],
       ["Decision", "decision"],
+      ["Datasets", "datasets"],
+      ["Setup", "setup"],
       ["Note", "note"],
     ]) {
-      expect(screen.getByRole("link", { name }).getAttribute("href"))
+      expect(within(sectionNavigation).getByRole("link", { name })
+        .getAttribute("href"))
+        .toBe(`#${id}`);
+      expect(within(outlineNavigation).getByRole("link", { name })
+        .getAttribute("href"))
         .toBe(`#${id}`);
       expect(document.getElementById(id)?.getAttribute("aria-labelledby"))
         .toBe(`${id}-title`);
     }
+    expect(screen.getByText(
+      "Evaluation · ImageNet-1k / val · 50,000 tasks",
+    )).toBeDefined();
+    expect(screen.getByText(
+      "ResNet-50-v2 · VisionLab-Harness",
+    )).toBeDefined();
+    expect(screen.getByText(
+      "GPU · 8× A100 80GB · lab-03",
+    )).toBeDefined();
+    expect(screen.getByText(
+      "learning_rate 0.001 · 4 parameters",
+    )).toBeDefined();
+    for (const title of ["Object", "Environment", "Config"]) {
+      const details = screen.getByText(title).closest("details");
+      expect(details).not.toBeNull();
+      expect((details as HTMLDetailsElement).open).toBe(false);
+    }
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     expect(screen.getByRole("region", { name: "Experiment details" }))
       .toBeDefined();
     const showActivity = screen.getByRole("button", {

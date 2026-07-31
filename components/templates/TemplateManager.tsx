@@ -6,11 +6,13 @@ import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
 import TemplateList from "@/components/templates/TemplateList";
 import NewTemplateDialog from "@/components/templates/NewTemplateDialog";
 import TemplateEditor from "@/components/templates/TemplateEditor";
+import TemplateHistoryDrawer from "@/components/templates/TemplateHistoryDrawer";
 import {
   archiveTemplate,
   emptyTemplateDraft,
   listTemplateSummaries,
   loadTemplateDraft,
+  restoreTemplateVersion,
   saveTemplate,
   unarchiveTemplate,
   type TemplateDraft,
@@ -26,6 +28,7 @@ export default function TemplateManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [newOpen, setNewOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const reloadSummaries = useCallback(async () => {
     const requestVersion = ++reloadVersion.current;
@@ -102,6 +105,13 @@ export default function TemplateManager() {
     await selectTemplate(selectedId);
   }
 
+  async function restore(versionNo: number) {
+    if (!selectedId) return;
+    await restoreTemplateVersion(selectedId, versionNo);
+    await reloadSummaries();
+    await selectTemplate(selectedId);
+  }
+
   if (loading && summaries.length === 0) {
     return <WorkspaceSkeleton variant="table" label="Loading Templates" />;
   }
@@ -118,6 +128,9 @@ export default function TemplateManager() {
         actions={
           selectedSummary ? (
             <>
+              <button type="button" className="btn ghost" onClick={() => setHistoryOpen(true)}>
+                History
+              </button>
               <button type="button" className="btn ghost" onClick={toggleArchive}>
                 {archived ? "Unarchive" : "Archive"}
               </button>
@@ -147,6 +160,12 @@ export default function TemplateManager() {
           )}
         </div>
       </div>
+      <TemplateHistoryDrawer
+        templateId={selectedId}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onRestore={restore}
+      />
       <NewTemplateDialog open={newOpen} onClose={() => setNewOpen(false)} onCreate={createTemplate} />
     </div>
   );

@@ -138,3 +138,45 @@ describe("template repository", () => {
     });
   });
 });
+
+describe("template restore", () => {
+  it("maps a snapshot into a save and returns the new revision", async () => {
+    vi.mocked(mocks.table("experiment_templates").maybeSingle)
+      .mockResolvedValue({ data: template, error: null });
+    vi.mocked(mocks.table("experiment_template_versions").maybeSingle)
+      .mockResolvedValue({
+        data: {
+          snapshot: [{
+            id: "f1",
+            label: "Metrics",
+            color_token: "blue",
+            position: 1,
+            archived_at: null,
+            keys: [{
+              id: "k1",
+              key: "pass@1",
+              value_type: "number",
+              required: false,
+              position: 1,
+              archived_at: null,
+              options: [],
+            }],
+          }],
+        },
+        error: null,
+      });
+    vi.mocked(mocks.rpc).mockResolvedValue({
+      data: { template_id: template.id, schema_revision: 4, version_no: 4 },
+      error: null,
+    });
+
+    const { restoreTemplateVersion } = await import("@/lib/templates/repository");
+    const result = await restoreTemplateVersion(template.id, 2);
+
+    expect(result.schema_revision).toBe(4);
+    expect(mocks.rpc).toHaveBeenCalledWith("save_experiment_template", expect.objectContaining({
+      p_name: "Benchmark",
+      p_expected_schema_revision: 3,
+    }));
+  });
+});

@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   archive: vi.fn(),
   unarchive: vi.fn(),
   create: vi.fn(),
+  listVersions: vi.fn(),
+  restore: vi.fn(),
 }));
 
 vi.mock("@/lib/templates/repository", () => ({
@@ -18,6 +20,8 @@ vi.mock("@/lib/templates/repository", () => ({
   saveTemplate: mocks.save,
   archiveTemplate: mocks.archive,
   unarchiveTemplate: mocks.unarchive,
+  listTemplateVersions: mocks.listVersions,
+  restoreTemplateVersion: mocks.restore,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -80,5 +84,23 @@ describe("TemplateManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(mocks.archive).toHaveBeenCalledWith("t1"));
     expect(confirmSpy).toHaveBeenCalled();
+  });
+
+  it("opens history and lists versions", async () => {
+    mocks.listVersions.mockResolvedValue([{
+      id: "v1",
+      version_no: 2,
+      reason: "Schema edited",
+      source: "browser",
+      schema_revision: 2,
+      created_at: "2026-07-31T00:00:00.000Z",
+    }]);
+    render(<TemplateManager />);
+    await screen.findByText("Benchmark A");
+    fireEvent.click(screen.getByRole("option", { name: /Benchmark A/ }));
+    await screen.findByRole("button", { name: "Save schema" });
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await screen.findByText("v2");
+    expect(screen.getByText("Schema edited")).not.toBeNull();
   });
 });

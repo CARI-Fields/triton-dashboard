@@ -253,7 +253,7 @@ select throws_ok(
      '', 'number', 2
    )$$,
   '23514',
-  'violates check constraint "experiment_template_keys_blank_check"',
+  'new row for relation "experiment_template_keys" violates check constraint "experiment_template_keys_blank_check"',
   'blank Key strings are rejected'
 );
 
@@ -300,7 +300,7 @@ select throws_ok(
      0.5
    )$$,
   '23503',
-  'violates foreign key constraint "experiment_values_experiment_template_fkey"',
+  'insert or update on table "experiment_values" violates foreign key constraint "experiment_values_experiment_template_fkey"',
   'a Value cannot pair an Experiment with another Template Key'
 );
 
@@ -314,7 +314,7 @@ select throws_ok(
      'not a number', 0.5
    )$$,
   '23514',
-  'violates check constraint "experiment_values_single_scalar_check"',
+  'new row for relation "experiment_values" violates check constraint "experiment_values_single_scalar_check"',
   'a Value row stores at most one scalar column'
 );
 
@@ -328,7 +328,7 @@ select throws_ok(
      'NaN'::double precision
    )$$,
   '23514',
-  'violates check constraint "experiment_values_number_finite_check"',
+  'new row for relation "experiment_values" violates check constraint "experiment_values_number_finite_check"',
   'NaN Number Values are rejected'
 );
 

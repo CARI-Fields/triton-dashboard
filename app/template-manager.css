@@ -329,3 +329,97 @@
   padding: 2px 10px;
   font-size: 13px;
 }
+
+.template-compare { min-width: 0; }
+.compare-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.compare-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.compare-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+.compare-scroll:focus-visible { outline: var(--focus-ring); }
+.compare-table { border-collapse: collapse; min-width: 100%; }
+.compare-table th,
+.compare-table td {
+  border-bottom: 1px solid var(--line-soft);
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.compare-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+.compare-table thead tr:first-child th { top: 0; }
+.compare-table thead tr:nth-child(2) th { top: 34px; }
+.compare-group {
+  background: var(--field-soft);
+  color: var(--field-accent);
+  font-weight: 600;
+  text-align: center;
+}
+.compare-key-head { position: relative; min-width: 120px; }
+.compare-key-head button {
+  border: 0;
+  background: transparent;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0;
+}
+.compare-filter-toggle { border: 0; background: transparent; cursor: pointer; }
+.compare-filter-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-3);
+  padding: 8px;
+}
+.compare-filter-menu input { width: 140px; }
+.compare-filter-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.compare-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.compare-baseline-row td { background: var(--accent-subtle); }
+.compare-baseline-row td:first-child::before { content: "◎ "; }
+.compare-baseline-note { color: var(--accent-foreground); font-size: 13px; }
+.compare-cell-different { background: var(--warn-soft); }
+.compare-delta {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+.compare-missing { color: var(--text-tertiary); }
+.compare-corner { text-align: left; }

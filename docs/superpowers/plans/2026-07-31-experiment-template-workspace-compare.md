@@ -1303,7 +1303,7 @@ export default function TemplateExperimentCompare({
               >
                 <option value="">Toggle columns…</option>
                 {activeKeys.map((key) => (
-                  <option key={key.id} value={key.id}>
+                  <option key={key.id} value={key.id ?? ""}>
                     {visibleKeys.some((visible) => visible.id === key.id)
                       ? `Hide ${key.key}`
                       : `Show ${key.key}`}
@@ -1325,7 +1325,9 @@ export default function TemplateExperimentCompare({
                     Experiment
                   </th>
                   {template.fields.map((field) => {
-                    const fieldKeys = visibleKeys.filter((key) => key.field_id === field.id);
+                    const fieldKeys = field.keys.filter((key) =>
+                      visibleKeys.some((visible) => visible.id === key.id),
+                    );
                     if (fieldKeys.length === 0) return null;
                     return (
                       <th
@@ -1436,7 +1438,10 @@ function CompareRowView({
             <CellValue value={raw} />
             {difference?.different && difference.delta !== null ? (
               <span className="compare-delta">
-                {difference.delta >= 0 ? "+" : ""}{difference.delta}
+                {(() => {
+                  const rounded = Number(difference.delta.toFixed(4));
+                  return `${rounded >= 0 ? "+" : ""}${rounded}`;
+                })()}
               </span>
             ) : null}
           </td>

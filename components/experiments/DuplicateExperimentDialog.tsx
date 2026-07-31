@@ -8,7 +8,15 @@ import {
   type FormEvent,
 } from "react";
 import type { Experiment, Member } from "@/lib/types";
-import { duplicateExperiment } from "@/lib/experiments/repository";
+import {
+  duplicateExperiment,
+  nextExperimentPosition,
+} from "@/lib/experiments/repository";
+import { duplicateTemplateExperiment } from "@/lib/experiments/values";
+import {
+  loadTemplateDraft,
+  type TemplateDraft,
+} from "@/lib/templates/repository";
 import { formatExperimentId } from "@/lib/experiments/policy";
 import { useModalFocus } from "@/components/ui/useModalFocus";
 
@@ -35,6 +43,8 @@ export default function DuplicateExperimentDialog({
   const [ownerId, setOwnerId] = useState(source.owner_id ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null);
+  const [fieldSelection, setFieldSelection] = useState<Record<string, boolean>>({});
   const dialogRef = useModalFocus({ open, onClose, blocked: saving });
 
   useEffect(() => {
@@ -77,6 +87,17 @@ export default function DuplicateExperimentDialog({
     setOwnerId(source.owner_id ?? "");
     setSaving(false);
     setError("");
+    setTemplateDraft(null);
+    setFieldSelection({});
+    if (source.template_id) {
+      loadTemplateDraft(source.template_id).then((draft) => {
+        if (!draft) return;
+        setTemplateDraft(draft);
+        setFieldSelection(Object.fromEntries(
+          draft.fields.map((field) => [field.id!, true]),
+        ));
+      });
+    }
   }, [open, source]);
 
   if (!open) return null;
@@ -95,6 +116,30 @@ export default function DuplicateExperimentDialog({
     setSaving(true);
     setError("");
     try {
+      if (sessionSourceRef.current.template_id && templateDraft) {
+        const keyIds = templateDraft.fields
+          .filter((field) => fieldSelection[field.id!])
+          .flatMap((field) => field.keys)
+          .filter((key) => key.valueType !== "attachment")
+          .map((key) => key.id!)
+          .filter((id): id is string => id !== null);
+        const created = await duplicateTemplateExperiment({
+          sourceId: sessionSourceRef.current.id,
+          name: name.trim(),
+          ownerId: ownerId || null,
+          position: await nextExperimentPosition(sessionSourceRef.current.task_id),
+          keyIds,
+          editSessionId: "00000000-0000-4000-8000-000000000001",
+        });
+        if (
+          mounted.current &&
+          generation.current === submissionGeneration &&
+          pending.current === operation
+        ) {
+          onCreated(created as unknown as Experiment);
+        }
+        return;
+      }
       const experiment = await duplicateExperiment(sessionSourceRef.current, {
         name: name.trim(),
         ownerId,
@@ -162,6 +207,29 @@ export default function DuplicateExperimentDialog({
           </button>
         </header>
         <form onSubmit={submit} aria-busy={saving}>
+          {sessionSourceRef.current.template_id && templateDraft ? (
+            <fieldset className="duplicate-fields">
+              <legend>Field tables to copy</legend>
+              {templateDraft.fields.map((field) => (
+                <label
+                  key={field.id ?? `new-field-${field.position}`}
+                  className="duplicate-field-option"
+                >
+                  <input
+                    type="checkbox"
+                    checked={fieldSelection[field.id!] ?? false}
+                    onChange={(event) =>
+                      setFieldSelection({
+                        ...fieldSelection,
+                        [field.id!]: event.target.checked,
+                      })}
+                  />
+                  <span className={`token-${field.colorToken}`}>{field.label}</span>
+                </label>
+              ))}
+              <small className="field-hint">Attachments are never copied.</small>
+            </fieldset>
+          ) : null}
           <div className="baseline-confirmation">
             Baseline = {formatExperimentId(sessionSource.experiment_no)} ·{" "}
             {sessionSource.name}

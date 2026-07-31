@@ -231,6 +231,30 @@
 .history-reason { display: block; color: var(--ink); font-size: 13px; }
 .history-meta { display: block; color: var(--text-tertiary); font-size: 12px; }
 
+.duplicate-fields {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.duplicate-fields legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
+.duplicate-field-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.required-missing-note {
+  border: 1px solid var(--crit-soft);
+  background: var(--crit-soft);
+  color: var(--crit);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
 .history-session { margin-bottom: 14px; }
 .history-session-toggle {
   width: 100%;

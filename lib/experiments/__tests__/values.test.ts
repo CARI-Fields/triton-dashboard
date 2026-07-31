@@ -104,4 +104,29 @@ describe("experiment value repository", () => {
       p_version_no: 2,
     });
   });
+
+  it("duplicates through the RPC with selected Key ids", async () => {
+    vi.mocked(mocks.rpc).mockResolvedValue({
+      data: { id: "exp-copy", name: "Copy" },
+      error: null,
+    });
+    const { duplicateTemplateExperiment } = await import("@/lib/experiments/values");
+    const result = await duplicateTemplateExperiment({
+      sourceId: EXPERIMENT_ID,
+      name: "Copy",
+      ownerId: null,
+      position: 2,
+      keyIds: [KEY_ID],
+      editSessionId: "80000000-0000-4000-8000-000000000020",
+    });
+    expect(result.name).toBe("Copy");
+    expect(mocks.rpc).toHaveBeenCalledWith("duplicate_experiment", {
+      p_source_id: EXPERIMENT_ID,
+      p_name: "Copy",
+      p_owner_id: null,
+      p_position: 2,
+      p_key_ids: [KEY_ID],
+      p_edit_session_id: "80000000-0000-4000-8000-000000000020",
+    });
+  });
 });

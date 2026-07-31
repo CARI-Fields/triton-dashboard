@@ -174,6 +174,30 @@ export async function listExperimentVersions(
   return (data ?? []) as ExperimentVersionSummary[];
 }
 
+export interface DuplicateTemplateInput {
+  sourceId: string;
+  name: string;
+  ownerId: string | null;
+  position: number;
+  keyIds: string[];
+  editSessionId: string;
+}
+
+export async function duplicateTemplateExperiment(
+  input: DuplicateTemplateInput,
+): Promise<{ id: string; name: string }> {
+  const { data, error } = await client().rpc("duplicate_experiment", {
+    p_source_id: input.sourceId,
+    p_name: input.name,
+    p_owner_id: input.ownerId,
+    p_position: input.position,
+    p_key_ids: input.keyIds,
+    p_edit_session_id: input.editSessionId,
+  });
+  throwIfError(error);
+  return data;
+}
+
 function typedValueFromRow(
   row: ExperimentValue,
   type: TemplateValueType,

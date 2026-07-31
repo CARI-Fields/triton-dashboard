@@ -17,6 +17,7 @@ import {
   saveExperimentCore,
   saveValue,
   touchEditSession,
+  unarchiveExperiment,
   type EditSessionClock,
   type SaveValueResult,
   type TypedValue,
@@ -131,7 +132,7 @@ export default function TemplateExperimentDetail({ id }: { id: string }) {
     if (!confirmed) return;
     try {
       if (experiment.archived_at) {
-        await archiveExperiment(experiment.id);
+        await unarchiveExperiment(experiment.id);
       } else {
         await archiveExperiment(experiment.id);
       }
@@ -146,6 +147,16 @@ export default function TemplateExperimentDetail({ id }: { id: string }) {
     if (lastSavedAt === null) return null;
     return "Saved just now";
   }, [saving, lastSavedAt]);
+
+  const missingRequired = template?.fields.flatMap((field) =>
+    field.keys.filter((key) => {
+      if (!key.required) return false;
+      const state = values.get(key.id!);
+      return state === undefined || state.value === null
+        || (state.value.kind === "multi_select" && state.value.optionIds.length === 0)
+        || (state.value.kind === "attachment" && state.value.attachmentIds.length === 0);
+    }).map((key) => key.key),
+  ) ?? [];
 
   if (loading) return <WorkspaceSkeleton variant="record" label="Loading Experiment" />;
   if (!experiment || !template) {
@@ -194,6 +205,12 @@ export default function TemplateExperimentDetail({ id }: { id: string }) {
       </header>
 
       {error ? <p className="form-error" role="alert">{error}</p> : null}
+
+      {missingRequired.length > 0 ? (
+        <p className="required-missing-note" role="alert">
+          Required values missing: {missingRequired.join(", ")}
+        </p>
+      ) : null}
 
       <ExperimentVersionDrawer
         experimentId={experiment.id}

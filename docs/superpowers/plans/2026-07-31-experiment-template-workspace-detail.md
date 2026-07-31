@@ -2038,7 +2038,7 @@ afterEach(cleanup);
 describe("TemplateExperimentDetail", () => {
   it("renders the locked Template name and one Field Table per Field Label", async () => {
     render(<TemplateExperimentDetail id="exp-1" />);
-    await screen.findByText("Run one");
+    await screen.findByDisplayValue("Run one");
     expect(screen.getByText("Benchmark A")).not.toBeNull();
     expect(screen.getByText("Metrics")).not.toBeNull();
     expect(screen.getByText("pass@1")).not.toBeNull();
@@ -2054,7 +2054,7 @@ describe("TemplateExperimentDetail", () => {
     });
     fireEvent.keyDown(screen.getByLabelText("Value for pass@1"), { key: "Enter" });
     await waitFor(() => expect(mocks.saveValue).toHaveBeenCalled());
-    expect(await screen.findByText("Saved just now")).not.toBeNull();
+    expect((await screen.findAllByText("Saved just now")).length).toBeGreaterThan(0);
   });
 });
 ```
@@ -2488,10 +2488,11 @@ export default function TemplateExperimentDetail({ id }: { id: string }) {
   const reload = useCallback(async () => {
     try {
       const bundle = await loadExperimentBundle(id);
+      if (!bundle || !bundle.experiment.template_id) {
+        throw new Error("Experiment has no Template.");
+      }
       const [templateDraft, valueMap] = await Promise.all([
-        bundle.experiment.template_id
-          ? loadTemplateDraft(bundle.experiment.template_id)
-          : Promise.resolve(null),
+        loadTemplateDraft(bundle.experiment.template_id),
         loadExperimentValues(id),
       ]);
       setExperiment(bundle.experiment);

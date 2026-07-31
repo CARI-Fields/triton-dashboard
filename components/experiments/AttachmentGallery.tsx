@@ -131,6 +131,7 @@ function AttachmentFigure({
 
 export interface AttachmentGalleryProps {
   scope: AttachmentScope;
+  templateKeyId?: string | null;
   visitKey: string;
   attachments: Attachment[];
   title: string;
@@ -141,6 +142,7 @@ export interface AttachmentGalleryProps {
 
 export default function AttachmentGallery({
   scope,
+  templateKeyId = null,
   visitKey,
   attachments,
   title,
@@ -190,7 +192,7 @@ export default function AttachmentGallery({
         ? Math.max(...attachments.map((attachment) => attachment.position)) + 1
         : 0;
       for (const file of Array.from(files)) {
-        await uploadAttachment(operationScope, file, position);
+        await uploadAttachment(operationScope, file, position, templateKeyId);
         position += 1;
       }
     } catch (caught) {

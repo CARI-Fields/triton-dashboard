@@ -545,6 +545,7 @@ describe("experiment evidence", () => {
       galleryProps(experiment).scope,
       file,
       1,
+      null,
     ));
     expect((await screen.findByRole("alert")).textContent).toBe("Upload failed.");
     expect(screen.queryAllByRole("img")).toHaveLength(0);
@@ -595,12 +596,14 @@ describe("experiment evidence", () => {
       galleryProps(experiment).scope,
       first,
       0,
+      null,
     );
     expect(uploadAttachment).toHaveBeenNthCalledWith(
       2,
       galleryProps(experiment).scope,
       second,
       1,
+      null,
     );
     expect(onChanged).toHaveBeenCalledTimes(1);
 

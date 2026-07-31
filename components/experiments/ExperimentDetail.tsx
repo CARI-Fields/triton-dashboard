@@ -47,6 +47,7 @@ import ConfigEditor from "@/components/experiments/ConfigEditor";
 import DataEditor from "@/components/experiments/DataEditor";
 import DecisionEditor from "@/components/experiments/DecisionEditor";
 import DuplicateExperimentDialog from "@/components/experiments/DuplicateExperimentDialog";
+import TemplateExperimentDetail from "@/components/experiments/TemplateExperimentDetail";
 import EnvironmentEditor from "@/components/experiments/EnvironmentEditor";
 import ExperimentDisclosure from "@/components/experiments/ExperimentDisclosure";
 import ExperimentSection from "@/components/experiments/ExperimentSection";
@@ -879,6 +880,10 @@ export default function ExperimentDetail({ id }: { id: string }) {
         )}
       </div>
     );
+  }
+
+  if (bundle?.experiment.template_id) {
+    return <TemplateExperimentDetail id={bundle.experiment.id} />;
   }
 
   if (!bundle || !server || !draft) {

@@ -159,6 +159,7 @@ describe("attachment repository", () => {
       path: uploadedPath,
       caption: "",
       position: 0,
+      template_key_id: null,
     });
   });
 

@@ -194,6 +194,10 @@ async function nextPosition(taskId: string): Promise<number> {
   return data?.length ? Number(data[0].position) + 1 : 0;
 }
 
+export async function nextExperimentPosition(taskId: string): Promise<number> {
+  return nextPosition(taskId);
+}
+
 export async function createExperiment(
   input: NewExperimentInput,
 ): Promise<Experiment> {

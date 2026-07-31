@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import type {
   ExperimentValue,
   ExperimentValueOption,
+  TemplateValueType,
 } from "@/lib/types";
 import type { Attachment } from "@/lib/types";
 import { typedValueFromRow } from "@/lib/experiments/values-internal";

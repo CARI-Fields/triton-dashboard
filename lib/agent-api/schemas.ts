@@ -343,6 +343,62 @@ function cloneJsonField<T>(field: string, value: T): T {
   }
 }
 
+export interface ValuePatch {
+  key_id: string;
+  expected_cell_revision: number;
+  value: unknown;
+}
+
+const TYPED_VALUE_KINDS = new Set([
+  "short_text", "long_text", "number", "boolean", "date_time", "url",
+  "single_select", "multi_select", "attachment",
+]);
+
+export function parseValuePatch(body: unknown): ValuePatch {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    invalidBody("Value patch body must be a JSON object.");
+  }
+  const record = body as Record<string, unknown>;
+  const keyId = record.key_id;
+  if (typeof keyId !== "string" || !isUuid(keyId)) {
+    invalidField("key_id");
+  }
+  const revision = record.expected_cell_revision;
+  if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 0) {
+    invalidField("expected_cell_revision");
+  }
+  if (
+    record.value !== null
+    && (typeof record.value !== "object" || Array.isArray(record.value))
+  ) {
+    invalidField("value");
+  }
+  const typed = record.value as Record<string, unknown> | null;
+  if (
+    typed
+    && (typeof typed.kind !== "string" || !TYPED_VALUE_KINDS.has(typed.kind))
+  ) {
+    invalidField("value.kind");
+  }
+  return {
+    key_id: keyId,
+    expected_cell_revision: revision,
+    value: typed,
+  };
+}
+
+export function parseVersionNumber(raw: string): number {
+  const versionNo = Number(raw);
+  if (!Number.isInteger(versionNo) || versionNo < 1) {
+    throw new AgentApiError(
+      400,
+      "INVALID_VERSION",
+      "versionNo must be a positive integer.",
+    );
+  }
+  return versionNo;
+}
+
 function validateFieldName(
   field: string,
   writable: ReadonlySet<string>,

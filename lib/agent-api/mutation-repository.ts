@@ -594,7 +594,137 @@ export function createMutationRepository(client: SupabaseClient) {
       throwRpcError(error, status);
       return mutationResult(data, attachmentDto);
     },
+
+    async patchExperimentValue(
+      input: PatchExperimentValueInput,
+    ): Promise<PatchExperimentValueResult> {
+      const { data, error, status } = await client.rpc(
+        "save_experiment_value",
+        {
+          p_experiment_id: input.experimentId,
+          p_key_id: input.keyId,
+          p_expected_cell_revision: input.expectedCellRevision,
+          p_value: input.value,
+          p_edit_session_id: input.editSessionId,
+        },
+      );
+      if (error) throwTemplateRpcError(error, status);
+      return data as PatchExperimentValueResult;
+    },
+
+    async archiveExperiment(
+      experimentId: string,
+    ): Promise<{ status: "ok"; version_no: number }> {
+      const { data, error, status } = await client.rpc(
+        "archive_experiment",
+        { p_experiment_id: experimentId },
+      );
+      if (error) throwTemplateRpcError(error, status);
+      return data;
+    },
+
+    async unarchiveExperiment(
+      experimentId: string,
+    ): Promise<{ status: "ok"; version_no: number }> {
+      const { data, error, status } = await client.rpc(
+        "unarchive_experiment",
+        { p_experiment_id: experimentId },
+      );
+      if (error) throwTemplateRpcError(error, status);
+      return data;
+    },
+
+    async restoreExperimentVersion(
+      experimentId: string,
+      versionNo: number,
+    ): Promise<{ status: "ok"; version_no: number; core_revision: number }> {
+      const { data, error, status } = await client.rpc(
+        "restore_experiment_version",
+        { p_experiment_id: experimentId, p_version_no: versionNo },
+      );
+      if (error) throwTemplateRpcError(error, status);
+      return data;
+    },
+
+    async createTemplateExperiment(
+      input: TemplateExperimentCreateInput,
+    ): Promise<Record<string, unknown>> {
+      const { data, error } = await client
+        .from("experiments")
+        .insert({
+          task_id: input.task_id,
+          template_id: input.template_id,
+          owner_id: input.owner_id,
+          name: input.name.trim(),
+          status: "planned",
+          position: 0,
+        })
+        .select("*")
+        .single();
+      if (error) throw new Error(error.message);
+      const created = data as Record<string, unknown>;
+      for (const [keyId, typed] of Object.entries(input.values ?? {})) {
+        await this.patchExperimentValue({
+          experimentId: created.id as string,
+          keyId,
+          expectedCellRevision: 0,
+          value: typed,
+          editSessionId: "00000000-0000-4000-8000-000000000001",
+        });
+      }
+      return created;
+    },
   };
+}
+
+export interface PatchExperimentValueInput {
+  experimentId: string;
+  keyId: string;
+  expectedCellRevision: number;
+  value: unknown;
+  editSessionId: string;
+}
+
+export type PatchExperimentValueResult =
+  | { status: "ok"; cell_revision: number; version_no: number }
+  | { status: "conflict"; remote: unknown; remote_cell_revision: number };
+
+export interface TemplateExperimentCreateInput {
+  task_id: string;
+  template_id: string;
+  name: string;
+  owner_id: string | null;
+  values?: Record<string, unknown>;
+}
+
+const TEMPLATE_RPC_CODES: Record<string, [number, string]> = {
+  EXPERIMENT_ARCHIVED: [409, "EXPERIMENT_ARCHIVED"],
+  TEMPLATE_ARCHIVED: [409, "TEMPLATE_ARCHIVED"],
+  KEY_ARCHIVED: [409, "KEY_ARCHIVED"],
+  KEY_NOT_FOUND: [404, "KEY_NOT_FOUND"],
+  OPTION_INVALID: [422, "OPTION_INVALID"],
+  VALUE_TYPE_MISMATCH: [422, "VALUE_TYPE_MISMATCH"],
+  NUMBER_NOT_FINITE: [422, "NUMBER_NOT_FINITE"],
+  URL_REQUIRED: [422, "URL_REQUIRED"],
+  DATETIME_REQUIRED: [422, "DATETIME_REQUIRED"],
+  REQUIRED_VALUES_MISSING: [422, "REQUIRED_VALUES_MISSING"],
+  EXPERIMENT_NOT_FOUND: [404, "EXPERIMENT_NOT_FOUND"],
+  VERSION_NOT_FOUND: [404, "VERSION_NOT_FOUND"],
+  EXPERIMENT_ALREADY_ARCHIVED: [409, "EXPERIMENT_ALREADY_ARCHIVED"],
+  EXPERIMENT_NOT_ARCHIVED: [409, "EXPERIMENT_NOT_ARCHIVED"],
+};
+
+function throwTemplateRpcError(error: unknown, _status: unknown): never {
+  const message = isRecord(error) && typeof error.message === "string"
+    ? error.message
+    : "";
+  const match = Object.entries(TEMPLATE_RPC_CODES).find(
+    ([code]) => message.includes(code),
+  );
+  if (match) {
+    throw new AgentApiError(match[1][0], match[1][1], message);
+  }
+  throw new AgentApiError(500, "TEMPLATE_MUTATION_FAILED", message || "Mutation failed.", true);
 }
 
 function repository() {
@@ -635,4 +765,35 @@ export function patchAttachment(
   input: PatchAttachmentInput,
 ): Promise<MutationResult<AttachmentMutationDto>> {
   return repository().patchAttachment(input);
+}
+
+export function patchExperimentValue(
+  input: PatchExperimentValueInput,
+): Promise<PatchExperimentValueResult> {
+  return repository().patchExperimentValue(input);
+}
+
+export function archiveExperiment(
+  experimentId: string,
+): Promise<{ status: "ok"; version_no: number }> {
+  return repository().archiveExperiment(experimentId);
+}
+
+export function unarchiveExperiment(
+  experimentId: string,
+): Promise<{ status: "ok"; version_no: number }> {
+  return repository().unarchiveExperiment(experimentId);
+}
+
+export function restoreExperimentVersion(
+  experimentId: string,
+  versionNo: number,
+): Promise<{ status: "ok"; version_no: number; core_revision: number }> {
+  return repository().restoreExperimentVersion(experimentId, versionNo);
+}
+
+export function createTemplateExperiment(
+  input: TemplateExperimentCreateInput,
+): Promise<Record<string, unknown>> {
+  return repository().createTemplateExperiment(input);
 }

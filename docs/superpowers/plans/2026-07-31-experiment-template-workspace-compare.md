@@ -53,6 +53,7 @@ Legacy `components/experiments/ExperimentCompare.tsx` and `lib/experiments/compa
 Create `lib/templates/__tests__/compare.test.ts`:
 
 ```ts
+
 import { describe, expect, it } from "vitest";
 import {
   applyCompareFilters,
@@ -150,13 +151,13 @@ describe("compare logic", () => {
     expect(deltaFor(
       { kind: "number", number: 1 },
       { kind: "number", number: 0.8 },
-    )).toBe(0.2);
+    )).toBeCloseTo(0.2);
     expect(deltaFor(null, { kind: "number", number: 0.8 })).toBeNull();
     expect(cellDifference({
       row: row("00000000-0000-4000-8000-000000000001", { kind: "number", number: 1 }),
       baselineRow: row("00000000-0000-4000-8000-000000000002", { kind: "number", number: 0.8 }),
       keyId: KEY_ID,
-    })).toEqual({ different: true, delta: 0.2 });
+    })).toEqual({ different: true, delta: expect.closeTo(0.2) });
   });
 });
 ```
@@ -174,6 +175,7 @@ Expected: FAIL — `@/lib/templates/compare` cannot be resolved.
 Create `lib/templates/compare.ts`:
 
 ```ts
+
 import type { TypedValue } from "@/lib/experiments/values";
 import type { ExperimentStatus } from "@/lib/types";
 
@@ -292,10 +294,12 @@ export function sortCompareRows(
   sort: CompareSort,
 ): CompareRow[] {
   return [...rows].sort((left, right) => {
-    const result = compareScalars(
-      rowValue(left, sort.keyId),
-      rowValue(right, sort.keyId),
-    );
+    const leftScalar = rowValue(left, sort.keyId);
+    const rightScalar = rowValue(right, sort.keyId);
+    if (leftScalar.kind === "missing" && rightScalar.kind === "missing") return 0;
+    if (leftScalar.kind === "missing") return 1;
+    if (rightScalar.kind === "missing") return -1;
+    const result = compareScalars(leftScalar, rightScalar);
     return sort.direction === "asc" ? result : -result;
   });
 }

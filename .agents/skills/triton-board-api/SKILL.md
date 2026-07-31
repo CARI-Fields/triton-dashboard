@@ -18,6 +18,10 @@ Use the bundled safe client:
 
 Run `python3 scripts/triton_board_api.py --help` for client syntax. Prefer this client so the raw Key stays in the environment instead of shell arguments. Read [references/openapi.yaml](references/openapi.yaml) only when endpoint, scope, filter, field, or response details are needed.
 
+## Template Experiments
+
+Experiments created from a Template carry `template_id` and expose typed `values` (keyed by stable `key_id`) plus `archived_at` and the current `version_no`. Patch Values via `PATCH /experiments/{id}/values` with `expected_cell_revision`; 409 means the cell changed and the response includes `remote`. Archive is gated on Required Values. Restore is a new forward mutation on unarchived Experiments.
+
 ## Safety and recovery
 
 - Never print the raw Key or request headers.

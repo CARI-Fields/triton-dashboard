@@ -397,6 +397,14 @@ describe("Triton Board API skill artifacts", () => {
       createExperimentAttachment: ["200", "201", "400", "401", "403", "404", "409", "422", "429", "500"],
       patchAttachment: ["200", "400", "401", "403", "404", "412", "413", "422", "429", "500"],
       listAudit: ["200", "400", "401", "403", "500"],
+      listTemplates: ["200"],
+      getTemplateSchema: ["200", "404"],
+      getTemplateCompareSource: ["200"],
+      patchExperimentValue: ["200", "409"],
+      archiveExperiment: ["200", "422"],
+      unarchiveExperiment: ["200"],
+      listExperimentVersions: ["200"],
+      restoreExperimentVersion: ["200"],
     };
     const scopeMatrix: Record<string, string | null> = {
       getCapabilities: null,
@@ -415,12 +423,20 @@ describe("Triton Board API skill artifacts", () => {
       createExperimentAttachment: "attachments:write",
       patchAttachment: "attachments:write",
       listAudit: "audit:read",
+      listTemplates: "board:read",
+      getTemplateSchema: "board:read",
+      getTemplateCompareSource: "board:read",
+      patchExperimentValue: "experiments:write",
+      archiveExperiment: "experiments:write",
+      unarchiveExperiment: "experiments:write",
+      listExperimentVersions: "board:read",
+      restoreExperimentVersion: "experiments:write",
     };
 
-    expect(new Set(operations.map(({ path }) => path)).size).toBe(13);
-    expect(operations).toHaveLength(16);
+    expect(new Set(operations.map(({ path }) => path)).size).toBe(21);
+    expect(operations).toHaveLength(24);
     expect(new Set(operations.map(({ operationId }) => operationId)).size)
-      .toBe(16);
+      .toBe(24);
     expect(Object.keys(byOperation).sort()).toEqual(
       Object.keys(responseMatrix).sort(),
     );
@@ -738,6 +754,17 @@ describe("Triton Board API skill artifacts", () => {
       display_name: "Triton Board API",
       short_description: "Safely inspect and update Triton Board data",
     });
+  });
+
+  it("documents the template-aware endpoints", () => {
+    const openapi = readFileSync(openapiPath, "utf8");
+    expect(openapi).toContain("operationId: listTemplates");
+    expect(openapi).toContain("operationId: getTemplateSchema");
+    expect(openapi).toContain("/templates/{id}/compare");
+    expect(openapi).toContain("operationId: patchExperimentValue");
+    expect(openapi).toContain("/experiments/{id}/archive");
+    expect(openapi).toContain("/experiments/{id}/unarchive");
+    expect(openapi).toContain("operationId: restoreExperimentVersion");
   });
 
 });

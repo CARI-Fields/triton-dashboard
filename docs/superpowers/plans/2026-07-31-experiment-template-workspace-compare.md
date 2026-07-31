@@ -381,6 +381,7 @@ Expected: PASS; no new type errors; commit succeeds.
 Create `lib/templates/__tests__/compare-url.test.ts`:
 
 ```ts
+
 import { describe, expect, it } from "vitest";
 import {
   parseCompareSearchParams,
@@ -445,6 +446,7 @@ Expected: FAIL — module cannot be resolved.
 Create `lib/templates/compare-url.ts`:
 
 ```ts
+
 import type { CompareViewFilter, CompareSort } from "@/lib/templates/compare";
 
 export interface CompareSearchParams {

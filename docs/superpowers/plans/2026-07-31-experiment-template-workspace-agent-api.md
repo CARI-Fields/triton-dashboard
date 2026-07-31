@@ -751,6 +751,7 @@ Expected: PASS; no new type errors; commit succeeds.
 Create `app/api/agent/v1/__tests__/template-routes.test.ts`:
 
 ```ts
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -810,7 +811,7 @@ beforeEach(() => vi.clearAllMocks());
 describe("template agent routes", () => {
   it("lists Templates", async () => {
     mocks.listTemplates.mockResolvedValue([{ id: TEMPLATE_ID, name: "Benchmark A" }]);
-    const { GET } = await import("./templates/route");
+    const { GET } = await import("../templates/route");
     const response = await get("/api/agent/v1/templates", GET);
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -818,7 +819,7 @@ describe("template agent routes", () => {
   });
 
   it("patches a Value by key_id with a conflict surfaced as 409", async () => {
-    const { PATCH } = await import("./experiments/[id]/values/route");
+    const { PATCH } = await import("../experiments/[id]/values/route");
     mocks.getExperiment.mockResolvedValue({
       id: EXPERIMENT_ID,
       task_id: "20000000-0000-4000-8000-000000000001",
@@ -1157,7 +1158,7 @@ export async function POST(
 }
 ```
 
-Modify `app/api/agent/v1/experiments/route.ts` POST: keep the legacy `parseExperimentCreate` path for `template_id: null`; when the body has `template_id`, accept it and create via the legacy insert plus values:
+Modify the experiment creation route (the actual POST lives at `app/api/agent/v1/tasks/[id]/experiments/route.ts`, not `experiments/route.ts`): keep the legacy `parseExperimentCreate` path for `template_id: null`; when the body has `template_id`, accept it and create via the legacy insert plus values:
 
 ```ts
 // In POST, after parsing the create body:

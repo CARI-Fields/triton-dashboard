@@ -278,9 +278,11 @@ function experimentDto(value: unknown): ExperimentMutationDto {
   const ownerId = nullableUuid(value, "owner_id");
   const startedAt = value.started_at;
   const completedAt = value.completed_at;
+  const archivedAt = value.archived_at;
   if (
     (startedAt !== null && typeof startedAt !== "string")
     || (completedAt !== null && typeof completedAt !== "string")
+    || (archivedAt !== null && typeof archivedAt !== "string")
   ) {
     return invalidRpcData();
   }
@@ -345,6 +347,9 @@ function experimentDto(value: unknown): ExperimentMutationDto {
     name: requiredString(value, "name"),
     status: status as ExperimentStatus,
     baseline_experiment_id: nullableUuid(value, "baseline_experiment_id"),
+    template_id: nullableUuid(value, "template_id"),
+    archived_at: archivedAt,
+    core_revision: requiredNumber(value, "core_revision"),
     data_spec: dataSpec,
     object_spec: objectSpec,
     environment_spec: environmentSpec,
@@ -390,6 +395,8 @@ function attachmentDto(value: unknown): AttachmentMutationDto {
     path: requiredString(value, "path"),
     caption: requiredString(value, "caption"),
     position: requiredNumber(value, "position"),
+    template_key_id: nullableUuid(value, "template_key_id"),
+    archived_at: value.archived_at as string | null,
     created_at: requiredString(value, "created_at"),
     updated_at: requiredString(value, "updated_at"),
   };

@@ -63,6 +63,9 @@ function row(id: string, passAt1: number, device: string): ExperimentListRow {
     name: `run-${id.slice(-1)}`,
     status: "analyzing",
     baseline_experiment_id: null,
+    template_id: null,
+    archived_at: null,
+    core_revision: 1,
     data_spec: { datasets: [] },
     object_spec: {
       model: "Qwen",
@@ -503,6 +506,8 @@ describe("experiment evidence", () => {
       path: "plots/plot.png",
       caption: "Latency plot",
       position: 0,
+      template_key_id: null,
+      archived_at: null,
       created_at: "2026-07-24T00:00:00.000Z",
       updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
@@ -571,6 +576,8 @@ describe("experiment evidence", () => {
       path: "plots/first.png",
       caption: "",
       position: 0,
+      template_key_id: null,
+      archived_at: null,
       created_at: "2026-07-24T00:00:00.000Z",
       updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
@@ -627,6 +634,8 @@ describe("experiment evidence", () => {
       path: "plots/plot.png",
       caption: "",
       position: 0,
+      template_key_id: null,
+      archived_at: null,
       created_at: "2026-07-24T00:00:00.000Z",
       updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
@@ -658,6 +667,8 @@ describe("experiment evidence", () => {
       path: "plots/plot.png",
       caption: "",
       position: 0,
+      template_key_id: null,
+      archived_at: null,
       created_at: "2026-07-24T00:00:00.000Z",
       updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
@@ -693,6 +704,8 @@ describe("experiment evidence", () => {
       path: "plots/a.png",
       caption: "A caption",
       position: 0,
+      template_key_id: null,
+      archived_at: null,
       created_at: "2026-07-24T00:00:00.000Z",
       updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;
@@ -762,6 +775,8 @@ describe("experiment evidence", () => {
       path: "plots/a.png",
       caption: "A caption",
       position: 0,
+      template_key_id: null,
+      archived_at: null,
       created_at: "2026-07-24T00:00:00.000Z",
       updated_at: "2026-07-24T00:00:00.000Z",
     } satisfies Attachment;

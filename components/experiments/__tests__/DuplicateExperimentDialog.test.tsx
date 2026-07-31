@@ -26,6 +26,9 @@ const source = {
   name: "Source run",
   status: "completed",
   baseline_experiment_id: null,
+  template_id: null,
+  archived_at: null,
+  core_revision: 1,
   data_spec: { datasets: [] },
   object_spec: {
     model: "Qwen",

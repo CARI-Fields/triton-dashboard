@@ -57,6 +57,9 @@ function experimentRow(): Record<string, unknown> {
     name: "Agent experiment",
     status: "planned",
     baseline_experiment_id: BASELINE_ID,
+    template_id: null,
+    archived_at: null,
+    core_revision: 1,
     data_spec: {
       datasets: [{
         role: "evaluation",
@@ -278,6 +281,9 @@ describe("Agent API mutation RPC repository", () => {
       name: "Agent experiment",
       status: "planned",
       baseline_experiment_id: BASELINE_ID,
+      template_id: null,
+      archived_at: null,
+      core_revision: 1,
       data_spec: {
         datasets: [{
           role: "evaluation",

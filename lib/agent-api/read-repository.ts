@@ -524,6 +524,9 @@ function experimentDto(row: Record<string, unknown>): ExperimentListRow {
     name: row.name as string,
     status: row.status as ExperimentStatus,
     baseline_experiment_id: row.baseline_experiment_id as string | null,
+    template_id: row.template_id as string | null,
+    archived_at: row.archived_at as string | null,
+    core_revision: row.core_revision as number,
     ...normalizedExperimentFields(row),
     notes: row.notes as string,
     result_summary: row.result_summary as string,
@@ -553,6 +556,8 @@ function attachmentDto(row: Record<string, unknown>): Attachment {
     path: row.path as string,
     caption: row.caption as string,
     position: row.position as number,
+    template_key_id: row.template_key_id as string | null,
+    archived_at: row.archived_at as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };

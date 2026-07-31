@@ -93,7 +93,10 @@ const attachment = {
   path: "task-a/task/object-plot.png",
   caption: "Latency plot",
   position: 0,
+  template_key_id: null,
+  archived_at: null,
   created_at: "2026-07-27T00:00:00.000Z",
+  updated_at: "2026-07-27T00:00:00.000Z",
 } satisfies Attachment;
 
 function enqueue(

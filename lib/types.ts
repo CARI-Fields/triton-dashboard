@@ -135,6 +135,109 @@ export interface EnvironmentSpec {
 export type ConfigValue = string | number | boolean | null;
 export type ExperimentConfig = Record<string, ConfigValue>;
 
+export type TemplateValueType =
+  | "short_text"
+  | "long_text"
+  | "number"
+  | "boolean"
+  | "single_select"
+  | "multi_select"
+  | "date_time"
+  | "url"
+  | "attachment";
+
+export interface ExperimentTemplate {
+  id: string;
+  name: string;
+  description: string;
+  schema_revision: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateField {
+  id: string;
+  template_id: string;
+  label: string;
+  color_token: string;
+  position: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateKey {
+  id: string;
+  template_id: string;
+  field_id: string;
+  key: string;
+  value_type: TemplateValueType;
+  required: boolean;
+  position: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateKeyOption {
+  id: string;
+  template_id: string;
+  key_id: string;
+  label: string;
+  position: number;
+  archived_at: string | null;
+}
+
+export interface ExperimentValue {
+  experiment_id: string;
+  template_id: string;
+  key_id: string;
+  text_value: string | null;
+  number_value: number | null;
+  boolean_value: boolean | null;
+  datetime_value: string | null;
+  option_id: string | null;
+  cell_revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExperimentValueOption {
+  experiment_id: string;
+  template_id: string;
+  key_id: string;
+  option_id: string;
+  position: number;
+}
+
+export type VersionSource = "browser" | "agent" | "migration" | "system";
+
+export interface ExperimentVersion {
+  id: string;
+  experiment_id: string;
+  version_no: number;
+  reason: string;
+  source: VersionSource;
+  edit_session_id: string | null;
+  template_schema_revision: number;
+  snapshot: unknown;
+  actor_member_id: string | null;
+  created_at: string;
+}
+
+export interface TemplateVersion {
+  id: string;
+  template_id: string;
+  version_no: number;
+  reason: string;
+  source: VersionSource;
+  schema_revision: number;
+  snapshot: unknown;
+  actor_member_id: string | null;
+  created_at: string;
+}
+
 export interface Experiment {
   id: string;
   experiment_no: number;
@@ -143,6 +246,9 @@ export interface Experiment {
   name: string;
   status: ExperimentStatus;
   baseline_experiment_id: string | null;
+  template_id: string | null;
+  archived_at: string | null;
+  core_revision: number;
   data_spec: DataSpec;
   object_spec: ObjectSpec;
   environment_spec: EnvironmentSpec;
@@ -173,6 +279,8 @@ export interface Attachment {
   path: string;
   caption: string;
   position: number;
+  template_key_id: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }

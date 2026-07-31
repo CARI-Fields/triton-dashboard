@@ -15,6 +15,9 @@ function experiment(id: string, passAt1: number, device: string): Experiment {
     name: `run-${id.slice(-2)}`,
     status: "analyzing",
     baseline_experiment_id: null,
+    template_id: null,
+    archived_at: null,
+    core_revision: 1,
     data_spec: {
       datasets: [{
         role: "evaluation",

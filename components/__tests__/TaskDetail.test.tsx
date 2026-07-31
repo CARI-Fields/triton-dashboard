@@ -217,6 +217,8 @@ const taskAttachment = {
   path: `${taskA.id}/task/task-attachment.png`,
   caption: "",
   position: 0,
+  template_key_id: null,
+  archived_at: null,
   created_at: "2026-07-24T00:00:00.000Z",
   updated_at: "2026-07-24T00:00:00.000Z",
 } satisfies Attachment;
@@ -230,6 +232,9 @@ function experiment(name: string): Experiment {
     name,
     status: "analyzing",
     baseline_experiment_id: null,
+    template_id: null,
+    archived_at: null,
+    core_revision: 1,
     data_spec: { datasets: [] },
     object_spec: {
       model: "",

@@ -1044,12 +1044,28 @@ git commit -m "feat: grant experiment template workspace data access"
 
 **Files:**
 - Modify: `lib/types.ts`
+- Modify: `lib/agent-api/mutation-repository.ts` (map the three new Experiment fields and two Attachment fields from RPC rows)
+- Modify: `lib/agent-api/read-repository.ts` (same mapping for read rows)
+- Modify: `lib/agent-api/__tests__/mutation-repository.test.ts` (RPC row fixture + exact-DTO assertion)
+- Modify: `lib/agent-api/__tests__/attachments.test.ts` (attachment row fixture + exact-DTO assertion)
 - Modify: `lib/experiments/__tests__/policy.test.ts`
 - Modify: `lib/experiments/__tests__/draft.test.ts`
 - Modify: `lib/experiments/__tests__/compare.test.ts`
 - Modify: `lib/experiments/__tests__/filters.test.ts`
 - Modify: `lib/experiments/__tests__/repository.test.ts`
 - Modify: `lib/attachments/__tests__/repository.test.ts`
+- Modify: `app/api/agent/v1/__tests__/activity-attachment-routes.test.ts`
+- Modify: `app/api/agent/v1/__tests__/write-routes.test.ts`
+- Modify: `components/__tests__/TaskDetail.test.tsx`
+- Modify: `components/experiments/__tests__/DuplicateExperimentDialog.test.tsx`
+- Modify: `components/experiments/__tests__/ExperimentCompare.test.tsx`
+- Modify: `components/experiments/__tests__/ExperimentDetail.test.tsx`
+- Modify: `components/experiments/__tests__/ExperimentDetailMarkdown.integration.test.tsx`
+- Modify: `components/experiments/__tests__/ExperimentEvidence.test.tsx`
+- Modify: `components/experiments/__tests__/ExperimentFilters.test.tsx`
+- Modify: `components/experiments/__tests__/ExperimentsDatabase.test.tsx`
+- Modify: `components/experiments/__tests__/ExperimentTable.test.tsx`
+- Modify: `components/experiments/__tests__/TaskExperimentsPanel.test.tsx`
 - Create: `lib/__tests__/template-types.test.ts`
 
 - [ ] **Step 1: Write the failing type test**

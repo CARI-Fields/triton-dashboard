@@ -2768,6 +2768,7 @@ describe("ExperimentVersionDrawer", () => {
         onRestored={vi.fn()}
       />,
     );
+    fireEvent.click(await screen.findByRole("button", { name: /Session 1/ }));
     await screen.findByText("v2");
     expect(screen.getAllByText(/Session/).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Restore version 2" }));

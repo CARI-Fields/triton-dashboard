@@ -23,6 +23,7 @@ import {
 } from "@/lib/experiments/values";
 import { EXPERIMENT_STATUS_LABELS, formatExperimentId } from "@/lib/experiments/policy";
 import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
+import ExperimentVersionDrawer from "@/components/experiments/ExperimentVersionDrawer";
 import TemplateFieldTables, {
   type CellState,
 } from "@/components/experiments/TemplateFieldTables";
@@ -37,6 +38,7 @@ export default function TemplateExperimentDetail({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const sessionRef = useRef<EditSessionClock>({
     id: "00000000-0000-4000-8000-000000000001",
     lastMutationAt: 0,
@@ -176,6 +178,13 @@ export default function TemplateExperimentDetail({ id }: { id: string }) {
           <button
             type="button"
             className="btn ghost"
+            onClick={() => setHistoryOpen(true)}
+          >
+            History
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
             disabled={archived || saving}
             onClick={toggleArchive}
           >
@@ -185,6 +194,13 @@ export default function TemplateExperimentDetail({ id }: { id: string }) {
       </header>
 
       {error ? <p className="form-error" role="alert">{error}</p> : null}
+
+      <ExperimentVersionDrawer
+        experimentId={experiment.id}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onRestored={reload}
+      />
 
       <TemplateFieldTables
         fields={template.fields}

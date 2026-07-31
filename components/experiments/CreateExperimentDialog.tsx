@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Experiment, Member } from "@/lib/types";
 import { createExperiment } from "@/lib/experiments/repository";
+import {
+  listTemplateSummaries,
+  type TemplateSummary,
+} from "@/lib/templates/repository";
 import { useModalFocus } from "@/components/ui/useModalFocus";
 
 export default function CreateExperimentDialog({
@@ -24,6 +28,8 @@ export default function CreateExperimentDialog({
   const openGeneration = useRef(0);
   const pending = useRef(false);
   const [name, setName] = useState("");
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [templateId, setTemplateId] = useState("");
   const [taskId, setTaskId] = useState(fixedTaskId ?? "");
   const [ownerId, setOwnerId] = useState("");
   const [error, setError] = useState("");
@@ -42,9 +48,18 @@ export default function CreateExperimentDialog({
     openGeneration.current += 1;
     if (!open) return;
     setName("");
+    setTemplateId("");
     setTaskId(fixedTaskId ?? "");
     setOwnerId("");
     setError("");
+    setTemplates([]);
+    listTemplateSummaries()
+      .then((summaries) => {
+        if (mounted.current) {
+          setTemplates(summaries.filter((summary) => summary.template.archived_at === null));
+        }
+      })
+      .catch(() => undefined);
   }, [fixedTaskId, open]);
 
   if (!open) return null;
@@ -52,8 +67,8 @@ export default function CreateExperimentDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending.current) return;
-    if (!name.trim() || !taskId || !ownerId) {
-      setError("Name, Owner, and Task are required.");
+    if (!name.trim() || !taskId || !ownerId || !templateId) {
+      setError("Name, Owner, Task, and Template are required.");
       return;
     }
 
@@ -64,6 +79,7 @@ export default function CreateExperimentDialog({
     try {
       const experiment = await createExperiment({
         taskId,
+        templateId,
         ownerId,
         name: name.trim(),
       });
@@ -113,6 +129,29 @@ export default function CreateExperimentDialog({
           </button>
         </header>
         <form onSubmit={submit} aria-busy={saving}>
+          <label>
+            <span>Template</span>
+            <select
+              aria-label="Experiment template"
+              value={templateId}
+              disabled={templates.length === 0}
+              onChange={(event) => setTemplateId(event.target.value)}
+            >
+              {templates.length === 0 ? (
+                <option value="">Loading templates…</option>
+              ) : (
+                <>
+                  <option value="">Choose a template…</option>
+                  {templates.map((summary) => (
+                    <option key={summary.template.id} value={summary.template.id}>
+                      {summary.template.name} · {summary.keyCount} keys · {summary.experimentCount} experiments
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+            <small className="field-hint">A Template cannot be changed later.</small>
+          </label>
           <label>
             <span>Name</span>
             <input

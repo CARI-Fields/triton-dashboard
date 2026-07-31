@@ -26,6 +26,7 @@ import {
 
 export interface NewExperimentInput {
   taskId: string;
+  templateId: string;
   name: string;
   ownerId: string;
 }
@@ -197,11 +198,13 @@ export async function createExperiment(
   input: NewExperimentInput,
 ): Promise<Experiment> {
   const taskId = requiredValue(input.taskId, "Task is required.");
+  const templateId = requiredValue(input.templateId, "Template is required.");
   const name = requiredValue(input.name, "Experiment name is required.");
   const ownerId = requiredValue(input.ownerId, "Experiment owner is required.");
   const position = await nextPosition(taskId);
   const insert: ExperimentInsert = {
     task_id: taskId,
+    template_id: templateId,
     owner_id: ownerId,
     name,
     status: "planned",

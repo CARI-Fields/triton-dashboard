@@ -18,6 +18,7 @@ export interface DuplicateInput {
 
 export interface ExperimentInsert {
   task_id: string;
+  template_id: string | null;
   owner_id: string;
   name: string;
   status: ExperimentStatus;
@@ -178,6 +179,7 @@ export function buildDuplicateInsert(
 ): ExperimentInsert {
   return {
     task_id: source.task_id,
+    template_id: source.template_id,
     owner_id: input.ownerId,
     name: input.name.trim(),
     status: "planned",

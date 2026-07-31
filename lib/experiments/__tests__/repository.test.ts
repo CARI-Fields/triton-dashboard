@@ -147,6 +147,8 @@ import {
   watchExperimentIndex,
 } from "@/lib/experiments/repository";
 
+const TEMPLATE_ID = "30000000-0000-4000-8000-000000000001";
+
 const experiment = {
   id: "00000000-0000-4000-8000-000000000001",
   experiment_no: 1,
@@ -323,15 +325,19 @@ describe("experiment update concurrency boundary", () => {
 describe("required experiment inputs", () => {
   it.each([
     [
-      { taskId: " ", name: "Experiment", ownerId: experiment.owner_id! },
+      { taskId: " ", templateId: TEMPLATE_ID, name: "Experiment", ownerId: experiment.owner_id! },
       "Task is required.",
     ],
     [
-      { taskId: experiment.task_id, name: " \t", ownerId: experiment.owner_id! },
+      { taskId: experiment.task_id, templateId: " ", name: "Experiment", ownerId: experiment.owner_id! },
+      "Template is required.",
+    ],
+    [
+      { taskId: experiment.task_id, templateId: TEMPLATE_ID, name: " \t", ownerId: experiment.owner_id! },
       "Experiment name is required.",
     ],
     [
-      { taskId: experiment.task_id, name: "Experiment", ownerId: "\n" },
+      { taskId: experiment.task_id, templateId: TEMPLATE_ID, name: "Experiment", ownerId: "\n" },
       "Experiment owner is required.",
     ],
   ])("rejects invalid create input before querying", async (input, message) => {
@@ -353,6 +359,7 @@ describe("required experiment inputs", () => {
 
     await createExperiment({
       taskId: ` ${experiment.task_id} `,
+      templateId: ` ${TEMPLATE_ID} `,
       name: "  Experiment one  ",
       ownerId: ` ${experiment.owner_id!} `,
     });
@@ -363,6 +370,7 @@ describe("required experiment inputs", () => {
     ]);
     expect(trace("experiments", "insert").insertPayload).toMatchObject({
       task_id: experiment.task_id,
+      template_id: TEMPLATE_ID,
       name: "Experiment one",
       owner_id: experiment.owner_id,
     });
@@ -388,6 +396,7 @@ describe("required experiment inputs", () => {
   it.each([
     ["create", async () => createExperiment({
       taskId: experiment.task_id,
+      templateId: TEMPLATE_ID,
       name: "New",
       ownerId: experiment.owner_id!,
     })],

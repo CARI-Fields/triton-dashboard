@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Experiment, Member, TaskModel } from "@/lib/types";
 import TaskExperimentsPanel from "@/components/experiments/TaskExperimentsPanel";
 import { createExperiment } from "@/lib/experiments/repository";
+import { listTemplateSummaries } from "@/lib/templates/repository";
 
 const routerPush = vi.hoisted(() => vi.fn());
 
@@ -20,6 +21,27 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/experiments/repository", () => ({
   createExperiment: vi.fn(),
 }));
+
+vi.mock("@/lib/templates/repository", () => ({
+  listTemplateSummaries: vi.fn(),
+}));
+
+const TEMPLATE_ID = "30000000-0000-4000-8000-000000000001";
+
+const templateSummary = {
+  template: {
+    id: TEMPLATE_ID,
+    name: "Benchmark A",
+    description: "",
+    schema_revision: 2,
+    archived_at: null,
+    created_at: "2026-07-31T00:00:00.000Z",
+    updated_at: "2026-07-31T00:00:00.000Z",
+  },
+  fieldCount: 1,
+  keyCount: 2,
+  experimentCount: 24,
+};
 
 const task = {
   id: "00000000-0000-4000-8000-000000000010",
@@ -109,7 +131,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(listTemplateSummaries).mockResolvedValue([templateSummary]);
+});
 afterEach(cleanup);
 
 describe("TaskExperimentsPanel", () => {
@@ -271,6 +296,10 @@ describe("TaskExperimentsPanel", () => {
 
     expect(screen.getByText("Unassigned")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "New experiment" }));
+    await screen.findByRole("option", { name: /Benchmark A/ });
+    fireEvent.change(screen.getByLabelText("Experiment template"), {
+      target: { value: TEMPLATE_ID },
+    });
     fireEvent.change(screen.getByLabelText("Experiment name"), {
       target: { value: "Created from Task" },
     });
@@ -281,6 +310,7 @@ describe("TaskExperimentsPanel", () => {
 
     await waitFor(() => expect(createExperiment).toHaveBeenCalledWith({
       taskId: task.id,
+      templateId: TEMPLATE_ID,
       ownerId: member.id,
       name: "Created from Task",
     }));

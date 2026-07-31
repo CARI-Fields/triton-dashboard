@@ -134,6 +134,7 @@ describe("duplicate policy", () => {
     });
     expect(duplicate).toEqual({
       task_id: completeContext.task_id,
+      template_id: completeContext.template_id,
       owner_id: "00000000-0000-4000-8000-000000000021",
       name: "Ascend guardrail run v2",
       status: "planned",
@@ -154,5 +155,13 @@ describe("duplicate policy", () => {
     });
     expect(duplicate.data_spec).not.toBe(completeContext.data_spec);
     expect(duplicate.config).not.toBe(completeContext.config);
+  });
+
+  it("copies the source Template into a duplicate", () => {
+    const insert = buildDuplicateInsert(
+      { ...completeContext, template_id: "30000000-0000-4000-8000-000000000001" },
+      { name: "Copy", ownerId: completeContext.owner_id!, position: 1 },
+    );
+    expect(insert.template_id).toBe("30000000-0000-4000-8000-000000000001");
   });
 });

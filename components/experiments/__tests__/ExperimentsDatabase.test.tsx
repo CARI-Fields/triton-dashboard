@@ -16,6 +16,7 @@ import {
   loadExperimentReferenceData,
   watchExperimentIndex,
 } from "@/lib/experiments/repository";
+import { listTemplateSummaries } from "@/lib/templates/repository";
 
 const routerPush = vi.hoisted(() => vi.fn());
 
@@ -29,6 +30,27 @@ vi.mock("@/lib/experiments/repository", () => ({
   loadExperimentReferenceData: vi.fn(),
   watchExperimentIndex: vi.fn(),
 }));
+
+vi.mock("@/lib/templates/repository", () => ({
+  listTemplateSummaries: vi.fn(),
+}));
+
+const TEMPLATE_ID = "30000000-0000-4000-8000-000000000001";
+
+const templateSummary = {
+  template: {
+    id: TEMPLATE_ID,
+    name: "Benchmark A",
+    description: "",
+    schema_revision: 2,
+    archived_at: null,
+    created_at: "2026-07-31T00:00:00.000Z",
+    updated_at: "2026-07-31T00:00:00.000Z",
+  },
+  fieldCount: 1,
+  keyCount: 2,
+  experimentCount: 24,
+};
 
 const task = {
   id: "00000000-0000-4000-8000-000000000010",
@@ -120,6 +142,7 @@ describe("ExperimentsDatabase", () => {
       members: [member],
     });
     vi.mocked(watchExperimentIndex).mockReturnValue(() => undefined);
+    vi.mocked(listTemplateSummaries).mockResolvedValue([templateSummary]);
   });
 
   afterEach(cleanup);
@@ -412,6 +435,10 @@ describe("ExperimentsDatabase", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "New experiment" }));
     const dialog = within(screen.getByRole("dialog", { name: "Create experiment" }));
+    await screen.findByRole("option", { name: /Benchmark A/ });
+    fireEvent.change(dialog.getByLabelText("Experiment template"), {
+      target: { value: TEMPLATE_ID },
+    });
     fireEvent.change(dialog.getByLabelText("Experiment name"), {
       target: { value: "NPU guardrail run" },
     });

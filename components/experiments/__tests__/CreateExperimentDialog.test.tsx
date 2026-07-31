@@ -4,10 +4,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Experiment, Member } from "@/lib/types";
 import CreateExperimentDialog from "@/components/experiments/CreateExperimentDialog";
 import { createExperiment } from "@/lib/experiments/repository";
+import { listTemplateSummaries } from "@/lib/templates/repository";
 
 vi.mock("@/lib/experiments/repository", () => ({
   createExperiment: vi.fn(),
 }));
+
+vi.mock("@/lib/templates/repository", () => ({
+  listTemplateSummaries: vi.fn(),
+}));
+
+const TEMPLATE_ID = "30000000-0000-4000-8000-000000000001";
+
+const templateSummary = {
+  template: {
+    id: TEMPLATE_ID,
+    name: "Benchmark A",
+    description: "",
+    schema_revision: 2,
+    archived_at: null,
+    created_at: "2026-07-31T00:00:00.000Z",
+    updated_at: "2026-07-31T00:00:00.000Z",
+  },
+  fieldCount: 1,
+  keyCount: 2,
+  experimentCount: 24,
+};
 
 const task = {
   id: "00000000-0000-4000-8000-000000000010",
@@ -32,7 +54,11 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
-function fillAndSubmit(name = "NPU guardrail run") {
+async function fillAndSubmit(name = "NPU guardrail run") {
+  await screen.findByRole("option", { name: /Benchmark A/ });
+  fireEvent.change(screen.getByLabelText("Experiment template"), {
+    target: { value: TEMPLATE_ID },
+  });
   fireEvent.change(screen.getByLabelText("Experiment name"), {
     target: { value: name },
   });
@@ -58,8 +84,25 @@ function CreateHarness() {
 }
 
 describe("CreateExperimentDialog", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(listTemplateSummaries).mockResolvedValue([templateSummary]);
+  });
   afterEach(cleanup);
+
+  it("requires a Template before creating", async () => {
+    render(
+      <CreateExperimentDialog
+        open
+        tasks={[]}
+        members={[]}
+        onClose={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Template")).not.toBeNull();
+    expect(screen.getByText(/cannot be changed later/)).not.toBeNull();
+  });
 
   it("traps keyboard focus, closes with Escape, and restores the launcher", async () => {
     render(<CreateHarness />);
@@ -91,7 +134,7 @@ describe("CreateExperimentDialog", () => {
     render(<CreateHarness />);
     const launch = screen.getByRole("button", { name: "Launch create" });
     fireEvent.click(launch);
-    fillAndSubmit();
+    await fillAndSubmit();
 
     const dialog = screen.getByRole("dialog");
     launch.focus();
@@ -104,7 +147,7 @@ describe("CreateExperimentDialog", () => {
     await act(async () => request.resolve({ id: "created" } as Experiment));
   });
 
-  it("requires Name, Owner, and Task and creates a planned row", async () => {
+  it("requires Name, Owner, Task, and Template and creates a planned row", async () => {
     vi.mocked(createExperiment).mockResolvedValue({ id: "new-experiment" } as Experiment);
     const onCreated = vi.fn();
     render(
@@ -118,8 +161,12 @@ describe("CreateExperimentDialog", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Create experiment" }));
-    expect(screen.getByText("Name, Owner, and Task are required.")).toBeDefined();
+    expect(screen.getByText("Name, Owner, Task, and Template are required.")).toBeDefined();
 
+    await screen.findByRole("option", { name: /Benchmark A/ });
+    fireEvent.change(screen.getByLabelText("Experiment template"), {
+      target: { value: TEMPLATE_ID },
+    });
     fireEvent.change(screen.getByLabelText("Experiment name"), {
       target: { value: "NPU guardrail run" },
     });
@@ -129,6 +176,7 @@ describe("CreateExperimentDialog", () => {
 
     await waitFor(() => expect(createExperiment).toHaveBeenCalledWith({
       taskId: task.id,
+      templateId: TEMPLATE_ID,
       ownerId: member.id,
       name: "NPU guardrail run",
     }));
@@ -150,7 +198,7 @@ describe("CreateExperimentDialog", () => {
       />,
     );
 
-    fillAndSubmit();
+    await fillAndSubmit();
     expect((screen.getByRole("button", { name: "Creating…" }) as HTMLButtonElement).disabled)
       .toBe(true);
     expect((screen.getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled)
@@ -178,7 +226,7 @@ describe("CreateExperimentDialog", () => {
     };
     const { rerender } = render(<CreateExperimentDialog open {...props} />);
 
-    fillAndSubmit("First");
+    await fillAndSubmit("First");
     rerender(<CreateExperimentDialog open={false} {...props} />);
     rerender(<CreateExperimentDialog open {...props} />);
     expect((screen.getByRole("button", { name: "Creating…" }) as HTMLButtonElement).disabled)
@@ -188,7 +236,7 @@ describe("CreateExperimentDialog", () => {
 
     await act(async () => pending.resolve({ id: "stale" } as Experiment));
     expect(onCreated).not.toHaveBeenCalled();
-    fillAndSubmit("Second");
+    await fillAndSubmit("Second");
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: "second" }));
   });
 
@@ -203,7 +251,7 @@ describe("CreateExperimentDialog", () => {
     };
     const { rerender } = render(<CreateExperimentDialog open {...props} />);
 
-    fillAndSubmit();
+    await fillAndSubmit();
     rerender(<CreateExperimentDialog open={false} {...props} />);
     rerender(<CreateExperimentDialog open {...props} />);
     await act(async () => {
@@ -229,7 +277,7 @@ describe("CreateExperimentDialog", () => {
         onCreated={onCreated}
       />,
     );
-    fillAndSubmit();
+    await fillAndSubmit();
     unmount();
 
     await act(async () => pending.resolve({ id: "stale" } as Experiment));
@@ -251,7 +299,7 @@ describe("CreateExperimentDialog", () => {
       />,
     );
 
-    fillAndSubmit();
+    await fillAndSubmit();
     expect((await screen.findByRole("alert")).textContent).toBe("Create failed.");
     fireEvent.click(screen.getByRole("button", { name: "Create experiment" }));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ id: "retried" }));

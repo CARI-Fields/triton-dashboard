@@ -1252,7 +1252,7 @@ function throwIfError(error: { message: string } | null): void {
 }
 
 function countBy(
-  rows: Array<{ template_id: string | null; archived_at: string | null }>,
+  rows: Array<{ template_id: string | null; archived_at?: string | null }>,
   activeOnly: boolean,
 ): Map<string, number> {
   const counts = new Map<string, number>();
@@ -1537,17 +1537,40 @@ import {
   type TemplateDraft,
 } from "@/lib/templates/repository";
 
+interface MockQuery {
+  data: unknown;
+  error: unknown;
+  select: ReturnType<typeof vi.fn>;
+  eq: ReturnType<typeof vi.fn>;
+  is: ReturnType<typeof vi.fn>;
+  order: ReturnType<typeof vi.fn>;
+  maybeSingle: ReturnType<typeof vi.fn>;
+  then: (
+    resolve: (response: unknown) => unknown,
+    reject: (error: unknown) => unknown,
+  ) => Promise<unknown>;
+}
+
 const mocks = vi.hoisted(() => {
   const rpc = vi.fn();
-  const tables: Record<string, unknown> = {};
-  function table(name: string) {
+  const tables: Record<string, MockQuery> = {};
+  function table(name: string): MockQuery {
     if (!tables[name]) {
       tables[name] = {
+        data: [] as unknown,
+        error: null as unknown,
         select: vi.fn(() => tables[name]),
         eq: vi.fn(() => tables[name]),
         is: vi.fn(() => tables[name]),
         order: vi.fn(() => tables[name]),
         maybeSingle: vi.fn(() => ({ data: null, error: null })),
+        then: (
+          resolve: (response: unknown) => unknown,
+          reject: (error: unknown) => unknown,
+        ) => Promise.resolve({
+          data: (tables[name] as { data: unknown }).data,
+          error: (tables[name] as { error: unknown }).error,
+        }).then(resolve, reject),
       };
     }
     return tables[name];
@@ -1596,14 +1619,16 @@ describe("template repository", () => {
     vi.mocked(experiments.select).mockReturnValue(experiments);
     vi.mocked(experiments.eq).mockReturnValue(experiments);
     vi.mocked(experiments.maybeSingle).mockResolvedValue({ data: template, error: null });
-    vi.mocked(mocks.table("experiment_template_fields").maybeSingle)
-      .mockResolvedValue({ data: [{ id: "f1", template_id: template.id, label: "Metrics", color_token: "blue", position: 1, archived_at: null }], error: null });
-    vi.mocked(mocks.table("experiment_template_keys").maybeSingle)
-      .mockResolvedValue({ data: [{ id: "k1", template_id: template.id, field_id: "f1", key: "pass@1", value_type: "number", required: false, position: 1, archived_at: null }], error: null });
-    vi.mocked(mocks.table("experiment_template_key_options").maybeSingle)
-      .mockResolvedValue({ data: [], error: null });
-    vi.mocked(mocks.table("experiment_values").maybeSingle)
-      .mockResolvedValue({ data: [], error: null });
+    mocks.table("experiment_template_fields").data = [{
+      id: "f1", template_id: template.id, label: "Metrics",
+      color_token: "blue", position: 1, archived_at: null,
+    }];
+    mocks.table("experiment_template_keys").data = [{
+      id: "k1", template_id: template.id, field_id: "f1", key: "pass@1",
+      value_type: "number", required: false, position: 1, archived_at: null,
+    }];
+    mocks.table("experiment_template_key_options").data = [];
+    mocks.table("experiment_values").data = [];
 
     const loaded = await loadTemplateDraft(template.id);
 

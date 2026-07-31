@@ -157,7 +157,7 @@ select is(
   'Number Value is stored typed'
 );
 select is(
-  (select core_revision from public.experiments
+  (select core_revision::int from public.experiments
    where id = '60000000-0000-4000-8000-000000000020'),
   2,
   'a successful cell save bumps core_revision'
@@ -738,24 +738,32 @@ begin
     delete from public.experiment_values
     where experiment_id = p_experiment_id and key_id = p_key_id;
   elsif v_key.value_type = 'multi_select' then
-  if v_current.experiment_id is null then
+    delete from public.experiment_value_options
+    where experiment_id = p_experiment_id and key_id = p_key_id;
+    if coalesce(array_length(v_option_ids, 1), 0) = 0 then
+      delete from public.experiment_values
+      where experiment_id = p_experiment_id and key_id = p_key_id;
+    elsif v_current.experiment_id is null then
       insert into public.experiment_values (
         experiment_id, template_id, key_id, cell_revision
       ) values (
         p_experiment_id, v_experiment.template_id, p_key_id, 1
       );
+      insert into public.experiment_value_options (
+        experiment_id, template_id, key_id, option_id, position
+      )
+      select p_experiment_id, v_experiment.template_id, p_key_id, x.id, x.ordinality - 1
+      from unnest(v_option_ids) with ordinality x(id, ordinality);
     else
       update public.experiment_values
       set cell_revision = v_cell_revision, updated_at = now()
       where experiment_id = p_experiment_id and key_id = p_key_id;
+      insert into public.experiment_value_options (
+        experiment_id, template_id, key_id, option_id, position
+      )
+      select p_experiment_id, v_experiment.template_id, p_key_id, x.id, x.ordinality - 1
+      from unnest(v_option_ids) with ordinality x(id, ordinality);
     end if;
-    delete from public.experiment_value_options
-    where experiment_id = p_experiment_id and key_id = p_key_id;
-    insert into public.experiment_value_options (
-      experiment_id, template_id, key_id, option_id, position
-    )
-    select p_experiment_id, v_experiment.template_id, p_key_id, x.id, x.ordinality - 1
-    from unnest(v_option_ids) with ordinality x(id, ordinality);
   elsif v_key.value_type = 'single_select' then
     if v_current.experiment_id is null then
       insert into public.experiment_values (

@@ -2346,9 +2346,9 @@ Expected: no output from tsc, then commit succeeds.
 Create `components/templates/__tests__/TemplateEditor.test.tsx`:
 
 ```tsx
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+i
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import TemplateEditor from "@/components/templates/TemplateEditor";
 import type { TemplateDraft } from "@/lib/templates/repository";
 
@@ -2376,30 +2376,33 @@ const draft: TemplateDraft = {
   }],
 };
 
+afterEach(cleanup);
+
 describe("TemplateEditor", () => {
   it("shows exactly the four schema columns", () => {
     render(
       <TemplateEditor draft={draft} experimentCount={24} onPersist={vi.fn()} readOnly={false} />,
     );
-    expect(screen.getByText("Field label")).toBeInTheDocument();
-    expect(screen.getByText("Key")).toBeInTheDocument();
-    expect(screen.getByText("Value type")).toBeInTheDocument();
-    expect(screen.getByText("Required / optional")).toBeInTheDocument();
+    expect(screen.getByText("Field label")).not.toBeNull();
+    expect(screen.getByText("Key")).not.toBeNull();
+    expect(screen.getByText("Value type")).not.toBeNull();
+    expect(screen.getByText("Required / optional")).not.toBeNull();
   });
 
   it("locks the Value Type of a populated Key", () => {
     render(
       <TemplateEditor draft={draft} experimentCount={24} onPersist={vi.fn()} readOnly={false} />,
     );
-    expect(screen.getByLabelText("Value type for pass@1")).toBeDisabled();
+    const select = screen.getByLabelText("Value type for pass@1") as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
   });
 
-  it("describes adding a Key as an impact line", async () => {
+  it("describes adding a Key as an impact line", () => {
     render(
       <TemplateEditor draft={draft} experimentCount={24} onPersist={vi.fn()} readOnly={false} />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Add key" }));
-    expect(screen.getByText(/creates an empty Key for 24 existing Experiments/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+    expect(screen.getByText(/creates an empty Key for 24 existing Experiments/)).not.toBeNull();
   });
 });
 ```
@@ -2417,6 +2420,7 @@ Expected: FAIL (assertions fail against the Task 4 stub).
 Create `components/templates/OptionsEditor.tsx`:
 
 ```tsx
+"
 "use client";
 
 import type { TemplateOptionDraft } from "@/lib/templates/repository";
@@ -2504,6 +2508,7 @@ export default function OptionsEditor({
 Replace the Task 4 stub with:
 
 ```tsx
+"
 "use client";
 
 import { useMemo, useState } from "react";
@@ -2514,7 +2519,6 @@ import type {
   TemplateFieldDraft,
   TemplateKeyDraft,
   TemplateOptionDraft,
-  TemplateValueType,
 } from "@/lib/templates/repository";
 import type { TemplateValueType as ValueType } from "@/lib/types";
 
@@ -2964,11 +2968,6 @@ Append:
   font-weight: 600;
   width: 100%;
 }
-.template-key-row td { border-top: 0; }
-.template-field-row + .template-key-row td { border-top: 0; }
-.template-field-row td,
-.template-field-row + .template-key-row td,
-.template-key-row + .template-key-row td { border-top: 0; }
 .template-key-row input,
 .template-key-row select {
   min-width: 140px;

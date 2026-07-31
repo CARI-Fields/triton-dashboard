@@ -76,7 +76,7 @@ describe("TemplateManager", () => {
     render(<TemplateManager />);
     await screen.findByText("Benchmark A");
     fireEvent.click(screen.getByRole("option", { name: /Benchmark A/ }));
-    await screen.findByText(/Schema editor arrives/);
+    await screen.findByRole("button", { name: "Save schema" });
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(mocks.archive).toHaveBeenCalledWith("t1"));
     expect(confirmSpy).toHaveBeenCalled();

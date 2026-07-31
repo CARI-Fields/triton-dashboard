@@ -127,30 +127,30 @@ select is(
     'Function Benchmark',
     'Created by save function',
     1,
-    '[{
-      "id": null,
+    $$[{
+      "id": "40000000-0000-4000-8000-000000000011",
       "label": "Metrics",
       "color_token": "blue",
       "position": 1,
       "keys": [{
-        "id": null,
+        "id": "50000000-0000-4000-8000-000000000011",
         "key": "pass@1",
         "value_type": "number",
         "required": false,
         "position": 1,
         "options": []
       }, {
-        "id": null,
+        "id": "50000000-0000-4000-8000-000000000012",
         "key": "device",
         "value_type": "single_select",
         "required": false,
         "position": 2,
         "options": [
-          {"id": null, "label": "npu:1", "position": 1, "archived": false},
-          {"id": null, "label": "gpu:0", "position": 2, "archived": false}
+          {"id": "70000000-0000-4000-8000-000000000011", "label": "npu:1", "position": 1, "archived": false},
+          {"id": "70000000-0000-4000-8000-000000000012", "label": "gpu:0", "position": 2, "archived": false}
         ]
       }]
-    }]'::jsonb
+    }]$$::jsonb
   )->>'schema_revision'),
   '2',
   'save bumps schema_revision to 2'
@@ -162,7 +162,7 @@ select is(
   'save writes one immutable version'
 );
 select is(
-  (select version_no from public.experiment_template_versions
+  (select version_no::int from public.experiment_template_versions
    where template_id = '30000000-0000-4000-8000-000000000010'),
   1,
   'first version is version_no 1'
@@ -174,7 +174,7 @@ select is(
   'version records browser source'
 );
 select ok(
-  (select snapshot @> '{"label": "Metrics"}'::jsonb
+  (select snapshot @> '[{"label": "Metrics"}]'::jsonb
    from public.experiment_template_versions
    where template_id = '30000000-0000-4000-8000-000000000010'),
   'snapshot contains the Field Label'
@@ -199,14 +199,14 @@ select is(
     'Function Benchmark',
     'Renamed key',
     2,
-    '[{
-      "id": (select id from public.experiment_template_fields where template_id = '30000000-0000-4000-8000-000000000010'),
+    $$[{
+      "id": "40000000-0000-4000-8000-000000000011",
       "label": "Metrics",
       "color_token": "blue",
       "position": 1,
       "keys": [
         {
-          "id": (select id from public.experiment_template_keys where template_id = '30000000-0000-4000-8000-000000000010' and key = 'pass@1'),
+          "id": "50000000-0000-4000-8000-000000000011",
           "key": "pass@1_new",
           "value_type": "number",
           "required": true,
@@ -215,19 +215,19 @@ select is(
           "options": []
         },
         {
-          "id": (select id from public.experiment_template_keys where template_id = '30000000-0000-4000-8000-000000000010' and key = 'device'),
+          "id": "50000000-0000-4000-8000-000000000012",
           "key": "device",
           "value_type": "single_select",
           "required": false,
           "position": 2,
           "archived": false,
           "options": [
-            {"id": (select id from public.experiment_template_key_options where template_id = '30000000-0000-4000-8000-000000000010' and label = 'npu:1'), "label": "npu:1", "position": 1, "archived": false},
-            {"id": (select id from public.experiment_template_key_options where template_id = '30000000-0000-4000-8000-000000000010' and label = 'gpu:0'), "label": "gpu:0", "position": 2, "archived": false}
+            {"id": "70000000-0000-4000-8000-000000000011", "label": "npu:1", "position": 1, "archived": false},
+            {"id": "70000000-0000-4000-8000-000000000012", "label": "gpu:0", "position": 2, "archived": false}
           ]
         }
       ]
-    }]'::jsonb
+    }]$$::jsonb
   )->>'schema_revision'),
   '3',
   'second save bumps revision to 3'
@@ -271,21 +271,21 @@ insert into public.experiment_values (
 ) values (
   '60000000-0000-4000-8000-000000000010',
   '30000000-0000-4000-8000-000000000010',
-  (select id from public.experiment_template_keys where template_id = '30000000-0000-4000-8000-000000000010' and key = 'pass@1_new'),
+  '50000000-0000-4000-8000-000000000011',
   0.73
 );
 select throws_ok(
-  $$select public.save_experiment_template(
+  $q$select public.save_experiment_template(
     '30000000-0000-4000-8000-000000000010',
     'Function Benchmark', '', 3,
-    '[{
-      "id": (select id from public.experiment_template_fields where template_id = '30000000-0000-4000-8000-000000000010'),
+    $$[{
+      "id": "40000000-0000-4000-8000-000000000011",
       "label": "Metrics",
       "color_token": "blue",
       "position": 1,
       "keys": [
         {
-          "id": (select id from public.experiment_template_keys where template_id = '30000000-0000-4000-8000-000000000010' and key = 'pass@1_new'),
+          "id": "50000000-0000-4000-8000-000000000011",
           "key": "pass@1_new",
           "value_type": "text",
           "required": true,
@@ -294,8 +294,8 @@ select throws_ok(
           "options": []
         }
       ]
-    }]'::jsonb
-  )$$,
+    }]$$::jsonb
+  )$q$,
   'P0001',
   'POPULATED_KEY_TYPE_LOCKED',
   'a populated Key cannot change Value Type'
@@ -307,14 +307,14 @@ select is(
   (select public.save_experiment_template(
     '30000000-0000-4000-8000-000000000010',
     'Function Benchmark', '', 3,
-    '[{
-      "id": (select id from public.experiment_template_fields where template_id = '30000000-0000-4000-8000-000000000010'),
+    $$[{
+      "id": "40000000-0000-4000-8000-000000000011",
       "label": "Metrics",
       "color_token": "blue",
       "position": 1,
       "keys": [
         {
-          "id": (select id from public.experiment_template_keys where template_id = '30000000-0000-4000-8000-000000000010' and key = 'pass@1_new'),
+          "id": "50000000-0000-4000-8000-000000000011",
           "key": "pass@1_new",
           "value_type": "number",
           "required": true,
@@ -323,19 +323,19 @@ select is(
           "options": []
         },
         {
-          "id": (select id from public.experiment_template_keys where template_id = '30000000-0000-4000-8000-000000000010' and key = 'device'),
+          "id": "50000000-0000-4000-8000-000000000012",
           "key": "device",
           "value_type": "single_select",
           "required": false,
           "position": 2,
           "archived": false,
           "options": [
-            {"id": (select id from public.experiment_template_key_options where template_id = '30000000-0000-4000-8000-000000000010' and label = 'npu:1'), "label": "npu:1", "position": 1, "archived": false},
-            {"id": (select id from public.experiment_template_key_options where template_id = '30000000-0000-4000-8000-000000000010' and label = 'gpu:0'), "label": "gpu:0", "position": 2, "archived": false}
+            {"id": "70000000-0000-4000-8000-000000000011", "label": "npu:1", "position": 1, "archived": false},
+            {"id": "70000000-0000-4000-8000-000000000012", "label": "gpu:0", "position": 2, "archived": false}
           ]
         }
       ]
-    }]'::jsonb
+    }]$$::jsonb
   )->>'schema_revision'),
   '4',
   'archiving a populated Key still saves'
@@ -350,9 +350,7 @@ select is(
 );
 select is(
   (select count(*)::int from public.experiment_values
-   where key_id = (select id from public.experiment_template_keys
-                   where template_id = '30000000-0000-4000-8000-000000000010'
-                     and key = 'pass@1_new')),
+   where key_id = '50000000-0000-4000-8000-000000000011'),
   1,
   'archived Key preserves its Values'
 );
@@ -362,25 +360,25 @@ select is(
   (select public.save_experiment_template(
     '30000000-0000-4000-8000-000000000010',
     'Function Benchmark', '', 4,
-    '[{
-      "id": (select id from public.experiment_template_fields where template_id = '30000000-0000-4000-8000-000000000010'),
+    $$[{
+      "id": "40000000-0000-4000-8000-000000000011",
       "label": "Metrics",
       "color_token": "blue",
       "position": 1,
       "keys": [
         {
-          "id": (select id from public.experiment_template_keys where template_id = '30000000-0000-4000-8000-000000000010' and key = 'device'),
+          "id": "50000000-0000-4000-8000-000000000012",
           "key": "device",
           "value_type": "single_select",
           "required": false,
           "position": 2,
           "archived": false,
           "options": [
-            {"id": (select id from public.experiment_template_key_options where template_id = '30000000-0000-4000-8000-000000000010' and label = 'npu:1'), "label": "npu:1", "position": 1, "archived": false}
+            {"id": "70000000-0000-4000-8000-000000000011", "label": "npu:1", "position": 1, "archived": false}
           ]
         }
       ]
-    }]'::jsonb
+    }]$$::jsonb
   )->>'schema_revision'),
   '5',
   'removing an unreferenced option still saves'
@@ -424,9 +422,9 @@ select throws_ok(
   'archived Templates cannot create new Experiments'
 );
 select throws_ok(
-  $$select public.save_experiment_template(
+  $q$select public.save_experiment_template(
     '30000000-0000-4000-8000-000000000010', 'Function Benchmark', '', 6, '[]'::jsonb
-  )$$,
+  )$q$,
   'P0001',
   'TEMPLATE_ARCHIVED',
   'archived Templates cannot be edited'
@@ -612,7 +610,18 @@ begin
           archived_at = null,
           updated_at = now()
       where id = v_field_id and template_id = p_template_id;
-      if not found then raise exception 'FIELD_TEMPLATE_MISMATCH' using errcode = 'P0001'; end if;
+      if not found then
+        if exists (select 1 from public.experiment_template_fields where id = v_field_id) then
+          raise exception 'FIELD_TEMPLATE_MISMATCH' using errcode = 'P0001';
+        end if;
+        insert into public.experiment_template_fields (id, template_id, label, color_token, position)
+        values (
+          v_field_id, p_template_id,
+          trim(v_field->>'label'),
+          coalesce(nullif(v_field->>'color_token', ''), 'blue'),
+          (v_field->>'position')::integer
+        );
+      end if;
     end if;
     v_kept_field_ids := array_append(v_kept_field_ids, v_field_id);
 
@@ -648,24 +657,39 @@ begin
         returning id into v_key_id;
       else
         if exists (
-          select 1 from public.experiment_values
-          where key_id = v_key_id and template_id = p_template_id
-        ) and (
-          select value_type from public.experiment_template_keys
+          select 1 from public.experiment_template_keys
           where id = v_key_id and template_id = p_template_id
-        ) is distinct from v_key->>'value_type' then
-          raise exception 'POPULATED_KEY_TYPE_LOCKED' using errcode = 'P0001';
+        ) then
+          if exists (
+            select 1 from public.experiment_values
+            where key_id = v_key_id and template_id = p_template_id
+          ) and (
+            select value_type from public.experiment_template_keys
+            where id = v_key_id and template_id = p_template_id
+          ) is distinct from v_key->>'value_type' then
+            raise exception 'POPULATED_KEY_TYPE_LOCKED' using errcode = 'P0001';
+          end if;
+          update public.experiment_template_keys
+          set key = trim(v_key->>'key'),
+              field_id = v_field_id,
+              value_type = v_key->>'value_type',
+              required = coalesce((v_key->>'required')::boolean, required),
+              position = (v_key->>'position')::integer,
+              archived_at = null,
+              updated_at = now()
+          where id = v_key_id and template_id = p_template_id;
+        else
+          if exists (select 1 from public.experiment_template_keys where id = v_key_id) then
+            raise exception 'KEY_TEMPLATE_MISMATCH' using errcode = 'P0001';
+          end if;
+          insert into public.experiment_template_keys (id, template_id, field_id, key, value_type, required, position)
+          values (
+            v_key_id, p_template_id, v_field_id,
+            trim(v_key->>'key'), v_key->>'value_type',
+            coalesce((v_key->>'required')::boolean, false),
+            (v_key->>'position')::integer
+          );
         end if;
-        update public.experiment_template_keys
-        set key = trim(v_key->>'key'),
-            field_id = v_field_id,
-            value_type = v_key->>'value_type',
-            required = coalesce((v_key->>'required')::boolean, required),
-            position = (v_key->>'position')::integer,
-            archived_at = null,
-            updated_at = now()
-        where id = v_key_id and template_id = p_template_id;
-        if not found then raise exception 'KEY_TEMPLATE_MISMATCH' using errcode = 'P0001'; end if;
       end if;
       v_kept_key_ids := array_append(v_kept_key_ids, v_key_id);
 
@@ -700,7 +724,13 @@ begin
               position = (v_option->>'position')::integer,
               archived_at = null
           where id = v_option_id and template_id = p_template_id;
-          if not found then raise exception 'OPTION_TEMPLATE_MISMATCH' using errcode = 'P0001'; end if;
+          if not found then
+            if exists (select 1 from public.experiment_template_key_options where id = v_option_id) then
+              raise exception 'OPTION_TEMPLATE_MISMATCH' using errcode = 'P0001';
+            end if;
+            insert into public.experiment_template_key_options (id, template_id, key_id, label, position)
+            values (v_option_id, p_template_id, v_key_id, trim(v_option->>'label'), (v_option->>'position')::integer);
+          end if;
         end if;
         v_kept_option_ids := array_append(v_kept_option_ids, v_option_id);
       end loop;

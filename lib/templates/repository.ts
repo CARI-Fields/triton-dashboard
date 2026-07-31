@@ -367,3 +367,13 @@ export async function restoreTemplateVersion(
   );
   return saveTemplate(draft);
 }
+
+export function emptyTemplateDraft(template: ExperimentTemplate): TemplateDraft {
+  return {
+    templateId: template.id,
+    name: template.name,
+    description: template.description,
+    schemaRevision: template.schema_revision,
+    fields: [],
+  };
+}

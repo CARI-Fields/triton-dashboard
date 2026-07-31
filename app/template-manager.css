@@ -1,0 +1,102 @@
+.template-manager {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 16px;
+}
+.template-manager-body {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  min-height: 0;
+}
+.template-rail {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.template-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.template-rail-header h2 {
+  font-size: 14px;
+  margin: 0;
+}
+.template-rail-list {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+}
+.template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  color: var(--ink);
+}
+.template-card:hover { background: var(--surface-hover); }
+.template-card.selected { background: var(--accent-soft); }
+.template-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.template-archived-badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--crit-soft);
+  color: var(--crit);
+}
+.template-card-description {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.template-card-meta {
+  display: flex;
+  gap: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.template-editor-pane {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 16px;
+}
+.template-empty {
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* Field color tokens (finite, contrast-checked palette) */
+.token-blue { --field-accent: #275fd2; --field-soft: #eef3ff; }
+.token-green { --field-accent: #2f6a48; --field-soft: #eaf5ee; }
+.token-amber { --field-accent: #9a6512; --field-soft: #fff4d9; }
+.token-purple { --field-accent: #6b4aa8; --field-soft: #f1ecfa; }
+.token-rose { --field-accent: #b0405f; --field-soft: #fbedf1; }
+.token-teal { --field-accent: #1f6f6b; --field-soft: #e6f4f3; }
+
+@media (max-width: 760px) {
+  .template-manager-body {
+    grid-template-columns: 1fr;
+  }
+  .template-rail-list {
+    max-height: 220px;
+  }
+}

@@ -1716,9 +1716,9 @@ git commit -m "feat: add template repository and impact description"
 Create `components/templates/__tests__/TemplateManager.test.tsx`:
 
 ```tsx
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+i
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TemplateManager from "@/components/templates/TemplateManager";
 import type { TemplateSummary } from "@/lib/templates/repository";
 
@@ -1772,18 +1772,20 @@ beforeEach(() => {
   mocks.loadDraft.mockResolvedValue(draft);
 });
 
+afterEach(cleanup);
+
 describe("TemplateManager", () => {
   it("lists Templates with key and experiment counts", async () => {
     render(<TemplateManager />);
     await screen.findByText("Benchmark A");
-    expect(screen.getByText("2 keys")).toBeInTheDocument();
-    expect(screen.getByText("24 experiments")).toBeInTheDocument();
+    expect(screen.getByText("2 keys")).not.toBeNull();
+    expect(screen.getByText("24 experiments")).not.toBeNull();
   });
 
   it("opens the schema editor for a selected Template", async () => {
     render(<TemplateManager />);
     await screen.findByText("Benchmark A");
-    await userEvent.click(screen.getByRole("button", { name: /Benchmark A/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Benchmark A/ }));
     await waitFor(() => expect(mocks.loadDraft).toHaveBeenCalledWith("t1"));
   });
 
@@ -1792,8 +1794,9 @@ describe("TemplateManager", () => {
     mocks.archive.mockResolvedValue(undefined);
     render(<TemplateManager />);
     await screen.findByText("Benchmark A");
-    await userEvent.click(screen.getByRole("button", { name: /Benchmark A/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("option", { name: /Benchmark A/ }));
+    await screen.findByText(/Schema editor arrives/);
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(mocks.archive).toHaveBeenCalledWith("t1"));
     expect(confirmSpy).toHaveBeenCalled();
   });
@@ -2015,6 +2018,7 @@ The test expects `2 keys` and `24 experiments` as separate texts; adjust the met
 Create `components/templates/TemplateManager.tsx`:
 
 ```tsx
+"
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -2036,6 +2040,7 @@ import {
 
 export default function TemplateManager() {
   const reloadVersion = useRef(0);
+  const selectVersion = useRef(0);
   const [summaries, setSummaries] = useState<TemplateSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<TemplateDraft | null>(null);
@@ -2063,16 +2068,19 @@ export default function TemplateManager() {
   }, [reloadSummaries]);
 
   const selectTemplate = useCallback(async (templateId: string) => {
+    const requestVersion = ++selectVersion.current;
     setSelectedId(templateId);
     setDraft(null);
     setError("");
     try {
       const next = await loadTemplateDraft(templateId);
-      if (selectedId === templateId) setDraft(next);
+      if (requestVersion !== selectVersion.current) return;
+      setDraft(next);
     } catch (caught) {
+      if (requestVersion !== selectVersion.current) return;
       setError(caught instanceof Error ? caught.message : "Could not load the Template.");
     }
-  }, [selectedId]);
+  }, []);
 
   async function createTemplate(name: string, description: string) {
     const { data, error } = await import("@/lib/supabase").then((m) =>
@@ -2163,6 +2171,7 @@ export default function TemplateManager() {
       <NewTemplateDialog open={newOpen} onClose={() => setNewOpen(false)} onCreate={createTemplate} />
     </div>
   );
+}
 ```
 
 - [ ] **Step 7: Create the CSS**
@@ -2298,7 +2307,7 @@ PATH=/tmp/node-v24.18.0-linux-arm64/bin:$PATH npx vitest run components/template
 Expected: PASS (note: `TemplateEditor` does not exist yet; the test only covers the list/create/archive paths, so the manager must render a placeholder instead of the editor until Task 5). If the manager imports `TemplateEditor` before Task 5, add a temporary stub:
 
 ```tsx
-// components/templates/TemplateEditor.tsx (temporary stub for Task 4; replaced in Task 5)
+// Temporary stub for Task 4; replaced in Task 5.
 import type { TemplateDraft } from "@/lib/templates/repository";
 
 export default function TemplateEditor(_props: {

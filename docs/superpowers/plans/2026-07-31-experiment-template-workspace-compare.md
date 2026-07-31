@@ -613,6 +613,7 @@ Expected: PASS; no new type errors; commit succeeds.
 Create `lib/templates/__tests__/compare-data.test.ts`:
 
 ```ts
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadTemplateCompareRows } from "@/lib/templates/compare-data";
 
@@ -642,7 +643,13 @@ const mocks = vi.hoisted(() => {
         eq: vi.fn(() => tables[name]),
         in: vi.fn(() => tables[name]),
         not: vi.fn(() => tables[name]),
-        is: vi.fn(() => tables[name]),
+        is: vi.fn((column: string, value: unknown) => {
+          const rows = (tables[name] as { data: unknown[] }).data as Array<Record<string, unknown>>;
+          (tables[name] as { data: unknown }).data = value === null
+            ? rows.filter((row) => row[column] == null)
+            : rows.filter((row) => row[column] === value);
+          return tables[name];
+        }),
         order: vi.fn(() => tables[name]),
         then: (
           resolve: (response: unknown) => unknown,
@@ -691,6 +698,7 @@ beforeEach(() => {
     boolean_value: null,
     datetime_value: null,
     option_id: null,
+    template_key: { value_type: "number" },
   }];
   mocks.table("experiment_value_options").data = [];
   mocks.table("attachments").data = [];
@@ -712,25 +720,25 @@ describe("loadTemplateCompareRows", () => {
   });
 
   it("filters archived rows unless requested", async () => {
-    mocks.table("experiments").data = [
-      ...(mocks.table("experiments").data as unknown[]),
-      {
-        id: "60000000-0000-4000-8000-000000000002",
-        experiment_no: 2,
-        task_id: "20000000-0000-4000-8000-000000000001",
-        owner_id: null,
-        name: "Run two",
-        status: "completed",
-        baseline_experiment_id: null,
-        template_id: TEMPLATE_ID,
-        archived_at: "2026-07-31T00:00:00.000Z",
-        core_revision: 1,
-        created_at: "2026-07-31T00:00:00.000Z",
-        updated_at: "2026-07-31T00:00:00.000Z",
-      },
-    ];
+    const rows = mocks.table("experiments").data as unknown[];
+    const archivedRow = {
+      id: "60000000-0000-4000-8000-000000000002",
+      experiment_no: 2,
+      task_id: "20000000-0000-4000-8000-000000000001",
+      owner_id: null,
+      name: "Run two",
+      status: "completed",
+      baseline_experiment_id: null,
+      template_id: TEMPLATE_ID,
+      archived_at: "2026-07-31T00:00:00.000Z",
+      core_revision: 1,
+      created_at: "2026-07-31T00:00:00.000Z",
+      updated_at: "2026-07-31T00:00:00.000Z",
+    };
+    mocks.table("experiments").data = [...rows, archivedRow];
     const withoutArchived = await loadTemplateCompareRows(TEMPLATE_ID, false);
     expect(withoutArchived).toHaveLength(1);
+    mocks.table("experiments").data = [...rows, archivedRow];
     const withArchived = await loadTemplateCompareRows(TEMPLATE_ID, true);
     expect(withArchived).toHaveLength(2);
     expect(withArchived[1].archivedAt).not.toBeNull();
@@ -751,6 +759,7 @@ Expected: FAIL — module cannot be resolved.
 Create `lib/templates/compare-data.ts`:
 
 ```ts
+
 import { supabase } from "@/lib/supabase";
 import type {
   Attachment,

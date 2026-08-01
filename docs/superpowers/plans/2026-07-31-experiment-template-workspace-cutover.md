@@ -878,7 +878,11 @@ if (!url) {
   process.exit(1);
 }
 
-const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+const useSsl = !/localhost|127\.0\.0\.1/.test(new URL(url).hostname);
+const client = new pg.Client({
+  connectionString: url,
+  ssl: useSsl ? { rejectUnauthorized: false } : false,
+});
 
 const checks = [];
 function check(name, condition, detail = "") {
@@ -906,7 +910,7 @@ try {
   if (templateId) {
     const values = await client.query(
       `select count(*)::int as total,
-              count(*) filter (where v.template_id <> e.template_id) as cross_template
+              count(*) filter (where v.template_id <> e.template_id)::int as cross_template
        from public.experiment_values v
        join public.experiments e on e.id = v.experiment_id`,
     );
@@ -914,7 +918,7 @@ try {
 
     const versions = await client.query(
       `select count(*)::int as experiments,
-              count(distinct e.id) as with_migration_version
+              count(distinct e.id)::int as with_migration_version
        from public.experiments e
        left join public.experiment_versions v
          on v.experiment_id = e.id and v.version_no = 1 and v.source = 'migration'`,

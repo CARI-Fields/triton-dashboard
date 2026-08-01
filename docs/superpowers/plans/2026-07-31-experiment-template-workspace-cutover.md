@@ -58,7 +58,7 @@ Create `supabase/tests/0019_legacy_experiment_cutover.sql`:
 
 ```sql
 begin;
-select plan(21);
+select plan(17);
 
 -- Imported Legacy Template exists with the deterministic UUID -------------------
 select is(
@@ -120,15 +120,19 @@ select is(
   'NO',
   'experiments.template_id is NOT NULL after backfill'
 );
+insert into public.modules (id, name, kind)
+values ('10000000-0000-4000-8000-000000000099', 'Cutover test module', 'pipeline');
+insert into public.tasks (id, module_id, title)
+values ('20000000-0000-4000-8000-000000000099', '10000000-0000-4000-8000-000000000099', 'Cutover test task');
 select throws_ok(
   $$insert into public.experiments (id, task_id, name)
     values (
       '60000000-0000-4000-8000-000000000099',
-      '20000000-0000-4000-8000-000000000001',
+      '20000000-0000-4000-8000-000000000099',
       'No template'
     )$$,
   '23502',
-  'null value in column "template_id"',
+  'null value in column "template_id" of relation "experiments" violates not-null constraint',
   'new Experiments require a Template'
 );
 
@@ -142,10 +146,6 @@ select is(
 );
 
 -- Lifecycle-only Activity -------------------------------------------------------------
-insert into public.modules (id, name, kind)
-values ('10000000-0000-4000-8000-000000000099', 'Cutover test module', 'pipeline');
-insert into public.tasks (id, module_id, title)
-values ('20000000-0000-4000-8000-000000000099', '10000000-0000-4000-8000-000000000099', 'Cutover test task');
 insert into public.experiments (id, task_id, template_id, name)
 values (
   '60000000-0000-4000-8000-000000000001',
@@ -723,7 +723,7 @@ npx supabase db reset --local
 npx supabase test db --local supabase/tests/0019_legacy_experiment_cutover.sql
 ```
 
-Expected: PASS (all 21 assertions).
+Expected: PASS (all 17 assertions).
 
 - [ ] **Step 4: Confirm the existing suite still passes**
 

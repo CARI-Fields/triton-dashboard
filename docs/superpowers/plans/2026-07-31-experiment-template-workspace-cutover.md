@@ -767,8 +767,8 @@ Add one concrete test:
 
 ```ts
   it("does not gate Status on legacy content after cutover", () => {
-    expect(validateForStatus("running", bareContext)).toEqual([]);
-    expect(validateForStatus("completed", bareContext)).toEqual([]);
+    expect(validateForStatus(bareContext, "running")).toEqual([]);
+    expect(validateForStatus(bareContext, "completed")).toEqual([]);
   });
 ```
 
@@ -789,15 +789,16 @@ In `lib/experiments/policy.ts`:
 
 ```ts
 export function validateForStatus(
+  experiment: Experiment,
   target: ExperimentStatus,
-  experiment: Pick<Experiment, "status">,
 ): ValidationIssue[] {
-  if (target === experiment.status) return [];
-  if (canTransition(experiment.status, target)) return [];
-  return [{
-    field: "status",
-    message: `${experiment.status} cannot transition to ${target}.`,
-  }];
+  if (!canTransition(experiment.status, target)) {
+    return [{
+      field: "status",
+      message: `Cannot move from ${EXPERIMENT_STATUS_LABELS[experiment.status]} to ${EXPERIMENT_STATUS_LABELS[target]}.`,
+    }];
+  }
+  return [];
 }
 ```
 

@@ -73,7 +73,7 @@ describe("experiment lifecycle", () => {
     expect(canTransition("completed", "running")).toBe(false);
   });
 
-  it("requires owner and runnable context before running", () => {
+  it("does not gate Status on legacy content after cutover", () => {
     const invalid = {
       ...completeContext,
       owner_id: null,
@@ -82,39 +82,34 @@ describe("experiment lifecycle", () => {
       environment_spec: { ...completeContext.environment_spec, server: "", devices: [] },
       config: {},
     };
-    expect(validateForStatus(invalid, "running").map((issue) => issue.field)).toEqual([
-      "owner_id",
-      "data_spec.datasets",
-      "object_spec.model",
-      "environment_spec.server_or_devices",
-      "config",
-    ]);
+    expect(validateForStatus(invalid, "running")).toEqual([]);
   });
 
-  it("requires a result before analyzing", () => {
+  it("allows analyzing and completion without legacy content", () => {
     const invalid = {
       ...completeContext,
       status: "running" as const,
       metrics: {},
       result_summary: "",
     };
-    expect(validateForStatus(invalid, "analyzing")).toEqual([
-      { field: "result", message: "Add a numeric metric or Result Summary before analyzing." },
-    ]);
-  });
-
-  it("requires runnable context, result, and a decision before completion", () => {
-    const invalid = {
+    expect(validateForStatus(invalid, "analyzing")).toEqual([]);
+    const bare = {
       ...completeContext,
       status: "analyzing" as const,
       metrics: {},
       result_summary: "",
       decision_outcome: null,
     };
-    expect(validateForStatus(invalid, "completed").map((issue) => issue.field)).toEqual([
-      "result",
-      "decision_outcome",
-    ]);
+    expect(validateForStatus(bare, "completed")).toEqual([]);
+  });
+
+  it("rejects an invalid Status transition", () => {
+    const planned = {
+      ...completeContext,
+      status: "planned" as const,
+    };
+    expect(validateForStatus(planned, "completed").map((issue) => issue.field))
+      .toEqual(["status"]);
   });
 
   it("rejects self baseline and formats stable display IDs", () => {

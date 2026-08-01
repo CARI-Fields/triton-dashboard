@@ -788,39 +788,7 @@ describe("Experiment PATCH route", () => {
     );
   });
 
-  it("reports merged-field workflow issues with stable field details", async () => {
-    vi.mocked(getExperiment).mockResolvedValue(experiment({
-      data_spec: {
-        datasets: [{
-          role: "evaluation",
-          name: "kernelbench",
-          split: "test",
-          revision: "v1",
-          task_count: 250,
-          samples_per_task: 1,
-        }],
-      },
-      object_spec: {
-        model: "Qwen",
-        harness: "",
-        parent_harness: "",
-        prompt: "",
-        prompt_change: "",
-        skills: [],
-        tools: [],
-      },
-      environment_spec: {
-        platform: "npu",
-        server: "atlas",
-        devices: [],
-        hardware: "",
-        evaluator: "",
-        revision: "",
-        precision_policy: "",
-      },
-      config: { profile: "defaults" },
-    }));
-
+  it("allows Status transitions without legacy content after cutover", async () => {
     const response = await experimentRoute.PATCH(
       jsonRequest(
         "PATCH",
@@ -844,15 +812,27 @@ describe("Experiment PATCH route", () => {
       experimentParams(),
     );
 
+    expect(response.status).toBe(200);
+    expect(patchExperiment).toHaveBeenCalled();
+  });
+
+  it("rejects an invalid Status transition", async () => {
+    const response = await experimentRoute.PATCH(
+      jsonRequest(
+        "PATCH",
+        `/experiments/${EXPERIMENT_ID}`,
+        { changes: { status: "completed" } },
+        patchHeaders(),
+      ),
+      experimentParams(),
+    );
+
     expect(response.status).toBe(422);
     expect(await responseBody(response)).toMatchObject({
       error: {
         code: "WORKFLOW_INVALID",
         details: {
-          issues: [{
-            field: "object_spec.model",
-            message: "Add a Model before running.",
-          }],
+          issues: [{ field: "status" }],
         },
       },
     });

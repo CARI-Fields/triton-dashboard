@@ -63,57 +63,6 @@ const TRANSITIONS: Record<ExperimentStatus, ExperimentStatus[]> = {
   cancelled: ["planned"],
 };
 
-function hasConfigValue(config: ExperimentConfig): boolean {
-  return Object.entries(config).some(([key, value]) => {
-    if (!key.trim()) return false;
-    if (typeof value === "string") return value.trim().length > 0;
-    return value !== null;
-  });
-}
-
-function hasResult(experiment: Experiment): boolean {
-  const hasMetric = Object.values(experiment.metrics).some(
-    (value) => typeof value === "number" && Number.isFinite(value),
-  );
-  return hasMetric || experiment.result_summary.trim().length > 0;
-}
-
-function runnableIssues(experiment: Experiment): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  if (!experiment.owner_id) {
-    issues.push({ field: "owner_id", message: "Choose an Owner before running." });
-  }
-  if (!experiment.data_spec.datasets.some((dataset) => dataset.name.trim().length > 0)) {
-    issues.push({
-      field: "data_spec.datasets",
-      message: "Add at least one named training or evaluation Dataset before running.",
-    });
-  }
-  if (!experiment.object_spec.model.trim()) {
-    issues.push({ field: "object_spec.model", message: "Add a Model before running." });
-  }
-  const environment = experiment.environment_spec;
-  if (!environment.platform) {
-    issues.push({
-      field: "environment_spec.platform",
-      message: "Choose NPU or GPU before running.",
-    });
-  }
-  if (!environment.server.trim() && !environment.devices.some((device) => device.trim())) {
-    issues.push({
-      field: "environment_spec.server_or_devices",
-      message: "Add a Server or Device before running.",
-    });
-  }
-  if (!hasConfigValue(experiment.config)) {
-    issues.push({
-      field: "config",
-      message: 'Add an explicit parameter or set profile to "defaults" before running.',
-    });
-  }
-  return issues;
-}
-
 export function formatExperimentId(experimentNo: number): string {
   return `EXP-${String(experimentNo).padStart(4, "0")}`;
 }
@@ -135,28 +84,6 @@ export function validateForStatus(
       field: "status",
       message: `Cannot move from ${EXPERIMENT_STATUS_LABELS[experiment.status]} to ${EXPERIMENT_STATUS_LABELS[target]}.`,
     }];
-  }
-  if (target === "running") return runnableIssues(experiment);
-  if (target === "analyzing") {
-    return hasResult(experiment)
-      ? []
-      : [{ field: "result", message: "Add a numeric metric or Result Summary before analyzing." }];
-  }
-  if (target === "completed") {
-    const issues = runnableIssues(experiment);
-    if (!hasResult(experiment)) {
-      issues.push({
-        field: "result",
-        message: "Add a numeric metric or Result Summary before completing.",
-      });
-    }
-    if (!experiment.decision_outcome) {
-      issues.push({
-        field: "decision_outcome",
-        message: "Choose a Decision Outcome before completing.",
-      });
-    }
-    return issues;
   }
   return [];
 }

@@ -816,11 +816,6 @@ components:
     ExperimentStatus:
       type: string
       enum: [planned, running, analyzing, completed, blocked, cancelled]
-    DecisionOutcome:
-      oneOf:
-        - type: string
-          enum: [reference, accepted, rejected, inconclusive]
-        - type: "null"
     Scope:
       type: string
       enum:
@@ -1034,94 +1029,6 @@ components:
               $ref: "#/components/schemas/NullableDateOnly"
             position:
               type: number
-    DatasetSpec:
-      type: object
-      additionalProperties: false
-      required: [role, name, split, revision, task_count, samples_per_task]
-      properties:
-        role:
-          type: string
-          enum: [training, evaluation]
-        name:
-          type: string
-        split:
-          type: string
-        revision:
-          type: string
-        task_count:
-          oneOf:
-            - type: number
-            - type: "null"
-        samples_per_task:
-          oneOf:
-            - type: number
-            - type: "null"
-    DataSpec:
-      type: object
-      additionalProperties: false
-      required: [datasets]
-      properties:
-        datasets:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetSpec"
-    ObjectSpec:
-      type: object
-      additionalProperties: false
-      required: [model, harness, parent_harness, prompt, prompt_change, skills, tools]
-      properties:
-        model:
-          type: string
-        harness:
-          type: string
-        parent_harness:
-          type: string
-        prompt:
-          type: string
-        prompt_change:
-          type: string
-        skills:
-          type: array
-          items:
-            type: string
-        tools:
-          type: array
-          items:
-            type: string
-    EnvironmentSpec:
-      type: object
-      additionalProperties: false
-      required: [platform, server, devices, hardware, evaluator, revision, precision_policy]
-      properties:
-        platform:
-          type: string
-          enum: ["", npu, gpu]
-        server:
-          type: string
-        devices:
-          type: array
-          items:
-            type: string
-        hardware:
-          type: string
-        evaluator:
-          type: string
-        revision:
-          type: string
-        precision_policy:
-          type: string
-    Config:
-      type: object
-      additionalProperties:
-        oneOf:
-          - type: string
-          - type: number
-          - type: boolean
-          - type: "null"
-    Metrics:
-      type: object
-      additionalProperties:
-        type: number
     Experiment:
       type: object
       required:
@@ -1131,17 +1038,9 @@ components:
         - owner_id
         - name
         - status
-        - baseline_experiment_id
-        - data_spec
-        - object_spec
-        - environment_spec
-        - config
-        - notes
-        - metrics
-        - featured_metric_keys
-        - result_summary
-        - decision_outcome
-        - decision_notes
+        - template_id
+        - archived_at
+        - core_revision
         - position
         - started_at
         - completed_at
@@ -1160,30 +1059,12 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/ExperimentStatus"
-        baseline_experiment_id:
+        template_id:
           $ref: "#/components/schemas/NullableUuid"
-        data_spec:
-          $ref: "#/components/schemas/DataSpec"
-        object_spec:
-          $ref: "#/components/schemas/ObjectSpec"
-        environment_spec:
-          $ref: "#/components/schemas/EnvironmentSpec"
-        config:
-          $ref: "#/components/schemas/Config"
-        notes:
-          type: string
-        metrics:
-          $ref: "#/components/schemas/Metrics"
-        featured_metric_keys:
-          type: array
-          items:
-            type: string
-        result_summary:
-          type: string
-        decision_outcome:
-          $ref: "#/components/schemas/DecisionOutcome"
-        decision_notes:
-          type: string
+        archived_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        core_revision:
+          type: number
         position:
           type: number
         started_at:
@@ -1239,55 +1120,6 @@ components:
               items:
                 $ref: "#/components/schemas/Attachment"
       unevaluatedProperties: false
-    ExperimentPatchEnvelope:
-      type: object
-      additionalProperties: false
-      required: [changes]
-      properties:
-        changes:
-          type: object
-          additionalProperties: false
-          minProperties: 1
-          properties:
-            name:
-              type: string
-              description: The server trims whitespace; the result must contain 1 through 200 characters.
-            status:
-              $ref: "#/components/schemas/ExperimentStatus"
-            baseline_experiment_id:
-              $ref: "#/components/schemas/NullableUuid"
-            data_spec:
-              $ref: "#/components/schemas/DataSpec"
-            object_spec:
-              $ref: "#/components/schemas/ObjectSpec"
-            environment_spec:
-              $ref: "#/components/schemas/EnvironmentSpec"
-            config:
-              $ref: "#/components/schemas/Config"
-            notes:
-              type: string
-            metrics:
-              $ref: "#/components/schemas/Metrics"
-            featured_metric_keys:
-              type: array
-              items:
-                type: string
-            result_summary:
-              type: string
-            decision_outcome:
-              $ref: "#/components/schemas/DecisionOutcome"
-            decision_notes:
-              type: string
-            position:
-              type: number
-    ExperimentCreate:
-      type: object
-      additionalProperties: false
-      required: [name]
-      properties:
-        name:
-          type: string
-          description: The server trims whitespace; the result must contain 1 through 200 characters.
     Activity:
       type: object
       additionalProperties: false
@@ -1413,17 +1245,9 @@ components:
         - owner_id
         - name
         - status
-        - baseline_experiment_id
-        - data_spec
-        - object_spec
-        - environment_spec
-        - config
-        - notes
-        - metrics
-        - featured_metric_keys
-        - result_summary
-        - decision_outcome
-        - decision_notes
+        - template_id
+        - archived_at
+        - core_revision
         - position
         - started_at
         - completed_at
@@ -1442,35 +1266,12 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/ExperimentStatus"
-        baseline_experiment_id:
+        template_id:
           $ref: "#/components/schemas/NullableUuid"
-        data_spec:
-          type: object
-          additionalProperties: true
-        object_spec:
-          type: object
-          additionalProperties: true
-        environment_spec:
-          type: object
-          additionalProperties: true
-        config:
-          type: object
-          additionalProperties: true
-        notes:
-          type: string
-        metrics:
-          type: object
-          additionalProperties: true
-        featured_metric_keys:
-          type: array
-          items:
-            type: string
-        result_summary:
-          type: string
-        decision_outcome:
-          $ref: "#/components/schemas/DecisionOutcome"
-        decision_notes:
-          type: string
+        archived_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        core_revision:
+          type: number
         position:
           type: number
         started_at:

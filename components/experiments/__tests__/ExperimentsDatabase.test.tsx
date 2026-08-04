@@ -59,6 +59,9 @@ const task = {
   status: "in_progress",
   assignees: [],
   notes: "",
+  tags: [],
+  priority: "medium",
+  due_date: null,
   position: 0,
   created_at: "2026-07-24T00:00:00.000Z",
   updated_at: "2026-07-24T00:00:00.000Z",
@@ -80,36 +83,9 @@ function row(id: string, experimentNo: number, name: string): ExperimentListRow 
     owner_id: member.id,
     name,
     status: "planned",
-    baseline_experiment_id: null,
     template_id: null,
     archived_at: null,
     core_revision: 1,
-    data_spec: { datasets: [] },
-    object_spec: {
-      model: "",
-      harness: "",
-      parent_harness: "",
-      prompt: "",
-      prompt_change: "",
-      skills: [],
-      tools: [],
-    },
-    environment_spec: {
-      platform: "",
-      server: "",
-      devices: [],
-      hardware: "",
-      evaluator: "",
-      revision: "",
-      precision_policy: "",
-    },
-    config: {},
-    metrics: {},
-    featured_metric_keys: [],
-    result_summary: "",
-    decision_outcome: null,
-    decision_notes: "",
-    notes: "",
     position: experimentNo,
     started_at: null,
     completed_at: null,
@@ -161,13 +137,11 @@ describe("ExperimentsDatabase", () => {
       "All",
       "Running",
       "Blocked",
-      "Needs Decision",
-      "Recently Completed",
     ]);
     expect(screen.getByRole("button", { name: "All" })
       .getAttribute("aria-pressed")).toBe("true");
     expect(screen.queryByRole("button", { name: "Archived" })).toBeNull();
-    expect(screen.getByRole("columnheader", { name: "Featured metrics" }))
+    expect(screen.getByRole("columnheader", { name: "Status" }))
       .toBeDefined();
     const region = screen.getByRole("region", {
       name: "Experiments table",
@@ -189,59 +163,6 @@ describe("ExperimentsDatabase", () => {
       { target: { value: "Guardrail" } },
     );
     expect(screen.getByText("1 experiments")).toBeDefined();
-  });
-
-  it("shows selected actions and clears the selected rows", async () => {
-    render(<ExperimentsDatabase />);
-    await screen.findByRole("link", { name: "Guardrail run" });
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0001" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0002" }));
-
-    const selection = screen.getByRole("status");
-    expect(within(selection).getByText("2 selected")).toBeDefined();
-    expect(screen.getByRole("link", { name: "Compare selected (2)" })).toBeDefined();
-    const clear = within(selection).getByRole("button", { name: "Clear selection" });
-    expect(clear).toBeDefined();
-
-    fireEvent.click(clear);
-    expect(screen.queryByRole("status")).toBeNull();
-    expect((screen.getByRole("checkbox", {
-      name: "Select EXP-0001",
-    }) as HTMLInputElement).checked).toBe(false);
-    expect(screen.getByRole("link", { name: "Compare selected (0)" })
-      .getAttribute("aria-disabled")).toBe("true");
-  });
-
-  it("keeps hidden selections and the canonical Compare URL in an empty filtered view", async () => {
-    render(<ExperimentsDatabase />);
-    await screen.findByRole("link", { name: "Guardrail run" });
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0001" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0002" }));
-    const compare = screen.getByRole("link", { name: "Compare selected (2)" });
-    const canonicalHref = `/experiments/compare?ids=${first.id}%2C${second.id}`;
-    expect(compare.getAttribute("href")).toBe(canonicalHref);
-
-    fireEvent.change(
-      screen.getByRole("searchbox", { name: "Search experiments" }),
-      { target: { value: "no matching experiment" } },
-    );
-
-    const selection = screen.getByRole("status");
-    const empty = screen.getByText("No experiments match this view.")
-      .closest(".experiment-empty") as HTMLElement;
-    expect(within(selection).getByText("2 selected")).toBeDefined();
-    expect(selection.nextElementSibling).toBe(empty);
-    fireEvent.click(within(empty).getByRole("button", {
-      name: "New experiment",
-    }));
-    expect(screen.getByRole("dialog", { name: "Create experiment" }))
-      .toBeDefined();
-    expect(screen.getByText("0 experiments")).toBeDefined();
-    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
-    expect(compare.getAttribute("aria-disabled")).toBe("false");
-    expect(compare.getAttribute("href")).toBe(canonicalHref);
   });
 
   it("loads repository rows, refreshes from Realtime, and unsubscribes", async () => {
@@ -380,49 +301,6 @@ describe("ExperimentsDatabase", () => {
     await act(async () => retryRows.resolve([first]));
     expect(await screen.findByRole("link", { name: "Guardrail run" })).toBeDefined();
     expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("removes deleted experiments from the selected comparison set", async () => {
-    let refresh: () => void = () => undefined;
-    vi.mocked(watchExperimentIndex).mockImplementation((onChange) => {
-      refresh = onChange;
-      return () => undefined;
-    });
-    render(<ExperimentsDatabase />);
-    await screen.findByRole("link", { name: "Guardrail run" });
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0001" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0002" }));
-    expect(screen.getByRole("link", { name: "Compare selected (2)" })).toBeDefined();
-
-    vi.mocked(listExperimentRows).mockResolvedValueOnce([first]);
-    act(() => refresh());
-    await waitFor(() => {
-      expect(screen.queryByRole("link", { name: "Baseline run" })).toBeNull();
-    });
-
-    const compare = screen.getByRole("link", { name: "Compare selected (1)" });
-    expect(compare.getAttribute("aria-disabled")).toBe("true");
-  });
-
-  it("keeps Compare inert until two rows produce a canonical selection URL", async () => {
-    vi.mocked(watchExperimentIndex).mockReturnValue(() => undefined);
-    render(<ExperimentsDatabase />);
-    await screen.findByRole("link", { name: "Guardrail run" });
-
-    const compare = screen.getByRole("link", { name: "Compare selected (0)" });
-    expect(compare.getAttribute("aria-disabled")).toBe("true");
-    expect(compare.getAttribute("href")).toBe("/experiments");
-    expect(fireEvent.click(compare)).toBe(false);
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0001" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EXP-0002" }));
-
-    const enabled = screen.getByRole("link", { name: "Compare selected (2)" });
-    expect(enabled.getAttribute("aria-disabled")).toBe("false");
-    expect(enabled.getAttribute("href")).toBe(
-      `/experiments/compare?ids=${first.id}%2C${second.id}`,
-    );
   });
 
   it("navigates to the real created experiment route", async () => {

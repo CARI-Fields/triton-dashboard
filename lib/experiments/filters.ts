@@ -1,22 +1,15 @@
-import type {
-  DecisionOutcome,
-  ExperimentListRow,
-  ExperimentStatus,
-} from "@/lib/types";
+import type { ExperimentListRow, ExperimentStatus } from "@/lib/types";
 
 export type ExperimentSavedView =
   | "all"
   | "running"
-  | "blocked"
-  | "needs_decision"
-  | "recently_completed";
+  | "blocked";
 
 export interface ExperimentFilterState {
   savedView: ExperimentSavedView;
   ownerId: string;
   taskId: string;
   status: ExperimentStatus | "";
-  decision: DecisionOutcome | "none" | "";
   search: string;
 }
 
@@ -25,11 +18,8 @@ export const EMPTY_EXPERIMENT_FILTERS: ExperimentFilterState = {
   ownerId: "",
   taskId: "",
   status: "",
-  decision: "",
   search: "",
 };
-
-const RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 export function applyExperimentFilters(
   rows: ExperimentListRow[],
@@ -41,17 +31,6 @@ export function applyExperimentFilters(
     .filter((row) => {
       if (filters.savedView === "running" && row.status !== "running") return false;
       if (filters.savedView === "blocked" && row.status !== "blocked") return false;
-      if (
-        filters.savedView === "needs_decision"
-        && (row.status !== "analyzing" || row.decision_outcome !== null)
-      ) return false;
-      if (filters.savedView === "recently_completed") {
-        if (row.status !== "completed" || !row.completed_at) return false;
-        const completed = new Date(row.completed_at).getTime();
-        if (!Number.isFinite(now) || !Number.isFinite(completed)) return false;
-        const age = now - completed;
-        if (age < 0 || age > RECENT_WINDOW_MS) return false;
-      }
       if (filters.ownerId === "unassigned" && row.owner_id !== null) return false;
       if (
         filters.ownerId
@@ -60,12 +39,6 @@ export function applyExperimentFilters(
       ) return false;
       if (filters.taskId && row.task_id !== filters.taskId) return false;
       if (filters.status && row.status !== filters.status) return false;
-      if (filters.decision === "none" && row.decision_outcome !== null) return false;
-      if (
-        filters.decision
-        && filters.decision !== "none"
-        && row.decision_outcome !== filters.decision
-      ) return false;
       if (query) {
         const haystack = [
           row.name,

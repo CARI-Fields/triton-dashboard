@@ -12,7 +12,6 @@ import type {
   Member,
   Task,
 } from "@/lib/types";
-import type { EditableExperimentPatch } from "@/lib/experiments/draft";
 import {
   normalizeTaskRow,
   TASK_WITH_ASSIGNEES_SELECT,
@@ -40,9 +39,7 @@ export interface ExperimentBundle {
   experiment: Experiment;
   task: ExperimentListRow["task"];
   owner: Member | null;
-  baseline: ExperimentListRow | null;
   members: Member[];
-  candidates: ExperimentListRow[];
   attachments: Attachment[];
   activity: Activity[];
 }
@@ -52,17 +49,9 @@ export interface ExperimentReferenceData {
   members: Member[];
 }
 
-export type ExperimentUpdateResult =
-  | { ok: true; experiment: Experiment }
-  | { ok: false; conflict: true };
-
 type JoinedExperiment = Experiment & {
   task: ExperimentListRow["task"];
   owner: Member | null;
-};
-
-type JoinedExperimentBundle = JoinedExperiment & {
-  baseline: JoinedExperiment | null;
 };
 
 function client() {
@@ -80,27 +69,6 @@ function requiredValue(value: string, message: string): string {
   return trimmed;
 }
 
-function updatePayload(
-  patch: EditableExperimentPatch,
-): EditableExperimentPatch {
-  return {
-    owner_id: patch.owner_id,
-    name: patch.name,
-    status: patch.status,
-    baseline_experiment_id: patch.baseline_experiment_id,
-    data_spec: structuredClone(patch.data_spec),
-    object_spec: structuredClone(patch.object_spec),
-    environment_spec: structuredClone(patch.environment_spec),
-    config: structuredClone(patch.config),
-    metrics: { ...patch.metrics },
-    featured_metric_keys: [...patch.featured_metric_keys],
-    result_summary: patch.result_summary,
-    decision_outcome: patch.decision_outcome,
-    decision_notes: patch.decision_notes,
-    notes: patch.notes,
-  };
-}
-
 const MEMBER_SELECT = "id,name,initials,position,created_at";
 const LIST_SELECT = [
   "*",
@@ -109,43 +77,10 @@ const LIST_SELECT = [
 ].join(",");
 const BUNDLE_SELECT = [
   LIST_SELECT,
-  `baseline:experiments!baseline_experiment_id(*,task:tasks(id,title),owner:members(${MEMBER_SELECT}))`,
 ].join(",");
 
 function normalizeExperiment(row: Experiment): Experiment {
-  const data = row.data_spec as Partial<Experiment["data_spec"]> | null;
-  const object = row.object_spec as Partial<Experiment["object_spec"]> | null;
-  const environment =
-    row.environment_spec as Partial<Experiment["environment_spec"]> | null;
-  return {
-    ...row,
-    data_spec: {
-      datasets: Array.isArray(data?.datasets) ? data.datasets : [],
-    },
-    object_spec: {
-      model: object?.model ?? "",
-      harness: object?.harness ?? "",
-      parent_harness: object?.parent_harness ?? "",
-      prompt: object?.prompt ?? "",
-      prompt_change: object?.prompt_change ?? "",
-      skills: Array.isArray(object?.skills) ? object.skills : [],
-      tools: Array.isArray(object?.tools) ? object.tools : [],
-    },
-    environment_spec: {
-      platform: environment?.platform ?? "",
-      server: environment?.server ?? "",
-      devices: Array.isArray(environment?.devices) ? environment.devices : [],
-      hardware: environment?.hardware ?? "",
-      evaluator: environment?.evaluator ?? "",
-      revision: environment?.revision ?? "",
-      precision_policy: environment?.precision_policy ?? "",
-    },
-    config: row.config && typeof row.config === "object" ? row.config : {},
-    metrics: row.metrics && typeof row.metrics === "object" ? row.metrics : {},
-    featured_metric_keys: Array.isArray(row.featured_metric_keys)
-      ? row.featured_metric_keys
-      : [],
-  };
+  return row;
 }
 
 function normalizeJoined(row: JoinedExperiment): ExperimentListRow {
@@ -212,36 +147,7 @@ export async function createExperiment(
     owner_id: ownerId,
     name,
     status: "planned",
-    baseline_experiment_id: null,
-    data_spec: { datasets: [] },
-    object_spec: {
-      model: "",
-      harness: "",
-      parent_harness: "",
-      prompt: "",
-      prompt_change: "",
-      skills: [],
-      tools: [],
-    },
-    environment_spec: {
-      platform: "",
-      server: "",
-      devices: [],
-      hardware: "",
-      evaluator: "",
-      revision: "",
-      precision_policy: "",
-    },
-    config: {},
-    metrics: {},
-    featured_metric_keys: [],
-    result_summary: "",
-    decision_outcome: null,
-    decision_notes: "",
-    notes: "",
     position,
-    started_at: null,
-    completed_at: null,
   };
   const { data, error } = await client()
     .from("experiments")
@@ -272,24 +178,6 @@ export async function duplicateExperiment(
   return normalizeExperiment(data as Experiment);
 }
 
-export async function updateExperiment(
-  id: string,
-  expectedUpdatedAt: string,
-  patch: EditableExperimentPatch,
-): Promise<ExperimentUpdateResult> {
-  const { data, error } = await client()
-    .from("experiments")
-    .update(updatePayload(patch))
-    .eq("id", id)
-    .eq("updated_at", expectedUpdatedAt)
-    .select("*")
-    .maybeSingle();
-  throwIfError(error);
-  return data
-    ? { ok: true, experiment: normalizeExperiment(data as Experiment) }
-    : { ok: false, conflict: true };
-}
-
 export async function loadExperimentBundle(
   id: string,
 ): Promise<ExperimentBundle | null> {
@@ -300,10 +188,8 @@ export async function loadExperimentBundle(
     .maybeSingle();
   throwIfError(error);
   if (!data) return null;
-  const joined = data as unknown as JoinedExperimentBundle;
-  const { baseline, ...experimentRow } = joined;
-  const row = normalizeJoined(experimentRow);
-  const [membersResult, attachmentsResult, activityResult, candidates] =
+  const row = normalizeJoined(data as unknown as JoinedExperiment);
+  const [membersResult, attachmentsResult, activityResult] =
     await Promise.all([
       client().from("members").select("*").order("position"),
       client()
@@ -316,7 +202,6 @@ export async function loadExperimentBundle(
         .select("*")
         .eq("experiment_id", id)
         .order("created_at", { ascending: false }),
-      listExperimentRows(),
     ]);
   throwIfError(membersResult.error);
   throwIfError(attachmentsResult.error);
@@ -325,9 +210,7 @@ export async function loadExperimentBundle(
     experiment: row,
     task: row.task,
     owner: row.owner,
-    baseline: baseline ? normalizeJoined(baseline) : null,
     members: (membersResult.data ?? []) as Member[],
-    candidates: candidates.filter((candidate) => candidate.id !== id),
     attachments: (attachmentsResult.data ?? []) as Attachment[],
     activity: (activityResult.data ?? []) as Activity[],
   };

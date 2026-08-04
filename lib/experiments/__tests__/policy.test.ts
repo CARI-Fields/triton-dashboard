@@ -15,45 +15,9 @@ const completeContext: Experiment = {
   owner_id: "00000000-0000-4000-8000-000000000020",
   name: "Ascend guardrail run",
   status: "planned",
-  baseline_experiment_id: null,
   template_id: null,
   archived_at: null,
   core_revision: 1,
-  data_spec: {
-    datasets: [{
-      role: "evaluation",
-      name: "dr-kernel-rl",
-      split: "tier1-gen1",
-      revision: "seed20260717-gen1",
-      task_count: 20,
-      samples_per_task: 1,
-    }],
-  },
-  object_spec: {
-    model: "Qwen3.6-35B-A3B",
-    harness: "cand_0000",
-    parent_harness: "seed",
-    prompt: "prompts/ascend.md",
-    prompt_change: "+6 lines of Ascend guardrails",
-    skills: ["kernel-designer"],
-    tools: ["verify.py"],
-  },
-  environment_spec: {
-    platform: "npu",
-    server: "localhost.localdomain",
-    devices: ["npu:14", "npu:15"],
-    hardware: "Ascend910_9372",
-    evaluator: "triton-evaluation",
-    revision: "r18",
-    precision_policy: "fp32 reference",
-  },
-  config: { max_turns: 18, temperature: 0.1 },
-  metrics: { "pass@1": 0.2, tokens: 671552 },
-  featured_metric_keys: ["pass@1"],
-  result_summary: "4 of 20 tasks passed.",
-  decision_outcome: "accepted",
-  decision_notes: "Keep the guardrail.",
-  notes: "Compiler failures remain.",
   position: 2,
   started_at: "2026-07-24T10:00:00.000Z",
   completed_at: null,
@@ -77,10 +41,6 @@ describe("experiment lifecycle", () => {
     const invalid = {
       ...completeContext,
       owner_id: null,
-      data_spec: { datasets: [] },
-      object_spec: { ...completeContext.object_spec, model: "" },
-      environment_spec: { ...completeContext.environment_spec, server: "", devices: [] },
-      config: {},
     };
     expect(validateForStatus(invalid, "running")).toEqual([]);
   });
@@ -133,23 +93,8 @@ describe("duplicate policy", () => {
       owner_id: "00000000-0000-4000-8000-000000000021",
       name: "Ascend guardrail run v2",
       status: "planned",
-      baseline_experiment_id: completeContext.id,
-      data_spec: completeContext.data_spec,
-      object_spec: completeContext.object_spec,
-      environment_spec: completeContext.environment_spec,
-      config: completeContext.config,
-      metrics: {},
-      featured_metric_keys: [],
-      result_summary: "",
-      decision_outcome: null,
-      decision_notes: "",
-      notes: "",
       position: 3,
-      started_at: null,
-      completed_at: null,
     });
-    expect(duplicate.data_spec).not.toBe(completeContext.data_spec);
-    expect(duplicate.config).not.toBe(completeContext.config);
   });
 
   it("copies the source Template into a duplicate", () => {

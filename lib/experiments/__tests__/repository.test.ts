@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { editableExperimentPatch } from "@/lib/experiments/draft";
 import type {
   Attachment,
   Experiment,
@@ -141,7 +140,6 @@ import {
   loadExperimentBundle,
   loadExperimentReferenceData,
   loadExperimentsForCompare,
-  updateExperiment,
   uploadExperimentAttachment,
   watchExperiment,
   watchExperimentIndex,
@@ -156,36 +154,9 @@ const experiment = {
   owner_id: "00000000-0000-4000-8000-000000000020",
   name: "Experiment one",
   status: "planned",
-  baseline_experiment_id: null,
   template_id: null,
   archived_at: null,
   core_revision: 1,
-  data_spec: { datasets: [] },
-  object_spec: {
-    model: "",
-    harness: "",
-    parent_harness: "",
-    prompt: "",
-    prompt_change: "",
-    skills: [],
-    tools: [],
-  },
-  environment_spec: {
-    platform: "",
-    server: "",
-    devices: [],
-    hardware: "",
-    evaluator: "",
-    revision: "",
-    precision_policy: "",
-  },
-  config: {},
-  metrics: {},
-  featured_metric_keys: [],
-  result_summary: "",
-  decision_outcome: null,
-  decision_notes: "",
-  notes: "",
   position: 0,
   started_at: null,
   completed_at: null,
@@ -256,72 +227,6 @@ beforeEach(() => {
   mocks.storage.remove.mockResolvedValue({ error: null });
 });
 
-describe("experiment update concurrency boundary", () => {
-  it("sends only editable fields even when passed a structurally wider object", async () => {
-    const patch = editableExperimentPatch(experiment);
-    const widerPatch = {
-      ...patch,
-      id: "attacker-controlled-id",
-      task_id: "attacker-controlled-task",
-      experiment_no: 999,
-      created_at: "attacker-controlled-created-at",
-      updated_at: "attacker-controlled-updated-at",
-      position: 999,
-    };
-    enqueue("experiments", "update", { data: null, error: null });
-
-    await updateExperiment(
-      experiment.id,
-      experiment.updated_at,
-      widerPatch,
-    );
-
-    expect(trace("experiments", "update").updatePayload).toEqual(patch);
-  });
-
-  it("matches both the id and previously loaded updated_at", async () => {
-    enqueue("experiments", "update", { data: null, error: null });
-
-    await updateExperiment(
-      experiment.id,
-      experiment.updated_at,
-      editableExperimentPatch(experiment),
-    );
-
-    expect(trace("experiments", "update").eqCalls).toEqual([
-      ["id", experiment.id],
-      ["updated_at", experiment.updated_at],
-    ]);
-  });
-
-  it("throws a query error", async () => {
-    enqueue("experiments", "update", {
-      data: null,
-      error: { message: "update failed" },
-    });
-
-    await expect(
-      updateExperiment(
-        experiment.id,
-        experiment.updated_at,
-        editableExperimentPatch(experiment),
-      ),
-    ).rejects.toThrow("update failed");
-  });
-
-  it("returns an explicit conflict for a successful zero-row update", async () => {
-    enqueue("experiments", "update", { data: null, error: null });
-
-    await expect(
-      updateExperiment(
-        experiment.id,
-        experiment.updated_at,
-        editableExperimentPatch(experiment),
-      ),
-    ).resolves.toEqual({ ok: false, conflict: true });
-  });
-});
-
 describe("required experiment inputs", () => {
   it.each([
     [
@@ -389,7 +294,6 @@ describe("required experiment inputs", () => {
       task_id: experiment.task_id,
       name: "Copy",
       owner_id: experiment.owner_id,
-      baseline_experiment_id: experiment.id,
     });
   });
 
@@ -460,18 +364,14 @@ describe("repository query contracts", () => {
     );
   });
 
-  it("uses the PostgREST-compatible baseline column hint in the bundle select", async () => {
+  it("loads a bundle from the experiment and joined relations", async () => {
     enqueue("experiments", "select", { data: null, error: null });
 
     await expect(loadExperimentBundle(experiment.id)).resolves.toBeNull();
 
     const select = trace("experiments", "select").selectCalls[0];
-    expect(select).toContain(
-      "baseline:experiments!baseline_experiment_id(",
-    );
-    expect(select).not.toContain(
-      "baseline:experiments!experiments_baseline_experiment_id_fkey(",
-    );
+    expect(select).toContain("task:tasks(id,title)");
+    expect(select).toContain("owner:members(");
   });
 
   it("preserves caller order when loading comparison rows", async () => {

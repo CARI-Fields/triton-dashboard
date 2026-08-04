@@ -1,7 +1,6 @@
 "use client";
 
 import type {
-  DecisionOutcome,
   ExperimentListRow,
   ExperimentStatus,
 } from "@/lib/types";
@@ -9,17 +8,12 @@ import {
   type ExperimentFilterState,
   type ExperimentSavedView,
 } from "@/lib/experiments/filters";
-import {
-  DECISION_LABELS,
-  EXPERIMENT_STATUS_LABELS,
-} from "@/lib/experiments/policy";
+import { EXPERIMENT_STATUS_LABELS } from "@/lib/experiments/policy";
 
 const SAVED_VIEWS: { value: ExperimentSavedView; label: string }[] = [
   { value: "all", label: "All" },
   { value: "running", label: "Running" },
   { value: "blocked", label: "Blocked" },
-  { value: "needs_decision", label: "Needs Decision" },
-  { value: "recently_completed", label: "Recently Completed" },
 ];
 
 export default function ExperimentFilters({
@@ -97,23 +91,6 @@ export default function ExperimentFilters({
             <option value="">All statuses</option>
             {(Object.entries(EXPERIMENT_STATUS_LABELS) as [ExperimentStatus, string][])
               .map(([status, label]) => <option key={status} value={status}>{label}</option>)}
-          </select>
-        </label>
-        <label>
-          <span className="sr-only">Decision</span>
-          <select
-            value={value.decision}
-            onChange={(event) => set(
-              "decision",
-              event.target.value as DecisionOutcome | "none" | "",
-            )}
-          >
-            <option value="">All decisions</option>
-            <option value="none">No decision</option>
-            {(Object.entries(DECISION_LABELS) as [DecisionOutcome, string][])
-              .map(([decision, label]) => (
-                <option key={decision} value={decision}>{label}</option>
-              ))}
           </select>
         </label>
         <span className="result-count">{resultCount} experiments</span>

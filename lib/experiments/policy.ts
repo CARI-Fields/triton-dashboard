@@ -1,7 +1,5 @@
 import type {
-  DecisionOutcome,
   Experiment,
-  ExperimentConfig,
   ExperimentStatus,
 } from "@/lib/types";
 
@@ -22,20 +20,7 @@ export interface ExperimentInsert {
   owner_id: string;
   name: string;
   status: ExperimentStatus;
-  baseline_experiment_id: string | null;
-  data_spec: Experiment["data_spec"];
-  object_spec: Experiment["object_spec"];
-  environment_spec: Experiment["environment_spec"];
-  config: ExperimentConfig;
-  metrics: Record<string, number>;
-  featured_metric_keys: string[];
-  result_summary: string;
-  decision_outcome: DecisionOutcome | null;
-  decision_notes: string;
-  notes: string;
   position: number;
-  started_at: string | null;
-  completed_at: string | null;
 }
 
 export const EXPERIMENT_STATUS_LABELS: Record<ExperimentStatus, string> = {
@@ -45,13 +30,6 @@ export const EXPERIMENT_STATUS_LABELS: Record<ExperimentStatus, string> = {
   completed: "Completed",
   blocked: "Blocked",
   cancelled: "Cancelled",
-};
-
-export const DECISION_LABELS: Record<DecisionOutcome, string> = {
-  reference: "Reference",
-  accepted: "Accepted",
-  rejected: "Rejected",
-  inconclusive: "Inconclusive",
 };
 
 const TRANSITIONS: Record<ExperimentStatus, ExperimentStatus[]> = {
@@ -110,19 +88,6 @@ export function buildDuplicateInsert(
     owner_id: input.ownerId,
     name: input.name.trim(),
     status: "planned",
-    baseline_experiment_id: source.id,
-    data_spec: structuredClone(source.data_spec),
-    object_spec: structuredClone(source.object_spec),
-    environment_spec: structuredClone(source.environment_spec),
-    config: structuredClone(source.config),
-    metrics: {},
-    featured_metric_keys: [],
-    result_summary: "",
-    decision_outcome: null,
-    decision_notes: "",
-    notes: "",
     position: input.position,
-    started_at: null,
-    completed_at: null,
   };
 }

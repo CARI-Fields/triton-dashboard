@@ -91,50 +91,6 @@ export type ExperimentStatus =
   | "blocked"
   | "cancelled";
 
-export type DecisionOutcome =
-  | "reference"
-  | "accepted"
-  | "rejected"
-  | "inconclusive";
-
-export type DatasetRole = "training" | "evaluation";
-
-export interface DatasetSpec {
-  role: DatasetRole;
-  name: string;
-  split: string;
-  revision: string;
-  task_count: number | null;
-  samples_per_task: number | null;
-}
-
-export interface DataSpec {
-  datasets: DatasetSpec[];
-}
-
-export interface ObjectSpec {
-  model: string;
-  harness: string;
-  parent_harness: string;
-  prompt: string;
-  prompt_change: string;
-  skills: string[];
-  tools: string[];
-}
-
-export interface EnvironmentSpec {
-  platform: "npu" | "gpu" | "";
-  server: string;
-  devices: string[];
-  hardware: string;
-  evaluator: string;
-  revision: string;
-  precision_policy: string;
-}
-
-export type ConfigValue = string | number | boolean | null;
-export type ExperimentConfig = Record<string, ConfigValue>;
-
 export type TemplateValueType =
   | "short_text"
   | "long_text"
@@ -245,20 +201,9 @@ export interface Experiment {
   owner_id: string | null;
   name: string;
   status: ExperimentStatus;
-  baseline_experiment_id: string | null;
   template_id: string | null;
   archived_at: string | null;
   core_revision: number;
-  data_spec: DataSpec;
-  object_spec: ObjectSpec;
-  environment_spec: EnvironmentSpec;
-  config: ExperimentConfig;
-  notes: string;
-  metrics: Record<string, number>;
-  featured_metric_keys: string[];
-  result_summary: string;
-  decision_outcome: DecisionOutcome | null;
-  decision_notes: string;
   position: number;
   started_at: string | null;
   completed_at: string | null;

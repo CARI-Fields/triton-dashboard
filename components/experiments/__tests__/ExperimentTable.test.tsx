@@ -10,36 +10,9 @@ const row = {
   owner_id: null,
   name: "Manual NPU run",
   status: "analyzing",
-  baseline_experiment_id: null,
   template_id: null,
   archived_at: null,
   core_revision: 1,
-  data_spec: { datasets: [] },
-  object_spec: {
-    model: "",
-    harness: "",
-    parent_harness: "",
-    prompt: "",
-    prompt_change: "",
-    skills: [],
-    tools: [],
-  },
-  environment_spec: {
-    platform: "",
-    server: "",
-    devices: [],
-    hardware: "",
-    evaluator: "",
-    revision: "",
-    precision_policy: "",
-  },
-  config: {},
-  metrics: { "pass@1": 0.2, tokens: 1000 },
-  featured_metric_keys: ["pass@1"],
-  result_summary: "",
-  decision_outcome: null,
-  decision_notes: "",
-  notes: "",
   position: 0,
   started_at: null,
   completed_at: null,
@@ -52,20 +25,17 @@ const row = {
 afterEach(cleanup);
 
 describe("ExperimentTable", () => {
-  it("renders real stored fields, status and decision labels, and real links", () => {
-    const decidedRow = { ...row, decision_outcome: "accepted" as const };
-    render(<ExperimentTable rows={[decidedRow]} showTask selectable={false} />);
+  it("renders real stored fields, status, and real links", () => {
+    render(<ExperimentTable rows={[row]} showTask selectable={false} />);
     const headers = screen.getAllByRole("columnheader");
     expect(headers.map((header) => header.textContent)).toEqual([
-        "ID",
-        "Name",
-        "Task",
-        "Owner",
-        "Status",
-        "Decision",
-        "Featured metrics",
-        "Updated",
-      ]);
+      "ID",
+      "Name",
+      "Task",
+      "Owner",
+      "Status",
+      "Updated",
+    ]);
     expect(headers.every((header) => header.getAttribute("scope") === "col"))
       .toBe(true);
     expect(screen.getByText("EXP-0007")).toBeDefined();
@@ -75,29 +45,6 @@ describe("ExperimentTable", () => {
       .toBe("/task/00000000-0000-4000-8000-000000000010");
     expect(screen.getByText("Unassigned")).toBeDefined();
     expect(screen.getByText("Analyzing")).toBeDefined();
-    expect(screen.getByText("Accepted")).toBeDefined();
-  });
-
-  it("renders only finite featured metrics and a dash for missing or invalid values", () => {
-    const metricsRow = {
-      ...row,
-      metrics: {
-        finite: 0.2,
-        missing: undefined,
-        nan: Number.NaN,
-        positive: Number.POSITIVE_INFINITY,
-        negative: Number.NEGATIVE_INFINITY,
-      } as unknown as ExperimentListRow["metrics"],
-      featured_metric_keys: ["finite", "missing", "nan", "positive", "negative"],
-    };
-    render(<ExperimentTable rows={[metricsRow]} showTask selectable={false} />);
-    expect(screen.getByText("finite 0.2")).toBeDefined();
-    expect(screen.getByText("missing —")).toBeDefined();
-    expect(screen.getByText("nan —")).toBeDefined();
-    expect(screen.getByText("positive —")).toBeDefined();
-    expect(screen.getByText("negative —")).toBeDefined();
-    expect(screen.queryByText(/NaN|Infinity/)).toBeNull();
-    expect(screen.queryByText(/tokens/)).toBeNull();
   });
 
   it("supports controlled selection without wrapping the checkbox in a link", () => {
@@ -148,7 +95,6 @@ describe("ExperimentTable", () => {
     expect(screen.queryByRole("columnheader", { name: "Task" })).toBeNull();
     expect(screen.queryByText("Deleted task")).toBeNull();
     expect(screen.getByText("Unassigned")).toBeDefined();
-    expect(screen.getByText("—")).toBeDefined();
   });
 
   it("renders a deleted task empty state when the global table receives no task", () => {

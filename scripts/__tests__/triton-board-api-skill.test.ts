@@ -316,7 +316,8 @@ describe("Triton Board API skill artifacts", () => {
     const skill = readFileSync(skillPath, "utf8");
     expect(skill).toContain("matching operation recipe");
     expect(skill).toContain("For GET/read:");
-    expect(skill).toContain("For Task or Experiment PATCH:");
+    expect(skill).toContain("For Task PATCH:");
+    expect(skill).toContain("For Experiment Value PATCH:");
     expect(skill).toContain("For Attachment PATCH:");
     expect(skill).toContain("For POST:");
     const attachmentPatch = skill.slice(
@@ -393,7 +394,6 @@ describe("Triton Board API skill artifacts", () => {
       createTaskExperiment: ["200", "201", "400", "401", "403", "409", "413", "422", "429", "500"],
       listExperiments: ["200", "400", "401", "403", "500"],
       getExperiment: ["200", "400", "401", "403", "404", "500"],
-      patchExperiment: ["200", "400", "401", "403", "404", "412", "413", "422", "429", "500"],
       createExperimentAttachment: ["200", "201", "400", "401", "403", "404", "409", "422", "429", "500"],
       patchAttachment: ["200", "400", "401", "403", "404", "412", "413", "422", "429", "500"],
       listAudit: ["200", "400", "401", "403", "500"],
@@ -419,7 +419,6 @@ describe("Triton Board API skill artifacts", () => {
       createTaskExperiment: "experiments:write",
       listExperiments: "board:read",
       getExperiment: "board:read",
-      patchExperiment: "experiments:write",
       createExperimentAttachment: "attachments:write",
       patchAttachment: "attachments:write",
       listAudit: "audit:read",
@@ -434,9 +433,9 @@ describe("Triton Board API skill artifacts", () => {
     };
 
     expect(new Set(operations.map(({ path }) => path)).size).toBe(21);
-    expect(operations).toHaveLength(24);
+    expect(operations).toHaveLength(23);
     expect(new Set(operations.map(({ operationId }) => operationId)).size)
-      .toBe(24);
+      .toBe(23);
     expect(Object.keys(byOperation).sort()).toEqual(
       Object.keys(responseMatrix).sort(),
     );

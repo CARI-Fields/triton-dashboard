@@ -8,7 +8,6 @@ import {
   parseExperimentListFilters,
   parseTaskListFilters,
 } from "@/lib/agent-api/read-repository";
-import { parseExperimentPatch } from "@/lib/agent-api/schemas";
 import type { AgentContext } from "@/lib/agent-api/types";
 
 const TASK_ID = "30000000-0000-4000-8000-000000000001";
@@ -136,33 +135,6 @@ function experimentRow(
     owner_id: MEMBER_ID,
     name: "Tiled kernel",
     status: "running",
-    baseline_experiment_id: null,
-    data_spec: { datasets: [] },
-    object_spec: {
-      model: "",
-      harness: "",
-      parent_harness: "",
-      prompt: "",
-      prompt_change: "",
-      skills: [],
-      tools: [],
-    },
-    environment_spec: {
-      platform: "npu",
-      server: "",
-      devices: [],
-      hardware: "",
-      evaluator: "",
-      revision: "",
-      precision_policy: "",
-    },
-    config: { block: 128 },
-    notes: "",
-    metrics: { latency: 1.5 },
-    featured_metric_keys: ["latency"],
-    result_summary: "",
-    decision_outcome: null,
-    decision_notes: "",
     position: 0,
     started_at: null,
     completed_at: null,
@@ -557,272 +529,27 @@ describe("read repository DTOs and queries", () => {
     });
   });
 
-  it("uses neutral list defaults when stored Experiment JSON fields are invalid", async () => {
-    const row = {
-      ...experimentRow(),
-      data_spec: {
-        datasets: [{
-          role: "validation",
-          name: "kernelbench",
-          split: "test",
-          revision: "v1",
-          task_count: 250,
-          samples_per_task: 1,
-        }],
-      },
-      object_spec: {
-        model: "Qwen",
-        harness: "kernelbench",
-        parent_harness: "",
-        prompt: "Optimize",
-        prompt_change: "",
-        skills: ["triton", 7],
-        tools: [],
-      },
-      environment_spec: {
-        platform: "npu",
-        server: "atlas",
-        devices: ["npu:0", 1],
-        hardware: "910B",
-        evaluator: "pytest",
-        revision: "v1",
-        precision_policy: "fp32",
-      },
-      config: { nested: { block: 128 } },
-      metrics: { latency: "NaN", throughput: null },
-      featured_metric_keys: ["latency", 1],
-      task: {
-        id: TASK_ID,
-        title: "Fused attention",
-        internal_task_secret: "do-not-return",
-      },
-      owner: {
-        ...(experimentRow().owner as Record<string, unknown>),
-        auth_data: "do-not-return",
-      },
-    };
-    const { client } = clientFor({ experiments: { data: [row] } });
-
-    const result = await createReadRepository(client).listExperiments({
-      limit: 50,
-    });
-    const experiment = result.items[0];
-
-    expect(experiment.task).toEqual({
-      id: TASK_ID,
-      title: "Fused attention",
-    });
-    expect(experiment.owner).toEqual({
-      id: MEMBER_ID,
-      name: "Bruce",
-      initials: "B",
-      position: 0,
-      created_at: "2026-07-28T12:00:00.000Z",
-    });
-    expect(experiment).toMatchObject({
-      data_spec: { datasets: [] },
-      object_spec: {
-        model: "",
-        harness: "",
-        parent_harness: "",
-        prompt: "",
-        prompt_change: "",
-        skills: [],
-        tools: [],
-      },
-      environment_spec: {
-        platform: "",
-        server: "",
-        devices: [],
-        hardware: "",
-        evaluator: "",
-        revision: "",
-        precision_policy: "",
-      },
-      config: {},
-      metrics: {},
-      featured_metric_keys: [],
-    });
-    expect(experiment.data_spec.datasets).not.toEqual([
-      expect.objectContaining({ role: "training" }),
-    ]);
-    expect(JSON.stringify(experiment)).not.toContain("internal_task_secret");
-    expect(JSON.stringify(experiment)).not.toContain("auth_data");
-
-    expect(() => parseExperimentPatch({
-      changes: {
-        data_spec: experiment.data_spec,
-        object_spec: experiment.object_spec,
-        environment_spec: experiment.environment_spec,
-        config: experiment.config,
-        metrics: experiment.metrics,
-        featured_metric_keys: experiment.featured_metric_keys,
-      },
-    })).not.toThrow();
-  });
-
-  it("preserves valid detail JSON values while stripping nested extras", async () => {
-    const row = {
-      ...experimentRow(),
-      data_spec: {
-        datasets: [
-          {
-            role: "evaluation",
-            name: "kernelbench",
-            split: "test",
-            revision: "v1",
-            task_count: 250,
-            samples_per_task: 1,
-            internal_dataset_secret: "do-not-return",
-          },
-          {
-            role: "training",
-            name: "triton-corpus",
-            split: "train",
-            revision: "v2",
-            task_count: null,
-            samples_per_task: null,
-          },
-        ],
-        internal_data_secret: "do-not-return",
-      },
-      object_spec: {
-        model: "Qwen",
-        harness: "kernelbench",
-        parent_harness: "base",
-        prompt: "Optimize",
-        prompt_change: "Use tiling",
-        skills: ["triton"],
-        tools: ["profiler"],
-        internal_object_secret: "do-not-return",
-      },
-      environment_spec: {
-        platform: "npu",
-        server: "atlas",
-        devices: ["npu:0"],
-        hardware: "910B",
-        evaluator: "pytest",
-        revision: "v1",
-        precision_policy: "fp32",
-        internal_environment_secret: "do-not-return",
-      },
-      config: {
-        block: 128,
-        enabled: true,
-        label: "fast",
-        optional: null,
-      },
-      metrics: { latency: 1.25, throughput: 42 },
-      featured_metric_keys: ["latency", 1],
-      task: {
-        id: TASK_ID,
-        title: "Fused attention",
-        notes: "do-not-return",
-      },
-      attachments: [],
-    };
-    const { client } = clientFor({ experiments: { data: row } });
-
-    const result = await createReadRepository(client)
-      .getExperiment(EXPERIMENT_ID);
-    const serialized = JSON.stringify(result);
-
-    expect(result?.task).toEqual({
-      id: TASK_ID,
-      title: "Fused attention",
-    });
-    expect(result?.data_spec).toEqual({
-      datasets: [{
-        role: "evaluation",
-        name: "kernelbench",
-        split: "test",
-        revision: "v1",
-        task_count: 250,
-        samples_per_task: 1,
-      }, {
-        role: "training",
-        name: "triton-corpus",
-        split: "train",
-        revision: "v2",
-        task_count: null,
-        samples_per_task: null,
-      }],
-    });
-    expect(result?.object_spec).toEqual({
-      model: "Qwen",
-      harness: "kernelbench",
-      parent_harness: "base",
-      prompt: "Optimize",
-      prompt_change: "Use tiling",
-      skills: ["triton"],
-      tools: ["profiler"],
-    });
-    expect(result?.environment_spec).toEqual({
-      platform: "npu",
-      server: "atlas",
-      devices: ["npu:0"],
-      hardware: "910B",
-      evaluator: "pytest",
-      revision: "v1",
-      precision_policy: "fp32",
-    });
-    expect(result?.config).toEqual({
-      block: 128,
-      enabled: true,
-      label: "fast",
-      optional: null,
-    });
-    expect(result?.metrics).toEqual({ latency: 1.25, throughput: 42 });
-    expect(result?.featured_metric_keys).toEqual([]);
-    expect(serialized).not.toContain("internal_");
-    expect(serialized).not.toContain('"notes":"do-not-return"');
-    expect(() => parseExperimentPatch({
-      changes: {
-        data_spec: result?.data_spec,
-        object_spec: result?.object_spec,
-        environment_spec: result?.environment_spec,
-        config: result?.config,
-        metrics: result?.metrics,
-        featured_metric_keys: result?.featured_metric_keys,
-      },
-    })).not.toThrow();
-  });
-
-  it("preserves a nullable embedded Task relation without leaking row fields", async () => {
-    const { client } = clientFor({
-      experiments: { data: [{ ...experimentRow(), task: null }] },
-    });
-
-    const result = await createReadRepository(client).listExperiments({
-      limit: 50,
-    });
-
-    expect(result.items[0].task).toBeNull();
-  });
-
-  it("includes allowlisted Attachments with updated_at in Experiment detail", async () => {
-    const row = {
-      ...experimentRow(),
-      attachments: [{
-        id: "70000000-0000-4000-8000-000000000001",
-        task_id: TASK_ID,
-        experiment_id: EXPERIMENT_ID,
-        url: "https://storage.test/plot.png",
-        path: "task/experiment/plot.png",
-        caption: "Latency",
-        position: 0,
-        created_at: "2026-07-28T12:00:00.000Z",
-        updated_at: UPDATED_AT,
-        storage_secret: "do-not-return",
-      }],
-    };
+  it("includes Experiment attachments without leaking storage secrets", async () => {
     const { client, queries } = clientFor({
-      experiments: { data: row },
+      experiments: {
+        data: {
+          ...experimentRow(),
+          attachments: [{
+            id: "70000000-0000-4000-8000-000000000001",
+            task_id: TASK_ID,
+            experiment_id: EXPERIMENT_ID,
+            url: "https://storage.test/plot.png",
+            path: "task/experiment/plot.png",
+            caption: "Latency",
+            position: 0,
+            created_at: "2026-07-28T12:00:00.000Z",
+            updated_at: UPDATED_AT,
+            storage_secret: "do-not-return",
+          }],
+        },
+      },
     });
-
-    const result = await createReadRepository(client)
-      .getExperiment(EXPERIMENT_ID);
-
+    const result = await createReadRepository(client).getExperiment(EXPERIMENT_ID);
     expect(result?.attachments).toEqual([{
       id: "70000000-0000-4000-8000-000000000001",
       task_id: TASK_ID,
@@ -839,7 +566,6 @@ describe("read repository DTOs and queries", () => {
     );
     expect(JSON.stringify(result)).not.toContain("storage_secret");
   });
-
   it("lists only public Activity fields for the requested Task", async () => {
     const { client, queries } = clientFor({
       activity: {

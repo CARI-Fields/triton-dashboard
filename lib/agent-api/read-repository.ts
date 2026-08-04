@@ -4,13 +4,6 @@ import { getServerSupabase } from "@/lib/agent-api/server";
 import { isRfc3339Timestamp } from "@/lib/agent-api/timestamps";
 import type { AgentContext } from "@/lib/agent-api/types";
 import {
-  isConfig,
-  isDataSpec,
-  isEnvironmentSpec,
-  isMetrics,
-  isObjectSpec,
-} from "@/lib/experiments/schema";
-import {
   normalizeTaskRow,
   TASK_WITH_ASSIGNEES_SELECT,
   type TaskRelationRow,
@@ -63,17 +56,9 @@ const EXPERIMENT_COLUMNS = [
   "owner_id",
   "name",
   "status",
-  "baseline_experiment_id",
-  "data_spec",
-  "object_spec",
-  "environment_spec",
-  "config",
-  "notes",
-  "metrics",
-  "featured_metric_keys",
-  "result_summary",
-  "decision_outcome",
-  "decision_notes",
+  "template_id",
+  "archived_at",
+  "core_revision",
   "position",
   "started_at",
   "completed_at",
@@ -455,83 +440,6 @@ function recordValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function normalizedExperimentFields(
-  row: Record<string, unknown>,
-): Pick<
-  Experiment,
-  | "data_spec"
-  | "object_spec"
-  | "environment_spec"
-  | "config"
-  | "metrics"
-  | "featured_metric_keys"
-> {
-  const dataSpec: Experiment["data_spec"] = isDataSpec(row.data_spec)
-    ? {
-      datasets: row.data_spec.datasets.map((dataset) => ({
-        role: dataset.role,
-        name: dataset.name,
-        split: dataset.split,
-        revision: dataset.revision,
-        task_count: dataset.task_count,
-        samples_per_task: dataset.samples_per_task,
-      })),
-    }
-    : { datasets: [] };
-  const objectSpec: Experiment["object_spec"] = isObjectSpec(row.object_spec)
-    ? {
-      model: row.object_spec.model,
-      harness: row.object_spec.harness,
-      parent_harness: row.object_spec.parent_harness,
-      prompt: row.object_spec.prompt,
-      prompt_change: row.object_spec.prompt_change,
-      skills: [...row.object_spec.skills],
-      tools: [...row.object_spec.tools],
-    }
-    : {
-      model: "",
-      harness: "",
-      parent_harness: "",
-      prompt: "",
-      prompt_change: "",
-      skills: [],
-      tools: [],
-    };
-  const environmentSpec: Experiment["environment_spec"] =
-    isEnvironmentSpec(row.environment_spec)
-      ? {
-        platform: row.environment_spec.platform,
-        server: row.environment_spec.server,
-        devices: [...row.environment_spec.devices],
-        hardware: row.environment_spec.hardware,
-        evaluator: row.environment_spec.evaluator,
-        revision: row.environment_spec.revision,
-        precision_policy: row.environment_spec.precision_policy,
-      }
-      : {
-        platform: "",
-        server: "",
-        devices: [],
-        hardware: "",
-        evaluator: "",
-        revision: "",
-        precision_policy: "",
-      };
-  const featuredMetricKeys = row.featured_metric_keys;
-  return {
-    data_spec: dataSpec,
-    object_spec: objectSpec,
-    environment_spec: environmentSpec,
-    config: isConfig(row.config) ? { ...row.config } : {},
-    metrics: isMetrics(row.metrics) ? { ...row.metrics } : {},
-    featured_metric_keys:
-      Array.isArray(featuredMetricKeys)
-      && featuredMetricKeys.every((key) => typeof key === "string")
-        ? [...featuredMetricKeys]
-        : [],
-  };
-}
-
 function taskReferenceDto(
   value: unknown,
 ): ExperimentListRow["task"] {
@@ -553,15 +461,9 @@ function experimentDto(row: Record<string, unknown>): ExperimentListRow {
     owner_id: row.owner_id as string | null,
     name: row.name as string,
     status: row.status as ExperimentStatus,
-    baseline_experiment_id: row.baseline_experiment_id as string | null,
     template_id: row.template_id as string | null,
     archived_at: row.archived_at as string | null,
     core_revision: row.core_revision as number,
-    ...normalizedExperimentFields(row),
-    notes: row.notes as string,
-    result_summary: row.result_summary as string,
-    decision_outcome: row.decision_outcome as Experiment["decision_outcome"],
-    decision_notes: row.decision_notes as string,
     position: row.position as number,
     started_at: row.started_at as string | null,
     completed_at: row.completed_at as string | null,

@@ -11,7 +11,8 @@ Use the bundled safe client:
 2. Call `python3 scripts/triton_board_api.py capabilities`.
 3. Follow the matching operation recipe:
    - For GET/read: use the exact relative endpoint path, documented filters, and required read scope; use the successful response as the result.
-   - For Task or Experiment PATCH: GET current resource, retain its quoted ETag, compute the smallest allowed change, and PATCH with `If-Match`.
+   - For Task PATCH: GET current resource, retain its quoted ETag, compute the smallest allowed change, and PATCH with `If-Match`.
+   - For Experiment Value PATCH: send the stable `key_id`, `expected_cell_revision`, and the typed `value` to `/experiments/{id}/values`; a `409` means the cell changed and the response includes `remote`.
    - For Attachment PATCH: use a trusted current target `attachment.updated_at` supplied in context when available; quote it for `If-Match`, never the parent Experiment ETag. Do not GET when that trusted target version is available. Otherwise, only when the Attachment is Experiment-linked and `board:read` is available, GET the parent Experiment and select the target Attachment. Direct Task Attachments have no Agent GET, and Attachment PATCH does not require `board:read`; stop if no trusted current target `attachment.updated_at` is available.
    - For POST: use the exact known parent, relative endpoint path, and strict input with the endpoint-specific write scope; let the server check live Task collaboration, and POST once with one stable `Idempotency-Key`. POST does not require `board:read` or a preflight GET.
 4. Verify the write response. A successful POST response is sufficient. Optional GET verification requires `board:read`.

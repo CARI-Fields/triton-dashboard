@@ -378,8 +378,9 @@ paths:
       operationId: createTaskExperiment
       summary: Create a planned Experiment under one Task.
       description: |
-        The body accepts only name. The URL supplies task_id; the server fixes
-        owner_id to the Key's Member and status to planned.
+        The body requires template_id and name; owner_id is optional and
+        values is an optional map of typed Values keyed by stable key_id.
+        The server fixes status to planned.
       x-required-scope: experiments:write
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -388,7 +389,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ExperimentCreate"
+              type: object
+              required: [template_id, name]
+              additionalProperties: false
+              properties:
+                template_id: { type: string, format: uuid }
+                name: { type: string, minLength: 1, maxLength: 200 }
+                owner_id: { type: string, format: uuid, nullable: true }
+                values:
+                  type: object
+                  additionalProperties: true
       responses:
         "200":
           description: Idempotent replay of the original result.
@@ -478,50 +488,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
-    patch:
-      tags: [Experiments]
-      operationId: patchExperiment
-      summary: Apply a minimal Experiment field change.
-      description: |
-        Requires collaboration on the parent Task. Workflow and same-Task
-        baseline constraints are validated before the atomic mutation.
-      x-required-scope: experiments:write
-      parameters:
-        - $ref: "#/components/parameters/IfMatch"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ExperimentPatchEnvelope"
-      responses:
-        "200":
-          description: Updated Experiment mutation DTO.
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExperimentMutationSuccess"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "412":
-          $ref: "#/components/responses/VersionConflict"
-        "413":
-          $ref: "#/components/responses/BodyTooLarge"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
-        "429":
-          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /experiments/{id}/attachments:

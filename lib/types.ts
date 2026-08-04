@@ -91,49 +91,108 @@ export type ExperimentStatus =
   | "blocked"
   | "cancelled";
 
-export type DecisionOutcome =
-  | "reference"
-  | "accepted"
-  | "rejected"
-  | "inconclusive";
+export type TemplateValueType =
+  | "short_text"
+  | "long_text"
+  | "number"
+  | "boolean"
+  | "single_select"
+  | "multi_select"
+  | "date_time"
+  | "url"
+  | "attachment";
 
-export type DatasetRole = "training" | "evaluation";
-
-export interface DatasetSpec {
-  role: DatasetRole;
+export interface ExperimentTemplate {
+  id: string;
   name: string;
-  split: string;
-  revision: string;
-  task_count: number | null;
-  samples_per_task: number | null;
+  description: string;
+  schema_revision: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface DataSpec {
-  datasets: DatasetSpec[];
+export interface TemplateField {
+  id: string;
+  template_id: string;
+  label: string;
+  color_token: string;
+  position: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface ObjectSpec {
-  model: string;
-  harness: string;
-  parent_harness: string;
-  prompt: string;
-  prompt_change: string;
-  skills: string[];
-  tools: string[];
+export interface TemplateKey {
+  id: string;
+  template_id: string;
+  field_id: string;
+  key: string;
+  value_type: TemplateValueType;
+  required: boolean;
+  position: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface EnvironmentSpec {
-  platform: "npu" | "gpu" | "";
-  server: string;
-  devices: string[];
-  hardware: string;
-  evaluator: string;
-  revision: string;
-  precision_policy: string;
+export interface TemplateKeyOption {
+  id: string;
+  template_id: string;
+  key_id: string;
+  label: string;
+  position: number;
+  archived_at: string | null;
 }
 
-export type ConfigValue = string | number | boolean | null;
-export type ExperimentConfig = Record<string, ConfigValue>;
+export interface ExperimentValue {
+  experiment_id: string;
+  template_id: string;
+  key_id: string;
+  text_value: string | null;
+  number_value: number | null;
+  boolean_value: boolean | null;
+  datetime_value: string | null;
+  option_id: string | null;
+  cell_revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExperimentValueOption {
+  experiment_id: string;
+  template_id: string;
+  key_id: string;
+  option_id: string;
+  position: number;
+}
+
+export type VersionSource = "browser" | "agent" | "migration" | "system";
+
+export interface ExperimentVersion {
+  id: string;
+  experiment_id: string;
+  version_no: number;
+  reason: string;
+  source: VersionSource;
+  edit_session_id: string | null;
+  template_schema_revision: number;
+  snapshot: unknown;
+  actor_member_id: string | null;
+  created_at: string;
+}
+
+export interface TemplateVersion {
+  id: string;
+  template_id: string;
+  version_no: number;
+  reason: string;
+  source: VersionSource;
+  schema_revision: number;
+  snapshot: unknown;
+  actor_member_id: string | null;
+  created_at: string;
+}
 
 export interface Experiment {
   id: string;
@@ -142,17 +201,9 @@ export interface Experiment {
   owner_id: string | null;
   name: string;
   status: ExperimentStatus;
-  baseline_experiment_id: string | null;
-  data_spec: DataSpec;
-  object_spec: ObjectSpec;
-  environment_spec: EnvironmentSpec;
-  config: ExperimentConfig;
-  notes: string;
-  metrics: Record<string, number>;
-  featured_metric_keys: string[];
-  result_summary: string;
-  decision_outcome: DecisionOutcome | null;
-  decision_notes: string;
+  template_id: string | null;
+  archived_at: string | null;
+  core_revision: number;
   position: number;
   started_at: string | null;
   completed_at: string | null;
@@ -173,6 +224,8 @@ export interface Attachment {
   path: string;
   caption: string;
   position: number;
+  template_key_id: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }

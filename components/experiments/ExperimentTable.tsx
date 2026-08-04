@@ -3,15 +3,9 @@ import { useId } from "react";
 import type { ExperimentListRow } from "@/lib/types";
 import { relTime } from "@/lib/time";
 import {
-  DECISION_LABELS,
   formatExperimentId,
 } from "@/lib/experiments/policy";
 import ExperimentStatusBadge from "@/components/experiments/ExperimentStatusBadge";
-
-function metricValue(value: unknown): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return Number.isInteger(value) ? value.toLocaleString() : Number(value.toPrecision(5)).toString();
-}
 
 export default function ExperimentTable({
   rows,
@@ -22,7 +16,7 @@ export default function ExperimentTable({
 }: {
   rows: ExperimentListRow[];
   showTask: boolean;
-  selectable: boolean;
+  selectable?: boolean;
   selectedIds?: ReadonlySet<string>;
   onToggle?: (id: string) => void;
 }) {
@@ -52,8 +46,6 @@ export default function ExperimentTable({
             {showTask && <th scope="col">Task</th>}
             <th scope="col">Owner</th>
             <th scope="col">Status</th>
-            <th scope="col">Decision</th>
-            <th scope="col">Featured metrics</th>
             <th scope="col">Updated</th>
           </tr>
         </thead>
@@ -94,21 +86,6 @@ export default function ExperimentTable({
                     : <span className="muted">Unassigned</span>}
                 </td>
                 <td><ExperimentStatusBadge status={row.status} /></td>
-                <td>
-                  {row.decision_outcome
-                    ? DECISION_LABELS[row.decision_outcome]
-                    : <span className="muted">—</span>}
-                </td>
-                <td>
-                  <div className="featured-metrics">
-                    {row.featured_metric_keys.length === 0 && <span className="muted">—</span>}
-                    {row.featured_metric_keys.map((key) => (
-                      <span key={key}>
-                        {key} {key in row.metrics ? metricValue(row.metrics[key]) : "—"}
-                      </span>
-                    ))}
-                  </div>
-                </td>
                 <td className="experiment-updated">{relTime(row.updated_at)}</td>
               </tr>
             );

@@ -278,6 +278,14 @@ python3 .agents/skills/triton-board-api/scripts/triton_board_api.py --help
 The validator command requires the Codex `skill-creator` system skill. Python compilation,
 client help, `npm test`, and `npm run build` use only repository files and normal project tools.
 
+### Production rollout (Phase 6 legacy cutover)
+
+1. Back up the database.
+2. Apply pending migrations with `npm run db:migrate`.
+3. Run the migration verification: `node scripts/verify-legacy-migration.mjs`.
+4. Spot-check a handful of legacy Experiments in the UI (Detail, Compare, Version History).
+5. Legacy content columns stay in place; a later cleanup release removes them.
+
 ### Shared login
 
 Auth is a single shared user. Create it in Supabase → **Authentication → Users → Add user**:

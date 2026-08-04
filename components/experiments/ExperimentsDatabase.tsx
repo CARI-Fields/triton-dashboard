@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ExperimentListRow, Member, Task } from "@/lib/types";
@@ -14,7 +13,6 @@ import {
   loadExperimentReferenceData,
   watchExperimentIndex,
 } from "@/lib/experiments/repository";
-import { serializeCompareSelection } from "@/lib/experiments/compare-url";
 import CreateExperimentDialog from "@/components/experiments/CreateExperimentDialog";
 import ExperimentFilters from "@/components/experiments/ExperimentFilters";
 import ExperimentTable from "@/components/experiments/ExperimentTable";
@@ -30,7 +28,6 @@ export default function ExperimentsDatabase() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [filters, setFilters] = useState<ExperimentFilterState>(EMPTY_EXPERIMENT_FILTERS);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [createOpen, setCreateOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -49,11 +46,6 @@ export default function ExperimentsDatabase() {
       setRows(nextRows);
       setTasks(references.tasks);
       setMembers(references.members);
-      setSelectedIds((current) => {
-        const availableIds = new Set(nextRows.map((row) => row.id));
-        const next = new Set([...current].filter((id) => availableIds.has(id)));
-        return next.size === current.size ? current : next;
-      });
       setError("");
     } catch (caught) {
       if (requestVersion !== reloadVersion.current) return;
@@ -87,21 +79,6 @@ export default function ExperimentsDatabase() {
     [filters, rows],
   );
 
-  function toggle(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const canCompare = selectedIds.size >= 2;
-  const compareQuery = serializeCompareSelection({
-    ids: [...selectedIds],
-    baselineId: null,
-  });
-
   return (
     <div className="workspace-page experiments-database">
       <PageHeader
@@ -110,16 +87,6 @@ export default function ExperimentsDatabase() {
         description="Manual run context, evidence, and decisions across every Task."
         actions={(
           <>
-            <Link
-              className={`btn ${canCompare ? "" : "disabled"}`}
-              aria-disabled={!canCompare}
-              href={canCompare ? `/experiments/compare?${compareQuery}` : "/experiments"}
-              onClick={(event) => {
-                if (!canCompare) event.preventDefault();
-              }}
-            >
-              Compare selected ({selectedIds.size})
-            </Link>
             <button type="button" className="btn primary" onClick={() => setCreateOpen(true)}>
               New experiment
             </button>
@@ -138,14 +105,6 @@ export default function ExperimentsDatabase() {
           <span>{error}</span>
           <button type="button" className="btn" onClick={retry} disabled={loading}>
             {loading ? "Retrying…" : "Retry"}
-          </button>
-        </div>
-      )}
-      {selectedIds.size > 0 && (
-        <div className="selection-strip" role="status">
-          <strong>{selectedIds.size} selected</strong>
-          <button type="button" onClick={() => setSelectedIds(new Set())}>
-            Clear selection
           </button>
         </div>
       )}
@@ -170,9 +129,6 @@ export default function ExperimentsDatabase() {
           <ExperimentTable
             rows={visibleRows}
             showTask
-            selectable
-            selectedIds={selectedIds}
-            onToggle={toggle}
           />
             )}
 

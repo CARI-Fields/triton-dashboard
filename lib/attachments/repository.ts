@@ -19,6 +19,7 @@ export async function uploadAttachment(
   scope: AttachmentScope,
   file: File,
   position: number,
+  templateKeyId: string | null = null,
 ): Promise<void> {
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const parent = scope.experimentId ?? "task";
@@ -35,6 +36,7 @@ export async function uploadAttachment(
     path,
     caption: "",
     position,
+    template_key_id: templateKeyId,
   });
   if (!error) return;
 
@@ -62,6 +64,15 @@ export async function updateAttachmentCaption(
 export async function deleteAttachment(
   attachment: Attachment,
 ): Promise<void> {
+  if (attachment.template_key_id) {
+    // Template-scoped attachments are soft-archived so version restore can reattach them.
+    const { error } = await client()
+      .from("attachments")
+      .update({ archived_at: new Date().toISOString() })
+      .eq("id", attachment.id);
+    throwIfError(error);
+    return;
+  }
   const { error } = await client()
     .from("attachments")
     .delete()

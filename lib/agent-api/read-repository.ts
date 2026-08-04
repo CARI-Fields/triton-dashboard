@@ -4,17 +4,12 @@ import { getServerSupabase } from "@/lib/agent-api/server";
 import { isRfc3339Timestamp } from "@/lib/agent-api/timestamps";
 import type { AgentContext } from "@/lib/agent-api/types";
 import {
-  isConfig,
-  isDataSpec,
-  isEnvironmentSpec,
-  isMetrics,
-  isObjectSpec,
-} from "@/lib/experiments/schema";
-import {
   normalizeTaskRow,
   TASK_WITH_ASSIGNEES_SELECT,
   type TaskRelationRow,
 } from "@/lib/tasks/assignees";
+import { typedValueFromRow } from "@/lib/experiments/values-internal";
+import type { TypedValue } from "@/lib/experiments/values";
 import type {
   Activity,
   Attachment,
@@ -61,17 +56,9 @@ const EXPERIMENT_COLUMNS = [
   "owner_id",
   "name",
   "status",
-  "baseline_experiment_id",
-  "data_spec",
-  "object_spec",
-  "environment_spec",
-  "config",
-  "notes",
-  "metrics",
-  "featured_metric_keys",
-  "result_summary",
-  "decision_outcome",
-  "decision_notes",
+  "template_id",
+  "archived_at",
+  "core_revision",
   "position",
   "started_at",
   "completed_at",
@@ -154,7 +141,35 @@ export interface BoardSummaryDto {
 
 export type ExperimentDetailDto = ExperimentListRow & {
   attachments: Attachment[];
+  values?: Record<string, { value: TypedValue | null; cell_revision: number }>;
+  version_no?: number | null;
+  template?: AgentTemplateSummary | null;
 };
+
+export interface AgentTemplateSummary {
+  id: string;
+  name: string;
+  description: string;
+  schema_revision: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentTemplateSchemaField {
+  id: string;
+  label: string;
+  color_token: string;
+  position: number;
+  keys: Array<{
+    id: string;
+    key: string;
+    value_type: string;
+    required: boolean;
+    position: number;
+    options: Array<{ id: string; label: string; position: number }>;
+  }>;
+}
 
 export interface AuditDto {
   id: string;
@@ -425,83 +440,6 @@ function recordValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function normalizedExperimentFields(
-  row: Record<string, unknown>,
-): Pick<
-  Experiment,
-  | "data_spec"
-  | "object_spec"
-  | "environment_spec"
-  | "config"
-  | "metrics"
-  | "featured_metric_keys"
-> {
-  const dataSpec: Experiment["data_spec"] = isDataSpec(row.data_spec)
-    ? {
-      datasets: row.data_spec.datasets.map((dataset) => ({
-        role: dataset.role,
-        name: dataset.name,
-        split: dataset.split,
-        revision: dataset.revision,
-        task_count: dataset.task_count,
-        samples_per_task: dataset.samples_per_task,
-      })),
-    }
-    : { datasets: [] };
-  const objectSpec: Experiment["object_spec"] = isObjectSpec(row.object_spec)
-    ? {
-      model: row.object_spec.model,
-      harness: row.object_spec.harness,
-      parent_harness: row.object_spec.parent_harness,
-      prompt: row.object_spec.prompt,
-      prompt_change: row.object_spec.prompt_change,
-      skills: [...row.object_spec.skills],
-      tools: [...row.object_spec.tools],
-    }
-    : {
-      model: "",
-      harness: "",
-      parent_harness: "",
-      prompt: "",
-      prompt_change: "",
-      skills: [],
-      tools: [],
-    };
-  const environmentSpec: Experiment["environment_spec"] =
-    isEnvironmentSpec(row.environment_spec)
-      ? {
-        platform: row.environment_spec.platform,
-        server: row.environment_spec.server,
-        devices: [...row.environment_spec.devices],
-        hardware: row.environment_spec.hardware,
-        evaluator: row.environment_spec.evaluator,
-        revision: row.environment_spec.revision,
-        precision_policy: row.environment_spec.precision_policy,
-      }
-      : {
-        platform: "",
-        server: "",
-        devices: [],
-        hardware: "",
-        evaluator: "",
-        revision: "",
-        precision_policy: "",
-      };
-  const featuredMetricKeys = row.featured_metric_keys;
-  return {
-    data_spec: dataSpec,
-    object_spec: objectSpec,
-    environment_spec: environmentSpec,
-    config: isConfig(row.config) ? { ...row.config } : {},
-    metrics: isMetrics(row.metrics) ? { ...row.metrics } : {},
-    featured_metric_keys:
-      Array.isArray(featuredMetricKeys)
-      && featuredMetricKeys.every((key) => typeof key === "string")
-        ? [...featuredMetricKeys]
-        : [],
-  };
-}
-
 function taskReferenceDto(
   value: unknown,
 ): ExperimentListRow["task"] {
@@ -523,12 +461,9 @@ function experimentDto(row: Record<string, unknown>): ExperimentListRow {
     owner_id: row.owner_id as string | null,
     name: row.name as string,
     status: row.status as ExperimentStatus,
-    baseline_experiment_id: row.baseline_experiment_id as string | null,
-    ...normalizedExperimentFields(row),
-    notes: row.notes as string,
-    result_summary: row.result_summary as string,
-    decision_outcome: row.decision_outcome as Experiment["decision_outcome"],
-    decision_notes: row.decision_notes as string,
+    template_id: row.template_id as string | null,
+    archived_at: row.archived_at as string | null,
+    core_revision: row.core_revision as number,
     position: row.position as number,
     started_at: row.started_at as string | null,
     completed_at: row.completed_at as string | null,
@@ -553,6 +488,8 @@ function attachmentDto(row: Record<string, unknown>): Attachment {
     path: row.path as string,
     caption: row.caption as string,
     position: row.position as number,
+    template_key_id: row.template_key_id as string | null,
+    archived_at: row.archived_at as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -804,11 +741,199 @@ export function createReadRepository(client: SupabaseClient) {
       throwIfError(error);
       if (!data) return null;
       const row = data as unknown as Record<string, unknown>;
-      return {
+      const detail: ExperimentDetailDto = {
         ...experimentDto(row),
         attachments:
           ((row.attachments ?? []) as Record<string, unknown>[])
             .map(attachmentDto),
+      };
+      if (row.template_id) {
+        const [values, valueOptions, templateSummary, versions] = await Promise.all([
+          client.from("experiment_values")
+            .select("*,template_key:experiment_template_keys(value_type)")
+            .eq("experiment_id", id),
+          client.from("experiment_value_options")
+            .select("key_id,option_id,position")
+            .eq("experiment_id", id)
+            .order("position"),
+          client.from("experiment_templates")
+            .select("id,name,description,schema_revision,archived_at,created_at,updated_at")
+            .eq("id", row.template_id as string)
+            .maybeSingle(),
+          client.from("experiment_versions")
+            .select("version_no")
+            .eq("experiment_id", id)
+            .order("version_no", { ascending: false })
+            .limit(1),
+        ]);
+        throwIfError(values.error);
+        throwIfError(valueOptions.error);
+        throwIfError(templateSummary.error);
+        throwIfError(versions.error);
+        const optionsByKey = new Map<string, string[]>();
+        for (const option of (valueOptions.data ?? []) as Array<{ key_id: string; option_id: string }>) {
+          const group = optionsByKey.get(option.key_id) ?? [];
+          group.push(option.option_id);
+          optionsByKey.set(option.key_id, group);
+        }
+        const typedValues: ExperimentDetailDto["values"] = {};
+        for (const value of (values.data ?? []) as Array<Record<string, unknown> & { template_key?: { value_type: string } }>) {
+          typedValues![value.key_id as string] = {
+            value: typedValueFromRow(
+              value as never,
+              (value.template_key?.value_type ?? "short_text") as never,
+              optionsByKey.get(value.key_id as string) ?? [],
+              [],
+            ),
+            cell_revision: value.cell_revision as number,
+          };
+        }
+        detail.values = typedValues;
+        detail.version_no = (versions.data?.[0]?.version_no as number | undefined) ?? null;
+        detail.template = templateSummary.data as AgentTemplateSummary | null;
+      }
+      return detail;
+    },
+
+    async listTemplates(): Promise<AgentTemplateSummary[]> {
+      const { data, error } = await client
+        .from("experiment_templates")
+        .select("id,name,description,schema_revision,archived_at,created_at,updated_at")
+        .order("name");
+      throwIfError(error);
+      return (data ?? []) as AgentTemplateSummary[];
+    },
+
+    async getTemplateSchema(
+      templateId: string,
+    ): Promise<AgentTemplateSchemaField[] | null> {
+      const [template, fields, keys, options] = await Promise.all([
+        client.from("experiment_templates")
+          .select("id,name,description,schema_revision,archived_at,created_at,updated_at")
+          .eq("id", templateId)
+          .maybeSingle(),
+        client.from("experiment_template_fields")
+          .select("*")
+          .eq("template_id", templateId)
+          .is("archived_at", null)
+          .order("position"),
+        client.from("experiment_template_keys")
+          .select("*")
+          .eq("template_id", templateId)
+          .is("archived_at", null)
+          .order("position"),
+        client.from("experiment_template_key_options")
+          .select("*")
+          .eq("template_id", templateId)
+          .is("archived_at", null)
+          .order("position"),
+      ]);
+      throwIfError(template.error);
+      throwIfError(fields.error);
+      throwIfError(keys.error);
+      throwIfError(options.error);
+      if (!template.data) return null;
+
+      const optionsByKey = new Map<string, AgentTemplateSchemaField["keys"][number]["options"]>();
+      for (const option of (options.data ?? []) as Array<{ key_id: string; id: string; label: string; position: number }>) {
+        const group = optionsByKey.get(option.key_id) ?? [];
+        group.push({ id: option.id, label: option.label, position: option.position });
+        optionsByKey.set(option.key_id, group);
+      }
+      const keysByField = new Map<string, AgentTemplateSchemaField["keys"]>();
+      for (const key of (keys.data ?? []) as Array<Record<string, unknown>>) {
+        const fieldId = key.field_id as string;
+        const group = keysByField.get(fieldId) ?? [];
+        group.push({
+          id: key.id as string,
+          key: key.key as string,
+          value_type: key.value_type as string,
+          required: key.required as boolean,
+          position: key.position as number,
+          options: optionsByKey.get(key.id as string) ?? [],
+        });
+        keysByField.set(fieldId, group);
+      }
+
+      return (fields.data ?? [] as Array<Record<string, unknown>>).map((field) => ({
+        id: field.id as string,
+        label: field.label as string,
+        color_token: field.color_token as string,
+        position: field.position as number,
+        keys: keysByField.get(field.id as string) ?? [],
+      }));
+    },
+
+    async getTemplateCompareSource(
+      templateId: string,
+      includeArchived: boolean,
+    ): Promise<{
+      template: AgentTemplateSummary | null;
+      experiments: Array<{
+        experiment: Record<string, unknown>;
+        values: Record<string, { value: unknown; cell_revision: number }>;
+      }>;
+    }> {
+      const templateSummary = await client
+        .from("experiment_templates")
+        .select("id,name,description,schema_revision,archived_at,created_at,updated_at")
+        .eq("id", templateId)
+        .maybeSingle();
+      throwIfError(templateSummary.error);
+
+      let experimentsQuery = client
+        .from("experiments")
+        .select("*")
+        .eq("template_id", templateId)
+        .order("experiment_no");
+      if (!includeArchived) {
+        experimentsQuery = experimentsQuery.is("archived_at", null);
+      }
+      const [experiments, values, valueOptions] = await Promise.all([
+        experimentsQuery,
+        client.from("experiment_values")
+          .select("*,template_key:experiment_template_keys(value_type)")
+          .in("template_id", [templateId]),
+        client.from("experiment_value_options")
+          .select("experiment_id,key_id,option_id,position")
+          .in("template_id", [templateId])
+          .order("position"),
+      ]);
+      throwIfError(experiments.error);
+      throwIfError(values.error);
+      throwIfError(valueOptions.error);
+
+      const optionsByCell = new Map<string, string[]>();
+      for (const row of (valueOptions.data ?? []) as Array<{ experiment_id: string; key_id: string; option_id: string }>) {
+        const key = `${row.experiment_id}:${row.key_id}`;
+        const group = optionsByCell.get(key) ?? [];
+        group.push(row.option_id);
+        optionsByCell.set(key, group);
+      }
+
+      const rows = (experiments.data ?? [] as Array<Record<string, unknown>>).map((experiment) => ({
+        experiment,
+        values: {} as Record<string, { value: unknown; cell_revision: number }>,
+      }));
+      const rowById = new Map(rows.map((row) => [row.experiment.id as string, row]));
+      for (const row of (values.data ?? []) as Array<Record<string, unknown> & { template_key?: { value_type: string } }>) {
+        const target = rowById.get(row.experiment_id as string);
+        if (!target) continue;
+        const type = row.template_key?.value_type ?? "short_text";
+        target.values[row.key_id as string] = {
+          value: typedValueFromRow(
+            row as never,
+            type as never,
+            optionsByCell.get(`${row.experiment_id}:${row.key_id}`) ?? [],
+            [],
+          ),
+          cell_revision: row.cell_revision as number,
+        };
+      }
+
+      return {
+        template: templateSummary.data as AgentTemplateSummary | null,
+        experiments: rows,
       };
     },
 
@@ -895,4 +1020,27 @@ export function listAudit(
   filters: Record<string, never>,
 ): Promise<AuditDto[]> {
   return repository().listAudit(context, filters);
+}
+
+export function listTemplates(): Promise<AgentTemplateSummary[]> {
+  return repository().listTemplates();
+}
+
+export function getTemplateSchema(
+  templateId: string,
+): Promise<AgentTemplateSchemaField[] | null> {
+  return repository().getTemplateSchema(templateId);
+}
+
+export function getTemplateCompareSource(
+  templateId: string,
+  includeArchived: boolean,
+): Promise<{
+  template: AgentTemplateSummary | null;
+  experiments: Array<{
+    experiment: Record<string, unknown>;
+    values: Record<string, { value: unknown; cell_revision: number }>;
+  }>;
+}> {
+  return repository().getTemplateCompareSource(templateId, includeArchived);
 }

@@ -3,24 +3,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { AgentApiError } from "@/lib/agent-api/errors";
 import { getServerSupabase } from "@/lib/agent-api/server";
 import type {
-  ExperimentPatch,
   TaskPatch,
 } from "@/lib/agent-api/schemas";
 import { isDateOnly } from "@/lib/agent-api/timestamps";
 import type { AgentContext } from "@/lib/agent-api/types";
-import {
-  isConfig,
-  isDataSpec,
-  isEnvironmentSpec,
-  isMetrics,
-  isObjectSpec,
-} from "@/lib/experiments/schema";
 import type {
   Activity,
   Attachment,
-  DecisionOutcome,
-  Experiment,
-  ExperimentStatus,
+
   Status,
   Task,
   TaskPriority,
@@ -40,20 +30,6 @@ const TASK_PRIORITIES = new Set<TaskPriority>([
   "high",
   "urgent",
 ]);
-const EXPERIMENT_STATUSES = new Set<ExperimentStatus>([
-  "planned",
-  "running",
-  "analyzing",
-  "completed",
-  "blocked",
-  "cancelled",
-]);
-const DECISION_OUTCOMES = new Set<DecisionOutcome>([
-  "reference",
-  "accepted",
-  "rejected",
-  "inconclusive",
-]);
 
 export type TaskMutationDto = Pick<
   Task,
@@ -69,7 +45,6 @@ export type TaskMutationDto = Pick<
   | "created_at"
   | "updated_at"
 >;
-export type ExperimentMutationDto = Experiment;
 export type ActivityMutationDto = Activity;
 export type AttachmentMutationDto = Attachment;
 
@@ -92,22 +67,6 @@ interface PatchTaskInput {
   requestId: string;
 }
 
-interface CreateExperimentInput {
-  context: AgentContext;
-  taskId: string;
-  name: string;
-  idempotencyKey: string;
-  requestHash: string;
-  requestId: string;
-}
-
-interface PatchExperimentInput {
-  context: AgentContext;
-  experimentId: string;
-  expectedUpdatedAt: string;
-  changes: ExperimentPatch;
-  requestId: string;
-}
 
 interface CreateActivityInput {
   context: AgentContext;
@@ -256,116 +215,6 @@ function taskDto(value: unknown): TaskMutationDto {
   };
 }
 
-function experimentDto(value: unknown): ExperimentMutationDto {
-  if (!isRecord(value)) return invalidRpcData();
-  const status = value.status;
-  if (
-    typeof status !== "string"
-    || !EXPERIMENT_STATUSES.has(status as ExperimentStatus)
-  ) {
-    return invalidRpcData();
-  }
-  const decisionOutcome = value.decision_outcome;
-  if (
-    decisionOutcome !== null
-    && (
-      typeof decisionOutcome !== "string"
-      || !DECISION_OUTCOMES.has(decisionOutcome as DecisionOutcome)
-    )
-  ) {
-    return invalidRpcData();
-  }
-  const ownerId = nullableUuid(value, "owner_id");
-  const startedAt = value.started_at;
-  const completedAt = value.completed_at;
-  if (
-    (startedAt !== null && typeof startedAt !== "string")
-    || (completedAt !== null && typeof completedAt !== "string")
-  ) {
-    return invalidRpcData();
-  }
-  const dataSpec: Experiment["data_spec"] = isDataSpec(value.data_spec)
-    ? {
-      datasets: value.data_spec.datasets.map((dataset) => ({
-        role: dataset.role,
-        name: dataset.name,
-        split: dataset.split,
-        revision: dataset.revision,
-        task_count: dataset.task_count,
-        samples_per_task: dataset.samples_per_task,
-      })),
-    }
-    : { datasets: [] };
-  const objectSpec: Experiment["object_spec"] = isObjectSpec(value.object_spec)
-    ? {
-      model: value.object_spec.model,
-      harness: value.object_spec.harness,
-      parent_harness: value.object_spec.parent_harness,
-      prompt: value.object_spec.prompt,
-      prompt_change: value.object_spec.prompt_change,
-      skills: [...value.object_spec.skills],
-      tools: [...value.object_spec.tools],
-    }
-    : {
-      model: "",
-      harness: "",
-      parent_harness: "",
-      prompt: "",
-      prompt_change: "",
-      skills: [],
-      tools: [],
-    };
-  const environmentSpec: Experiment["environment_spec"] =
-    isEnvironmentSpec(value.environment_spec)
-      ? {
-        platform: value.environment_spec.platform,
-        server: value.environment_spec.server,
-        devices: [...value.environment_spec.devices],
-        hardware: value.environment_spec.hardware,
-        evaluator: value.environment_spec.evaluator,
-        revision: value.environment_spec.revision,
-        precision_policy: value.environment_spec.precision_policy,
-      }
-      : {
-        platform: "",
-        server: "",
-        devices: [],
-        hardware: "",
-        evaluator: "",
-        revision: "",
-        precision_policy: "",
-      };
-  const featuredMetricKeys = value.featured_metric_keys;
-
-  return {
-    id: requiredUuid(value, "id"),
-    experiment_no: requiredNumber(value, "experiment_no"),
-    task_id: requiredUuid(value, "task_id"),
-    owner_id: ownerId,
-    name: requiredString(value, "name"),
-    status: status as ExperimentStatus,
-    baseline_experiment_id: nullableUuid(value, "baseline_experiment_id"),
-    data_spec: dataSpec,
-    object_spec: objectSpec,
-    environment_spec: environmentSpec,
-    config: isConfig(value.config) ? { ...value.config } : {},
-    notes: requiredString(value, "notes"),
-    metrics: isMetrics(value.metrics) ? { ...value.metrics } : {},
-    featured_metric_keys:
-      Array.isArray(featuredMetricKeys)
-      && featuredMetricKeys.every((item) => typeof item === "string")
-        ? [...featuredMetricKeys]
-        : [],
-    result_summary: requiredString(value, "result_summary"),
-    decision_outcome: decisionOutcome as DecisionOutcome | null,
-    decision_notes: requiredString(value, "decision_notes"),
-    position: requiredNumber(value, "position"),
-    started_at: startedAt,
-    completed_at: completedAt,
-    created_at: requiredString(value, "created_at"),
-    updated_at: requiredString(value, "updated_at"),
-  };
-}
 
 function activityDto(value: unknown): ActivityMutationDto {
   if (!isRecord(value) || value.kind !== "comment") return invalidRpcData();
@@ -390,6 +239,8 @@ function attachmentDto(value: unknown): AttachmentMutationDto {
     path: requiredString(value, "path"),
     caption: requiredString(value, "caption"),
     position: requiredNumber(value, "position"),
+    template_key_id: nullableUuid(value, "template_key_id"),
+    archived_at: value.archived_at as string | null,
     created_at: requiredString(value, "created_at"),
     updated_at: requiredString(value, "updated_at"),
   };
@@ -493,43 +344,6 @@ export function createMutationRepository(client: SupabaseClient) {
       return mutationResult(data, taskDto);
     },
 
-    async createExperiment(input: CreateExperimentInput): Promise<
-      MutationResult<ExperimentMutationDto>
-    > {
-      const { data, error, status } = await client.rpc(
-        "agent_api_create_experiment",
-        {
-          p_api_key_id: input.context.apiKeyId,
-          p_member_id: input.context.memberId,
-          p_task_id: input.taskId,
-          p_name: input.name,
-          p_idempotency_key: input.idempotencyKey,
-          p_request_hash: input.requestHash,
-          p_request_id: input.requestId,
-        },
-      );
-      throwRpcError(error, status);
-      return mutationResult(data, experimentDto);
-    },
-
-    async patchExperiment(input: PatchExperimentInput): Promise<
-      MutationResult<ExperimentMutationDto>
-    > {
-      const { data, error, status } = await client.rpc(
-        "agent_api_patch_experiment",
-        {
-          p_api_key_id: input.context.apiKeyId,
-          p_member_id: input.context.memberId,
-          p_experiment_id: input.experimentId,
-          p_expected_updated_at: input.expectedUpdatedAt,
-          p_changes: input.changes,
-          p_request_id: input.requestId,
-        },
-      );
-      throwRpcError(error, status);
-      return mutationResult(data, experimentDto);
-    },
-
     async createActivity(input: CreateActivityInput): Promise<
       MutationResult<ActivityMutationDto>
     > {
@@ -587,7 +401,137 @@ export function createMutationRepository(client: SupabaseClient) {
       throwRpcError(error, status);
       return mutationResult(data, attachmentDto);
     },
+
+    async patchExperimentValue(
+      input: PatchExperimentValueInput,
+    ): Promise<PatchExperimentValueResult> {
+      const { data, error, status } = await client.rpc(
+        "save_experiment_value",
+        {
+          p_experiment_id: input.experimentId,
+          p_key_id: input.keyId,
+          p_expected_cell_revision: input.expectedCellRevision,
+          p_value: input.value,
+          p_edit_session_id: input.editSessionId,
+        },
+      );
+      if (error) throwTemplateRpcError(error, status);
+      return data as PatchExperimentValueResult;
+    },
+
+    async archiveExperiment(
+      experimentId: string,
+    ): Promise<{ status: "ok"; version_no: number }> {
+      const { data, error, status } = await client.rpc(
+        "archive_experiment",
+        { p_experiment_id: experimentId },
+      );
+      if (error) throwTemplateRpcError(error, status);
+      return data;
+    },
+
+    async unarchiveExperiment(
+      experimentId: string,
+    ): Promise<{ status: "ok"; version_no: number }> {
+      const { data, error, status } = await client.rpc(
+        "unarchive_experiment",
+        { p_experiment_id: experimentId },
+      );
+      if (error) throwTemplateRpcError(error, status);
+      return data;
+    },
+
+    async restoreExperimentVersion(
+      experimentId: string,
+      versionNo: number,
+    ): Promise<{ status: "ok"; version_no: number; core_revision: number }> {
+      const { data, error, status } = await client.rpc(
+        "restore_experiment_version",
+        { p_experiment_id: experimentId, p_version_no: versionNo },
+      );
+      if (error) throwTemplateRpcError(error, status);
+      return data;
+    },
+
+    async createTemplateExperiment(
+      input: TemplateExperimentCreateInput,
+    ): Promise<Record<string, unknown>> {
+      const { data, error } = await client
+        .from("experiments")
+        .insert({
+          task_id: input.task_id,
+          template_id: input.template_id,
+          owner_id: input.owner_id,
+          name: input.name.trim(),
+          status: "planned",
+          position: 0,
+        })
+        .select("*")
+        .single();
+      if (error) throw new Error(error.message);
+      const created = data as Record<string, unknown>;
+      for (const [keyId, typed] of Object.entries(input.values ?? {})) {
+        await this.patchExperimentValue({
+          experimentId: created.id as string,
+          keyId,
+          expectedCellRevision: 0,
+          value: typed,
+          editSessionId: "00000000-0000-4000-8000-000000000001",
+        });
+      }
+      return created;
+    },
   };
+}
+
+export interface PatchExperimentValueInput {
+  experimentId: string;
+  keyId: string;
+  expectedCellRevision: number;
+  value: unknown;
+  editSessionId: string;
+}
+
+export type PatchExperimentValueResult =
+  | { status: "ok"; cell_revision: number; version_no: number }
+  | { status: "conflict"; remote: unknown; remote_cell_revision: number };
+
+export interface TemplateExperimentCreateInput {
+  task_id: string;
+  template_id: string;
+  name: string;
+  owner_id: string | null;
+  values?: Record<string, unknown>;
+}
+
+const TEMPLATE_RPC_CODES: Record<string, [number, string]> = {
+  EXPERIMENT_ARCHIVED: [409, "EXPERIMENT_ARCHIVED"],
+  TEMPLATE_ARCHIVED: [409, "TEMPLATE_ARCHIVED"],
+  KEY_ARCHIVED: [409, "KEY_ARCHIVED"],
+  KEY_NOT_FOUND: [404, "KEY_NOT_FOUND"],
+  OPTION_INVALID: [422, "OPTION_INVALID"],
+  VALUE_TYPE_MISMATCH: [422, "VALUE_TYPE_MISMATCH"],
+  NUMBER_NOT_FINITE: [422, "NUMBER_NOT_FINITE"],
+  URL_REQUIRED: [422, "URL_REQUIRED"],
+  DATETIME_REQUIRED: [422, "DATETIME_REQUIRED"],
+  REQUIRED_VALUES_MISSING: [422, "REQUIRED_VALUES_MISSING"],
+  EXPERIMENT_NOT_FOUND: [404, "EXPERIMENT_NOT_FOUND"],
+  VERSION_NOT_FOUND: [404, "VERSION_NOT_FOUND"],
+  EXPERIMENT_ALREADY_ARCHIVED: [409, "EXPERIMENT_ALREADY_ARCHIVED"],
+  EXPERIMENT_NOT_ARCHIVED: [409, "EXPERIMENT_NOT_ARCHIVED"],
+};
+
+function throwTemplateRpcError(error: unknown, _status: unknown): never {
+  const message = isRecord(error) && typeof error.message === "string"
+    ? error.message
+    : "";
+  const match = Object.entries(TEMPLATE_RPC_CODES).find(
+    ([code]) => message.includes(code),
+  );
+  if (match) {
+    throw new AgentApiError(match[1][0], match[1][1], message);
+  }
+  throw new AgentApiError(500, "TEMPLATE_MUTATION_FAILED", message || "Mutation failed.", true);
 }
 
 function repository() {
@@ -600,19 +544,13 @@ export function patchTask(
   return repository().patchTask(input);
 }
 
-export function createExperiment(
-  input: CreateExperimentInput,
-): Promise<MutationResult<ExperimentMutationDto>> {
-  return repository().createExperiment(input);
-}
-
-export function patchExperiment(
-  input: PatchExperimentInput,
-): Promise<MutationResult<ExperimentMutationDto>> {
-  return repository().patchExperiment(input);
-}
-
 export function createActivity(
+  input: CreateActivityInput,
+): Promise<MutationResult<ActivityMutationDto>> {
+  return repository().createActivity(input);
+}
+
+export function createExperiment(
   input: CreateActivityInput,
 ): Promise<MutationResult<ActivityMutationDto>> {
   return repository().createActivity(input);
@@ -628,4 +566,35 @@ export function patchAttachment(
   input: PatchAttachmentInput,
 ): Promise<MutationResult<AttachmentMutationDto>> {
   return repository().patchAttachment(input);
+}
+
+export function patchExperimentValue(
+  input: PatchExperimentValueInput,
+): Promise<PatchExperimentValueResult> {
+  return repository().patchExperimentValue(input);
+}
+
+export function archiveExperiment(
+  experimentId: string,
+): Promise<{ status: "ok"; version_no: number }> {
+  return repository().archiveExperiment(experimentId);
+}
+
+export function unarchiveExperiment(
+  experimentId: string,
+): Promise<{ status: "ok"; version_no: number }> {
+  return repository().unarchiveExperiment(experimentId);
+}
+
+export function restoreExperimentVersion(
+  experimentId: string,
+  versionNo: number,
+): Promise<{ status: "ok"; version_no: number; core_revision: number }> {
+  return repository().restoreExperimentVersion(experimentId, versionNo);
+}
+
+export function createTemplateExperiment(
+  input: TemplateExperimentCreateInput,
+): Promise<Record<string, unknown>> {
+  return repository().createTemplateExperiment(input);
 }

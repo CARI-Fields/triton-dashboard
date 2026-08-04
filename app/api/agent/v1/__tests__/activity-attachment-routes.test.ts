@@ -132,6 +132,8 @@ function attachment(
     path,
     caption: "Profile",
     position: 0,
+    template_key_id: null,
+    archived_at: null,
     created_at: OLD_ETAG,
     updated_at: UPDATED_AT,
   };

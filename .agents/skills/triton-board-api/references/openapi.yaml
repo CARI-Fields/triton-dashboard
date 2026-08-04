@@ -19,6 +19,111 @@ tags:
   - name: Attachments
   - name: Audit
 paths:
+  /templates:
+    get:
+      tags: [Templates]
+      operationId: listTemplates
+      summary: List Experiment Templates.
+      x-required-scope: board:read
+      responses:
+        "200":
+          description: Template summaries.
+  /templates/{id}:
+    get:
+      tags: [Templates]
+      operationId: getTemplateSchema
+      summary: Get one ordered Template schema.
+      x-required-scope: board:read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Ordered Fields, Keys, and options.
+        "404":
+          description: Template not found.
+  /templates/{id}/compare:
+    get:
+      tags: [Templates]
+      operationId: getTemplateCompareSource
+      summary: Compare source rows for one Template.
+      x-required-scope: board:read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: archived, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Experiments with typed Values.
+  /experiments/{id}/values:
+    patch:
+      tags: [Experiments]
+      operationId: patchExperimentValue
+      summary: Patch one typed Value by stable key_id.
+      x-required-scope: experiments:write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, expected_cell_revision]
+              properties:
+                key_id: { type: string, format: uuid }
+                expected_cell_revision: { type: integer, minimum: 0 }
+                value: { type: object, nullable: true }
+      responses:
+        "200":
+          description: Saved Value.
+        "409":
+          description: Cell revision conflict; response includes remote.
+  /experiments/{id}/archive:
+    post:
+      tags: [Experiments]
+      operationId: archiveExperiment
+      summary: Archive an Experiment (Required Values gate).
+      x-required-scope: experiments:write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Archived.
+        "422":
+          description: Required Values missing.
+  /experiments/{id}/unarchive:
+    post:
+      tags: [Experiments]
+      operationId: unarchiveExperiment
+      summary: Unarchive an Experiment.
+      x-required-scope: experiments:write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Unarchived.
+  /experiments/{id}/versions:
+    get:
+      tags: [Experiments]
+      operationId: listExperimentVersions
+      summary: List Experiment versions.
+      x-required-scope: board:read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Versions.
+  /experiments/{id}/versions/{versionNo}/restore:
+    post:
+      tags: [Experiments]
+      operationId: restoreExperimentVersion
+      summary: Restore a version as a new forward mutation.
+      x-required-scope: experiments:write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: versionNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Restored.
   /capabilities:
     get:
       tags: [Discovery]
@@ -273,8 +378,9 @@ paths:
       operationId: createTaskExperiment
       summary: Create a planned Experiment under one Task.
       description: |
-        The body accepts only name. The URL supplies task_id; the server fixes
-        owner_id to the Key's Member and status to planned.
+        The body requires template_id and name; owner_id is optional and
+        values is an optional map of typed Values keyed by stable key_id.
+        The server fixes status to planned.
       x-required-scope: experiments:write
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -283,7 +389,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ExperimentCreate"
+              type: object
+              required: [template_id, name]
+              additionalProperties: false
+              properties:
+                template_id: { type: string, format: uuid }
+                name: { type: string, minLength: 1, maxLength: 200 }
+                owner_id: { type: string, format: uuid, nullable: true }
+                values:
+                  type: object
+                  additionalProperties: true
       responses:
         "200":
           description: Idempotent replay of the original result.
@@ -373,50 +488,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
-    patch:
-      tags: [Experiments]
-      operationId: patchExperiment
-      summary: Apply a minimal Experiment field change.
-      description: |
-        Requires collaboration on the parent Task. Workflow and same-Task
-        baseline constraints are validated before the atomic mutation.
-      x-required-scope: experiments:write
-      parameters:
-        - $ref: "#/components/parameters/IfMatch"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ExperimentPatchEnvelope"
-      responses:
-        "200":
-          description: Updated Experiment mutation DTO.
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExperimentMutationSuccess"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "412":
-          $ref: "#/components/responses/VersionConflict"
-        "413":
-          $ref: "#/components/responses/BodyTooLarge"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
-        "429":
-          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
   /experiments/{id}/attachments:
@@ -745,11 +816,6 @@ components:
     ExperimentStatus:
       type: string
       enum: [planned, running, analyzing, completed, blocked, cancelled]
-    DecisionOutcome:
-      oneOf:
-        - type: string
-          enum: [reference, accepted, rejected, inconclusive]
-        - type: "null"
     Scope:
       type: string
       enum:
@@ -963,94 +1029,6 @@ components:
               $ref: "#/components/schemas/NullableDateOnly"
             position:
               type: number
-    DatasetSpec:
-      type: object
-      additionalProperties: false
-      required: [role, name, split, revision, task_count, samples_per_task]
-      properties:
-        role:
-          type: string
-          enum: [training, evaluation]
-        name:
-          type: string
-        split:
-          type: string
-        revision:
-          type: string
-        task_count:
-          oneOf:
-            - type: number
-            - type: "null"
-        samples_per_task:
-          oneOf:
-            - type: number
-            - type: "null"
-    DataSpec:
-      type: object
-      additionalProperties: false
-      required: [datasets]
-      properties:
-        datasets:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetSpec"
-    ObjectSpec:
-      type: object
-      additionalProperties: false
-      required: [model, harness, parent_harness, prompt, prompt_change, skills, tools]
-      properties:
-        model:
-          type: string
-        harness:
-          type: string
-        parent_harness:
-          type: string
-        prompt:
-          type: string
-        prompt_change:
-          type: string
-        skills:
-          type: array
-          items:
-            type: string
-        tools:
-          type: array
-          items:
-            type: string
-    EnvironmentSpec:
-      type: object
-      additionalProperties: false
-      required: [platform, server, devices, hardware, evaluator, revision, precision_policy]
-      properties:
-        platform:
-          type: string
-          enum: ["", npu, gpu]
-        server:
-          type: string
-        devices:
-          type: array
-          items:
-            type: string
-        hardware:
-          type: string
-        evaluator:
-          type: string
-        revision:
-          type: string
-        precision_policy:
-          type: string
-    Config:
-      type: object
-      additionalProperties:
-        oneOf:
-          - type: string
-          - type: number
-          - type: boolean
-          - type: "null"
-    Metrics:
-      type: object
-      additionalProperties:
-        type: number
     Experiment:
       type: object
       required:
@@ -1060,17 +1038,9 @@ components:
         - owner_id
         - name
         - status
-        - baseline_experiment_id
-        - data_spec
-        - object_spec
-        - environment_spec
-        - config
-        - notes
-        - metrics
-        - featured_metric_keys
-        - result_summary
-        - decision_outcome
-        - decision_notes
+        - template_id
+        - archived_at
+        - core_revision
         - position
         - started_at
         - completed_at
@@ -1089,30 +1059,12 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/ExperimentStatus"
-        baseline_experiment_id:
+        template_id:
           $ref: "#/components/schemas/NullableUuid"
-        data_spec:
-          $ref: "#/components/schemas/DataSpec"
-        object_spec:
-          $ref: "#/components/schemas/ObjectSpec"
-        environment_spec:
-          $ref: "#/components/schemas/EnvironmentSpec"
-        config:
-          $ref: "#/components/schemas/Config"
-        notes:
-          type: string
-        metrics:
-          $ref: "#/components/schemas/Metrics"
-        featured_metric_keys:
-          type: array
-          items:
-            type: string
-        result_summary:
-          type: string
-        decision_outcome:
-          $ref: "#/components/schemas/DecisionOutcome"
-        decision_notes:
-          type: string
+        archived_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        core_revision:
+          type: number
         position:
           type: number
         started_at:
@@ -1168,55 +1120,6 @@ components:
               items:
                 $ref: "#/components/schemas/Attachment"
       unevaluatedProperties: false
-    ExperimentPatchEnvelope:
-      type: object
-      additionalProperties: false
-      required: [changes]
-      properties:
-        changes:
-          type: object
-          additionalProperties: false
-          minProperties: 1
-          properties:
-            name:
-              type: string
-              description: The server trims whitespace; the result must contain 1 through 200 characters.
-            status:
-              $ref: "#/components/schemas/ExperimentStatus"
-            baseline_experiment_id:
-              $ref: "#/components/schemas/NullableUuid"
-            data_spec:
-              $ref: "#/components/schemas/DataSpec"
-            object_spec:
-              $ref: "#/components/schemas/ObjectSpec"
-            environment_spec:
-              $ref: "#/components/schemas/EnvironmentSpec"
-            config:
-              $ref: "#/components/schemas/Config"
-            notes:
-              type: string
-            metrics:
-              $ref: "#/components/schemas/Metrics"
-            featured_metric_keys:
-              type: array
-              items:
-                type: string
-            result_summary:
-              type: string
-            decision_outcome:
-              $ref: "#/components/schemas/DecisionOutcome"
-            decision_notes:
-              type: string
-            position:
-              type: number
-    ExperimentCreate:
-      type: object
-      additionalProperties: false
-      required: [name]
-      properties:
-        name:
-          type: string
-          description: The server trims whitespace; the result must contain 1 through 200 characters.
     Activity:
       type: object
       additionalProperties: false
@@ -1342,17 +1245,9 @@ components:
         - owner_id
         - name
         - status
-        - baseline_experiment_id
-        - data_spec
-        - object_spec
-        - environment_spec
-        - config
-        - notes
-        - metrics
-        - featured_metric_keys
-        - result_summary
-        - decision_outcome
-        - decision_notes
+        - template_id
+        - archived_at
+        - core_revision
         - position
         - started_at
         - completed_at
@@ -1371,35 +1266,12 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/ExperimentStatus"
-        baseline_experiment_id:
+        template_id:
           $ref: "#/components/schemas/NullableUuid"
-        data_spec:
-          type: object
-          additionalProperties: true
-        object_spec:
-          type: object
-          additionalProperties: true
-        environment_spec:
-          type: object
-          additionalProperties: true
-        config:
-          type: object
-          additionalProperties: true
-        notes:
-          type: string
-        metrics:
-          type: object
-          additionalProperties: true
-        featured_metric_keys:
-          type: array
-          items:
-            type: string
-        result_summary:
-          type: string
-        decision_outcome:
-          $ref: "#/components/schemas/DecisionOutcome"
-        decision_notes:
-          type: string
+        archived_at:
+          $ref: "#/components/schemas/NullableTimestamp"
+        core_revision:
+          type: number
         position:
           type: number
         started_at:

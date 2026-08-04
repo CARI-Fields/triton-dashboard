@@ -1,15 +1,6 @@
 import { AgentApiError } from "@/lib/agent-api/errors";
-import {
-  isConfig,
-  isDataSpec,
-  isEnvironmentSpec,
-  isMetrics,
-  isObjectSpec,
-} from "@/lib/experiments/schema";
 import { isDateOnly } from "@/lib/agent-api/timestamps";
 import type {
-  DecisionOutcome,
-  Experiment,
   ExperimentStatus,
   Status,
   Task,
@@ -28,20 +19,6 @@ const TASK_PRIORITIES = new Set<TaskPriority>([
   "medium",
   "high",
   "urgent",
-]);
-const EXPERIMENT_STATUSES = new Set<ExperimentStatus>([
-  "planned",
-  "running",
-  "analyzing",
-  "completed",
-  "blocked",
-  "cancelled",
-]);
-const DECISION_OUTCOMES = new Set<DecisionOutcome>([
-  "reference",
-  "accepted",
-  "rejected",
-  "inconclusive",
 ]);
 const DATA_SPEC_FIELDS = new Set(["datasets"]);
 const DATASET_FIELDS = new Set([
@@ -89,36 +66,6 @@ const TASK_PROTECTED_FIELDS = new Set([
   "updated_at",
 ]);
 
-const EXPERIMENT_WRITABLE_FIELDS = new Set([
-  "name",
-  "status",
-  "baseline_experiment_id",
-  "data_spec",
-  "object_spec",
-  "environment_spec",
-  "config",
-  "notes",
-  "metrics",
-  "featured_metric_keys",
-  "result_summary",
-  "decision_outcome",
-  "decision_notes",
-  "position",
-]);
-const EXPERIMENT_PROTECTED_FIELDS = new Set([
-  "id",
-  "experiment_no",
-  "task_id",
-  "owner_id",
-  "started_at",
-  "completed_at",
-  "created_at",
-  "updated_at",
-]);
-const EXPERIMENT_DECLARED_FIELDS = new Set([
-  ...EXPERIMENT_WRITABLE_FIELDS,
-  ...EXPERIMENT_PROTECTED_FIELDS,
-]);
 const ACTIVITY_PROTECTED_FIELDS = new Set([
   "id",
   "task_id",
@@ -159,34 +106,6 @@ export type TaskPatch = Partial<
     | "position"
   >
 >;
-
-export type ExperimentPatch = Partial<
-  Pick<
-    Experiment,
-    | "name"
-    | "status"
-    | "baseline_experiment_id"
-    | "data_spec"
-    | "object_spec"
-    | "environment_spec"
-    | "config"
-    | "notes"
-    | "metrics"
-    | "featured_metric_keys"
-    | "result_summary"
-    | "decision_outcome"
-    | "decision_notes"
-    | "position"
-  >
->;
-
-export interface ExperimentCreate {
-  name: string;
-}
-
-export interface ActivityCreate {
-  text: string;
-}
 
 export interface AttachmentPatch {
   caption: string;
@@ -343,6 +262,66 @@ function cloneJsonField<T>(field: string, value: T): T {
   }
 }
 
+export interface ValuePatch {
+  key_id: string;
+  expected_cell_revision: number;
+  value: unknown;
+}
+
+const TYPED_VALUE_KINDS = new Set([
+  "short_text", "long_text", "number", "boolean", "date_time", "url",
+  "single_select", "multi_select", "attachment",
+]);
+
+export function parseValuePatch(body: unknown): ValuePatch {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    invalidBody("Value patch body must be a JSON object.");
+  }
+  const record = body as Record<string, unknown>;
+  const keyId = record.key_id;
+  if (typeof keyId !== "string" || !isUuid(keyId)) {
+    invalidField("key_id");
+  }
+  const revision = record.expected_cell_revision;
+  if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 0) {
+    invalidField("expected_cell_revision");
+  }
+  if (
+    record.value !== null
+    && (typeof record.value !== "object" || Array.isArray(record.value))
+  ) {
+    invalidField("value");
+  }
+  const typed = record.value as Record<string, unknown> | null;
+  if (
+    typed
+    && (typeof typed.kind !== "string" || !TYPED_VALUE_KINDS.has(typed.kind))
+  ) {
+    invalidField("value.kind");
+  }
+  return {
+    key_id: keyId,
+    expected_cell_revision: revision,
+    value: typed,
+  };
+}
+
+export function parseVersionNumber(raw: string): number {
+  const versionNo = Number(raw);
+  if (!Number.isInteger(versionNo) || versionNo < 1) {
+    throw new AgentApiError(
+      400,
+      "INVALID_VERSION",
+      "versionNo must be a positive integer.",
+    );
+  }
+  return versionNo;
+}
+
+export interface ActivityCreate {
+  text: string;
+}
+
 function validateFieldName(
   field: string,
   writable: ReadonlySet<string>,
@@ -473,167 +452,6 @@ export function parseTaskPatch(body: unknown): TaskPatch {
     return invalidBody("PATCH body must contain only finite JSON numbers.");
   }
   return parsed;
-}
-
-export function parseExperimentPatch(body: unknown): ExperimentPatch {
-  const jsonDomainIssue = inspectJsonDomain(body);
-  if (jsonDomainIssue === "invalid_shape") {
-    return invalidBody("PATCH body must contain only JSON values.");
-  }
-  const changes = parsePatchEnvelope(body);
-  const parsed: ExperimentPatch = {};
-
-  for (const [field, value] of Object.entries(changes)) {
-    validateFieldName(
-      field,
-      EXPERIMENT_WRITABLE_FIELDS,
-      EXPERIMENT_PROTECTED_FIELDS,
-    );
-    switch (field) {
-      case "name":
-        if (typeof value !== "string") invalidField(field);
-        parsed.name = value.trim();
-        if (parsed.name.length < 1 || parsed.name.length > 200) {
-          invalidField(field);
-        }
-        break;
-      case "status":
-        if (
-          typeof value !== "string"
-          || !EXPERIMENT_STATUSES.has(value as ExperimentStatus)
-        ) {
-          invalidField(field);
-        }
-        parsed.status = value as ExperimentStatus;
-        break;
-      case "baseline_experiment_id":
-        if (value !== null && !isUuid(value)) invalidField(field);
-        parsed.baseline_experiment_id = value;
-        break;
-      case "data_spec":
-        if (
-          !isDataSpec(value)
-          || !hasOnlyFields(value, DATA_SPEC_FIELDS)
-          || !value.datasets.every(
-            (dataset) => hasOnlyFields(dataset, DATASET_FIELDS),
-          )
-        ) {
-          invalidField(field);
-        }
-        parsed.data_spec = cloneJsonField(field, value);
-        break;
-      case "object_spec":
-        if (
-          !isObjectSpec(value)
-          || !hasOnlyFields(value, OBJECT_SPEC_FIELDS)
-        ) {
-          invalidField(field);
-        }
-        parsed.object_spec = cloneJsonField(field, value);
-        break;
-      case "environment_spec":
-        if (
-          !isEnvironmentSpec(value)
-          || !hasOnlyFields(value, ENVIRONMENT_SPEC_FIELDS)
-        ) {
-          invalidField(field);
-        }
-        parsed.environment_spec = cloneJsonField(field, value);
-        break;
-      case "config":
-        if (!isConfig(value)) invalidField(field);
-        parsed.config = cloneJsonField(field, value);
-        break;
-      case "notes":
-        if (typeof value !== "string") invalidField(field);
-        parsed.notes = value;
-        break;
-      case "metrics":
-        if (!isMetrics(value)) invalidField(field);
-        parsed.metrics = cloneJsonField(field, value);
-        break;
-      case "featured_metric_keys":
-        if (!isStringArray(value)) invalidField(field);
-        parsed.featured_metric_keys = [...value];
-        break;
-      case "result_summary":
-        if (typeof value !== "string") invalidField(field);
-        parsed.result_summary = value;
-        break;
-      case "decision_outcome":
-        if (
-          value !== null
-          && (
-            typeof value !== "string"
-            || !DECISION_OUTCOMES.has(value as DecisionOutcome)
-          )
-        ) {
-          invalidField(field);
-        }
-        parsed.decision_outcome = value as DecisionOutcome | null;
-        break;
-      case "decision_notes":
-        if (typeof value !== "string") invalidField(field);
-        parsed.decision_notes = value;
-        break;
-      case "position":
-        if (typeof value !== "number" || !Number.isFinite(value)) {
-          invalidField(field);
-        }
-        parsed.position = value;
-        break;
-    }
-  }
-  if (jsonDomainIssue !== null) {
-    return invalidBody("PATCH body must contain only finite JSON numbers.");
-  }
-  return parsed;
-}
-
-export function parseExperimentCreate(body: unknown): ExperimentCreate {
-  const jsonDomainIssue = inspectJsonDomain(body);
-  if (jsonDomainIssue === "invalid_shape") {
-    return invalidBody(
-      "Experiment create body must contain only JSON values.",
-    );
-  }
-  if (!isRecord(body)) {
-    return invalidBody("Experiment create body must be a JSON object.");
-  }
-
-  for (const field of Object.keys(body)) {
-    if (field === "name") continue;
-    if (EXPERIMENT_DECLARED_FIELDS.has(field)) {
-      throw new AgentApiError(
-        422,
-        "FIELD_NOT_WRITABLE",
-        `${field} cannot be set when creating an Experiment.`,
-        false,
-        { field },
-      );
-    }
-    throw new AgentApiError(
-      422,
-      "UNKNOWN_FIELD",
-      `${field} is not a recognized field.`,
-      false,
-      { field },
-    );
-  }
-
-  if (Object.keys(body).length !== 1 || typeof body.name !== "string") {
-    return invalidField("name");
-  }
-  const name = body.name.trim();
-  if (name.length < 1 || name.length > 200) {
-    return invalidField("name");
-  }
-  if (jsonDomainIssue !== null) {
-    return invalidBody(
-      "Experiment create body must contain only finite JSON numbers.",
-    );
-  }
-  return { name };
 }
 
 export function parseActivityCreate(body: unknown): ActivityCreate {

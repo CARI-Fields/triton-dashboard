@@ -316,7 +316,8 @@ describe("Triton Board API skill artifacts", () => {
     const skill = readFileSync(skillPath, "utf8");
     expect(skill).toContain("matching operation recipe");
     expect(skill).toContain("For GET/read:");
-    expect(skill).toContain("For Task or Experiment PATCH:");
+    expect(skill).toContain("For Task PATCH:");
+    expect(skill).toContain("For Experiment Value PATCH:");
     expect(skill).toContain("For Attachment PATCH:");
     expect(skill).toContain("For POST:");
     const attachmentPatch = skill.slice(
@@ -393,10 +394,17 @@ describe("Triton Board API skill artifacts", () => {
       createTaskExperiment: ["200", "201", "400", "401", "403", "409", "413", "422", "429", "500"],
       listExperiments: ["200", "400", "401", "403", "500"],
       getExperiment: ["200", "400", "401", "403", "404", "500"],
-      patchExperiment: ["200", "400", "401", "403", "404", "412", "413", "422", "429", "500"],
       createExperimentAttachment: ["200", "201", "400", "401", "403", "404", "409", "422", "429", "500"],
       patchAttachment: ["200", "400", "401", "403", "404", "412", "413", "422", "429", "500"],
       listAudit: ["200", "400", "401", "403", "500"],
+      listTemplates: ["200"],
+      getTemplateSchema: ["200", "404"],
+      getTemplateCompareSource: ["200"],
+      patchExperimentValue: ["200", "409"],
+      archiveExperiment: ["200", "422"],
+      unarchiveExperiment: ["200"],
+      listExperimentVersions: ["200"],
+      restoreExperimentVersion: ["200"],
     };
     const scopeMatrix: Record<string, string | null> = {
       getCapabilities: null,
@@ -411,16 +419,23 @@ describe("Triton Board API skill artifacts", () => {
       createTaskExperiment: "experiments:write",
       listExperiments: "board:read",
       getExperiment: "board:read",
-      patchExperiment: "experiments:write",
       createExperimentAttachment: "attachments:write",
       patchAttachment: "attachments:write",
       listAudit: "audit:read",
+      listTemplates: "board:read",
+      getTemplateSchema: "board:read",
+      getTemplateCompareSource: "board:read",
+      patchExperimentValue: "experiments:write",
+      archiveExperiment: "experiments:write",
+      unarchiveExperiment: "experiments:write",
+      listExperimentVersions: "board:read",
+      restoreExperimentVersion: "experiments:write",
     };
 
-    expect(new Set(operations.map(({ path }) => path)).size).toBe(13);
-    expect(operations).toHaveLength(16);
+    expect(new Set(operations.map(({ path }) => path)).size).toBe(21);
+    expect(operations).toHaveLength(23);
     expect(new Set(operations.map(({ operationId }) => operationId)).size)
-      .toBe(16);
+      .toBe(23);
     expect(Object.keys(byOperation).sort()).toEqual(
       Object.keys(responseMatrix).sort(),
     );
@@ -615,17 +630,9 @@ describe("Triton Board API skill artifacts", () => {
         "owner_id",
         "name",
         "status",
-        "baseline_experiment_id",
-        "data_spec",
-        "object_spec",
-        "environment_spec",
-        "config",
-        "notes",
-        "metrics",
-        "featured_metric_keys",
-        "result_summary",
-        "decision_outcome",
-        "decision_notes",
+        "template_id",
+        "archived_at",
+        "core_revision",
         "position",
         "started_at",
         "completed_at",
@@ -738,6 +745,17 @@ describe("Triton Board API skill artifacts", () => {
       display_name: "Triton Board API",
       short_description: "Safely inspect and update Triton Board data",
     });
+  });
+
+  it("documents the template-aware endpoints", () => {
+    const openapi = readFileSync(openapiPath, "utf8");
+    expect(openapi).toContain("operationId: listTemplates");
+    expect(openapi).toContain("operationId: getTemplateSchema");
+    expect(openapi).toContain("/templates/{id}/compare");
+    expect(openapi).toContain("operationId: patchExperimentValue");
+    expect(openapi).toContain("/experiments/{id}/archive");
+    expect(openapi).toContain("/experiments/{id}/unarchive");
+    expect(openapi).toContain("operationId: restoreExperimentVersion");
   });
 
 });

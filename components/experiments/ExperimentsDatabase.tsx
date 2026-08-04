@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ExperimentListRow, Member, Task } from "@/lib/types";
@@ -87,6 +88,9 @@ export default function ExperimentsDatabase() {
         description="Manual run context, evidence, and decisions across every Task."
         actions={(
           <>
+            <Link className="btn ghost" href="/experiments/templates">
+              Templates
+            </Link>
             <button type="button" className="btn primary" onClick={() => setCreateOpen(true)}>
               New experiment
             </button>

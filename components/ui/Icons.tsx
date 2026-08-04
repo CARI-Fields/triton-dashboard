@@ -4,6 +4,7 @@ export type IconName =
   | "board"
   | "experiment"
   | "compare"
+  | "template"
   | "activity"
   | "analytics"
   | "key"
@@ -36,6 +37,12 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   compare: (
     <>
       <path d="M4 7h14M15 4l3 3-3 3M20 17H6M9 14l-3 3 3 3" />
+    </>
+  ),
+  template: (
+    <>
+      <rect x="3.5" y="4" width="17" height="16" rx="1.5" />
+      <path d="M3.5 9h17M9 9v11" />
     </>
   ),
   activity: (

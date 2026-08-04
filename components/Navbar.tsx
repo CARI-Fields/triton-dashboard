@@ -45,6 +45,15 @@ const NAV_ITEMS: NavigationItem[] = [
     ),
     children: [
       {
+        href: "/experiments/templates",
+        label: "Templates",
+        icon: "template",
+        active: (pathname: string) => (
+          pathname === "/experiments/templates"
+          || pathname.startsWith("/experiments/templates/")
+        ),
+      },
+      {
         href: "/experiments/compare",
         label: "Compare",
         icon: "compare",

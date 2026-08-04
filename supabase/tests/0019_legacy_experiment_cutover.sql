@@ -103,14 +103,14 @@ select is(
 );
 
 update public.experiments
-set config = '{"block": 256}'::jsonb
+set name = 'Renamed'
 where id = '60000000-0000-4000-8000-000000000001';
 select is(
   (select count(*)::int from public.activity
    where experiment_id = '60000000-0000-4000-8000-000000000001'
      and kind = 'edit'),
   0,
-  'legacy content edits no longer append Activity rows'
+  'non-lifecycle field edits do not append Activity rows'
 );
 
 update public.experiments

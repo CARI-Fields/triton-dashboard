@@ -1764,3 +1764,12 @@ git commit -m "feat(ui): add primitives barrel and finalize foundation"
 - **Placeholder scan:** none; every code step has real code.
 - **Type consistency:** `Status`/`ExperimentStatus`/`DecisionOutcome` from `@/lib/types`; `Intent`/`ButtonProps`/`BreadcrumbProps`/`TagProps` from `@blueprintjs/core`; `DataTableColumn<T>` consistent across definition + tests; `SaveState = "saved"|"unsaved"|"conflict"`.
 - **Known follow-ups for later plans:** add Templates + API keys entries to `NAV_ITEMS` (Plans 4/6); retire `globals.css`/`experiment-workspace.css` rules per-screen (Plans 2–5).
+
+## Deferred follow-ups (from Plan 1 final review — carry into later plans)
+
+These are non-blocking items the final whole-branch review surfaced; each has a clear trigger in a later plan:
+
+- **`*-soft` token aliases (Plan 2–5):** `app/blueprint-tokens.css` omits `--warn-soft`/`--good-soft`/`--crit-soft`/`--todo-soft`. Dormant now (`globals.css :root` still defines them and wins). When a later plan strips `globals.css`'s `:root`, it MUST add these aliases or `.pill.*`/`.dot.*`/soft-background rules lose their colors.
+- **`SaveBar` conflict state (Plan 3):** `components/ui/Feedback.tsx` `SaveBar` renders both a "Discard" and a "Load latest" button in the `conflict` state, both bound to `onDiscard`. Add an `onLoadLatest?: () => void` prop and bind "Load latest" to it when Plan 3 consumes SaveBar for experiment-detail conflict handling.
+- **Dead `.logout-btn` CSS + test (Plan 2–5):** logout moved into `SidebarNav` (Blueprint `Button`), so the `.logout-btn` rules in `globals.css` and the `.logout-btn` assertion in `app/__tests__/workspace-styles.test.ts` are dead. Retire them alongside the per-screen `globals.css` cleanup.
+- **Optional — `experimentStatusIntent` named cases:** `components/ui/Tag.tsx` falls through to `default: "none"` for `planned`/`cancelled`. Add named cases if/when those statuses get distinct UI meaning.

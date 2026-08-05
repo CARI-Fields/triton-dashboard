@@ -1,1 +1,21 @@
-/* Blueprint design tokens — populated in Task 4. */
+/* Blueprint design tokens — semantic aliases (Light).
+   These map the project's legacy semantic tokens onto Blueprint's --bp-*
+   variables so legacy CSS continues to render during the migration. */
+:root {
+  --ground: var(--bp-typography-color-background, #f6f7f9);
+  --paper: #ffffff;
+  --ink: var(--bp-typography-color-text, #1c2127);
+  --ink-soft: var(--bp-typography-color-text-muted, #5f6b7c);
+  --line: rgba(92, 112, 128, 0.2);
+  --line-strong: rgba(92, 112, 128, 0.45);
+  --accent: var(--bp-typography-color-primary-rest, #2d72d2);
+  --accent-hover: var(--bp-typography-color-primary-hover, #215db0);
+  --accent-soft: rgba(45, 114, 210, 0.15);
+  --found-bg: #edeff2;
+  --todo: var(--bp-typography-color-text-disabled, #5f6b7c);
+  --warn: var(--bp-intent-warning, #c87619);
+  --good: var(--bp-intent-success, #238551);
+  --crit: var(--bp-intent-danger, #cd4246);
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+  --sans: var(--bp-typography-font-family, -apple-system, "Segoe UI", Roboto, sans-serif);
+}

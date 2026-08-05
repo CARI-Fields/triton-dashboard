@@ -74,6 +74,7 @@ button { font-family: inherit; }
   letter-spacing: .04em; text-transform: uppercase;
 }
 .nav-btn {
+  display: flex; align-items: center; gap: 6px;
   padding: 7px 9px; border-radius: 5px; color: #5f5e5b;
   font-size: 13.5px; text-decoration: none;
 }

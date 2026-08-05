@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
-import Navbar from "@/components/Navbar";
+import "@blueprintjs/core/lib/css/blueprint.css";
+import "./blueprint-tokens.css";
 import "./globals.css";
 import "./experiment-workspace.css";
+import { BlueprintProvider } from "@/components/shell/BlueprintProvider";
+import { AppShell } from "@/components/shell/AppShell";
 
 export const metadata: Metadata = {
   title: "Triton Board — Team Experiment Workspace",
@@ -16,10 +19,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div className="app-shell">
-          <Navbar />
-          <main className="app-content">{children}</main>
-        </div>
+        <BlueprintProvider>
+          <AppShell>{children}</AppShell>
+        </BlueprintProvider>
       </body>
     </html>
   );

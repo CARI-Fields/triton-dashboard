@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 const root = resolve(__dirname, "../..");
 const globals = readFileSync(resolve(root, "app/globals.css"), "utf8");
 const layout = readFileSync(resolve(root, "app/layout.tsx"), "utf8");
+const appShell = readFileSync(
+  resolve(root, "components/shell/AppShell.tsx"),
+  "utf8",
+);
 const workspacePath = resolve(root, "app/experiment-workspace.css");
 
 function workspaceCss(): string {
@@ -29,9 +33,11 @@ function mediaBody(css: string, width: number): string {
 describe("workspace visual contracts", () => {
   it("mounts the global workspace shell through the root layout", () => {
     expect(layout).toMatch(/import\s+["']\.\/experiment-workspace\.css["']/);
-    expect(layout).toMatch(/className=["']app-shell["']/);
-    expect(layout).toMatch(/<Navbar\s*\/>/);
-    expect(layout).toMatch(/<main\s+className=["']app-content["']>\{children\}<\/main>/);
+    expect(layout).toMatch(/<AppShell/);
+    expect(appShell).toMatch(/className=["']app-shell["']/);
+    expect(appShell).toMatch(
+      /<main\s+className=["']app-content["']>\{children\}<\/main>/,
+    );
   });
 
   it("uses a white canvas and a 232px warm-gray desktop sidebar without decoration", () => {

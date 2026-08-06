@@ -530,7 +530,7 @@ describe("workspace visual contracts", () => {
       /background\s*:\s*var\(--border-strong\)/,
     );
     expect(ruleBody(globals, ".nav-subnav")).toMatch(/font-size\s*:\s*13px/);
-    const ancestor = ruleBody(globals, ".nav-btn.ancestor-active");
+    const ancestor = ruleBody(globals, ".app-sidebar .ancestor-active");
     expect(ancestor).toMatch(/background\s*:\s*var\(--surface-hover\)/);
     expect(ancestor).toMatch(/color\s*:\s*var\(--text-primary\)/);
   });
@@ -824,7 +824,7 @@ describe("workspace visual contracts", () => {
     );
     const compactLabels = ruleBody(
       compact,
-      ".brand strong,\n  .project-context,\n  .nav-btn > span,\n  .team-context > span,\n  .theme-toggle button > span,\n  .sidebar-logout > span",
+      ".brand strong,\n  .project-context,\n  .app-sidebar nav .bp6-button > span,\n  .team-context > span,\n  .sidebar-logout .bp6-button-text",
     );
     expect(compactLabels).toMatch(/position\s*:\s*absolute/);
     expect(compactLabels).toMatch(/clip-path\s*:\s*inset\(50%\)/);
@@ -1327,7 +1327,6 @@ describe("workspace visual contracts", () => {
     const css = `${globals}\n${workspaceCss()}`;
     const focusFamilies = [
       ".brand:focus-visible",
-      ".nav-btn:focus-visible",
       ".btn:focus-visible",
       ".icon-btn:focus-visible",
       ".saved-view-tabs button:focus-visible",

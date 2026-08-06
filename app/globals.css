@@ -144,23 +144,23 @@ button, input, select, textarea { font-family: inherit; }
 .app-sidebar > nav::-webkit-scrollbar {
   display: none;
 }
+/* Blueprint FILL buttons center by default; sidebar buttons align flush-left */
+.app-sidebar .bp6-button {
+  justify-content: flex-start;
+}
 .mobile-app-bar,
 .nav-backdrop {
   display: none;
 }
 .brand {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 12px;
-  border-radius: 6px;
-  color: var(--text-primary);
-  font-size: 18px;
+  gap: 10px;
+  color: inherit;
   text-decoration: none;
 }
 .brand strong {
-  font-size: inherit;
-  font-weight: 650;
-  line-height: 1.25;
+  font-size: 14px;
 }
 .brand-mark {
   width: 34px;
@@ -200,44 +200,17 @@ button, input, select, textarea { font-family: inherit; }
   background: var(--border-strong);
   content: "";
 }
-.nav-btn {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  min-height: 46px;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  color: var(--text-secondary);
-  font-size: 15px;
-  text-decoration: none;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-.nav-btn svg { flex: 0 0 auto; }
-.nav-btn:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
-.nav-btn.active {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  background: var(--accent-subtle);
-  color: var(--accent);
-  font-weight: 550;
-}
-.nav-btn.ancestor-active {
-  border-color: transparent;
-  background: var(--surface-hover);
-  color: var(--text-primary);
-  font-weight: 550;
-}
 .nav-subnav {
-  min-height: 38px;
-  padding: 7px 10px;
   font-size: 13px;
 }
 .nav-subnav svg {
   width: 17px;
   height: 17px;
+}
+/* ancestor of the active nav item — subtle highlight (BP doesn't provide this) */
+.app-sidebar .ancestor-active {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 .sidebar-footer {
   display: grid;
@@ -266,34 +239,6 @@ button, input, select, textarea { font-family: inherit; }
   background: var(--surface-hover);
   color: var(--text-primary);
 }
-.theme-toggle {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-}
-.theme-toggle button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 40px;
-  padding: 8px 10px;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 14px;
-}
-.theme-toggle button + button {
-  border-left: 1px solid var(--border-strong);
-}
-.theme-toggle button[aria-pressed="true"] {
-  background: var(--accent-subtle);
-  color: var(--accent);
-}
 .nav-menu-toggle,
 .sidebar-sheet-close {
   display: inline-grid;
@@ -312,14 +257,11 @@ button, input, select, textarea { font-family: inherit; }
 }
 
 .brand:focus-visible,
-.nav-btn:focus-visible,
-.theme-toggle button:focus-visible,
 .sidebar-logout:focus-visible,
 .nav-menu-toggle:focus-visible,
 .sidebar-sheet-close:focus-visible,
 .btn:focus-visible,
 .icon-btn:focus-visible,
-.logout-btn:focus-visible,
 .task-open:focus-visible,
 .back-link:focus-visible,
 input:focus-visible,
@@ -1391,12 +1333,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .login-error { color: var(--crit); font-size: 13px; margin: 10px 0 0; }
 .login-btn { margin-top: 16px; justify-content: center; padding: 11px; font-size: 14px; }
 .login-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.logout-btn {
-  position: fixed; top: 14px; right: 16px; z-index: 50; font-family: var(--mono); font-size: 12px;
-  color: var(--todo); background: var(--paper); border: 1px solid var(--line);
-  border-radius: 8px; padding: 6px 10px; cursor: pointer;
-}
-.logout-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ================= Agent API key admin ================= */
 .api-key-admin { max-width: 980px; }
@@ -2734,10 +2670,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   }
   .brand strong,
   .project-context,
-  .nav-btn > span,
+  .app-sidebar nav .bp6-button > span,
   .team-context > span,
-  .theme-toggle button > span,
-  .sidebar-logout > span {
+  .sidebar-logout .bp6-button-text {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -2746,8 +2681,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  .nav-btn,
-  .sidebar-logout {
+  .app-sidebar .bp6-button {
     justify-content: center;
     padding-inline: 0;
   }
@@ -2761,13 +2695,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   .nav-subnav {
     min-height: 46px;
     padding-inline: 0;
-  }
-  .theme-toggle {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .theme-toggle button + button {
-    border-top: 1px solid var(--border-strong);
-    border-left: 0;
   }
   .task-board-scroll {
     overflow-x: auto;
@@ -2882,10 +2809,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   }
   .app-sidebar.is-open .brand strong,
   .app-sidebar.is-open .project-context,
-  .app-sidebar.is-open .nav-btn > span,
+  .app-sidebar.is-open nav .bp6-button > span,
   .app-sidebar.is-open .team-context > span,
-  .app-sidebar.is-open .theme-toggle button > span,
-  .app-sidebar.is-open .sidebar-logout > span {
+  .app-sidebar.is-open .sidebar-logout .bp6-button-text {
     position: static;
     width: auto;
     height: auto;
@@ -2895,8 +2821,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
     white-space: normal;
   }
   .app-sidebar.is-open .brand,
-  .app-sidebar.is-open .nav-btn,
-  .app-sidebar.is-open .sidebar-logout {
+  .app-sidebar.is-open .bp6-button {
     justify-content: flex-start;
   }
   .app-sidebar.is-open .nav-subsection {
@@ -2909,13 +2834,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   .app-sidebar.is-open .nav-subnav {
     min-height: 44px;
     padding-inline: 10px;
-  }
-  .app-sidebar.is-open .theme-toggle {
-    grid-template-columns: 1fr 1fr;
-  }
-  .app-sidebar.is-open .theme-toggle button + button {
-    border-top: 0;
-    border-left: 1px solid var(--border-strong);
   }
   .sidebar-sheet-close {
     position: absolute;

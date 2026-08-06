@@ -407,3 +407,10 @@ If Steps 1–2 needed no changes, no commit — just report.
 - **Placeholder scan:** none; every code step has real code.
 - **Type/consistency:** `bp6-dark` used consistently; `BlueprintProvider` named export consistent across file + test + layout; token var names (`--font-ibm-plex-sans/mono`, `--sans`, `--mono`) match `main`'s `globals.css`.
 - **Main-specific risks flagged:** `next/font` IBM Plex still loaded but unused (cleanup later); token file must import AFTER `globals.css` to override (enforced by layout import order in Task 3).
+
+## Deferred follow-ups (from Plan 1 final review — carry into later plans)
+
+- **Blueprint global-reset neutralization (done in Plan 1 fix wave):** `app/blueprint-tokens.css` restores `body{font-size:16px}` + `p{margin:1em 0}` + `small{font-size:smaller}` + `strong{font-weight:700}` to UA defaults so Blueprint's base reset doesn't restyle unmigrated screens. **As each domain plan (3–7) migrates a screen to Blueprint components and retires its `globals.css` rules, re-evaluate whether these neutralizing overrides should be dropped there** (Blueprint's 14px base is the intended end state per screen).
+- **Icon-font `@font-face` (Plan 2+):** only `@blueprintjs/core/lib/css/blueprint.css` is imported; the icon `@font-face` rules in `@blueprintjs/icons/lib/css/blueprint-icons.css` are NOT. Irrelevant while no Blueprint components render, and React `<Icon>` uses SVG paths (not the font). If a later plan uses CSS-only icon classes (`bp6-icon-*`), import `blueprint-icons.css` then.
+- **`next/font` IBM Plex cleanup (later):** the IBM Plex `woff2` subsets still download though visually unused after the font bridge. Remove `app/fonts.ts` + its layout usage in a later cleanup plan.
+- **Palette migration is per-domain:** Plan 1 intentionally leaves unmigrated screens on `main`'s palette (`#1e96eb` etc.); each domain plan adopts Blueprint's palette (`#2d72d2` / `--bp-*`) as it reskins.

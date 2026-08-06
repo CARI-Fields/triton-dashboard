@@ -3,9 +3,12 @@ import Script from "next/script";
 import AuthGate from "@/components/AuthGate";
 import Navbar from "@/components/Navbar";
 import ThemeProvider from "@/components/theme/ThemeProvider";
+import { BlueprintProvider } from "@/components/shell/BlueprintProvider";
 import { ibmPlexMono, ibmPlexSans } from "@/app/fonts";
+import "@blueprintjs/core/lib/css/blueprint.css";
 import "./globals.css";
 import "./experiment-workspace.css";
+import "./blueprint-tokens.css";
 
 export const metadata: Metadata = {
   title: "Triton Board — Team Experiment Workspace",
@@ -20,6 +23,7 @@ const themeScript = `
       : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
+    document.documentElement.classList.toggle("bp6-dark", theme === "dark");
   } catch {}
 `;
 
@@ -39,12 +43,14 @@ export default function RootLayout({
           {themeScript}
         </Script>
         <ThemeProvider>
-          <AuthGate>
-            <div className="app-shell">
-              <Navbar />
-              <main className="app-content">{children}</main>
-            </div>
-          </AuthGate>
+          <BlueprintProvider>
+            <AuthGate>
+              <div className="app-shell">
+                <Navbar />
+                <main className="app-content">{children}</main>
+              </div>
+            </AuthGate>
+          </BlueprintProvider>
         </ThemeProvider>
       </body>
     </html>

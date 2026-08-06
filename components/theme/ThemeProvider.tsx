@@ -42,6 +42,7 @@ function resolveAppliedTheme(): Theme {
 function applyTheme(theme: Theme, persist: boolean) {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
+  document.documentElement.classList.toggle("bp6-dark", theme === "dark");
 
   if (!persist) return;
 

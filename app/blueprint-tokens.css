@@ -1,1 +1,16 @@
-/* Blueprint design-token mappings — populated in Task 5. */
+/*
+ * Blueprint migration token layer.
+ * Imported AFTER globals.css so these override main's tokens at equal specificity.
+ * Plan 1: switch fonts to the Blueprint stack (retire IBM Plex visually).
+ * Later plans add per-domain palette remaps here as screens migrate to Blueprint.
+ */
+
+:root,
+[data-theme="dark"] {
+  --font-ibm-plex-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-ibm-plex-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas,
+    monospace;
+  --sans: var(--font-ibm-plex-sans);
+  --mono: var(--font-ibm-plex-mono);
+}

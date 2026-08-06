@@ -7,6 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { Classes } from "@blueprintjs/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Navbar from "@/components/Navbar";
 import ThemeProvider from "@/components/theme/ThemeProvider";
@@ -144,7 +145,7 @@ describe("Navbar", () => {
         .filter((link) => link.getAttribute("aria-current") === "page");
       expect(current).toHaveLength(1);
       expect(current[0].textContent).toBe(active);
-      expect(current[0].classList).toContain("active");
+      expect(current[0].classList).toContain(Classes.ACTIVE);
     });
   }
 
@@ -161,10 +162,10 @@ describe("Navbar", () => {
     });
 
     expect(experiments.classList).toContain("ancestor-active");
-    expect(experiments.classList).not.toContain("active");
+    expect(experiments.classList).not.toContain(Classes.ACTIVE);
     expect(experiments.getAttribute("aria-current")).toBeNull();
     expect(compare.classList).toContain("nav-subnav");
-    expect(compare.classList).toContain("active");
+    expect(compare.classList).toContain(Classes.ACTIVE);
     expect(compare.getAttribute("aria-current")).toBe("page");
   });
 

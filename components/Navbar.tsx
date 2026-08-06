@@ -1,5 +1,6 @@
 "use client";
 
+import { Button, Classes } from "@blueprintjs/core";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -93,9 +94,11 @@ function NavigationLink({
     <Link
       href={item.href}
       className={[
-        "nav-btn",
+        Classes.BUTTON,
+        Classes.MINIMAL,
+        Classes.FILL,
+        active ? Classes.ACTIVE : "",
         secondary ? "nav-subnav" : "",
-        active ? "active" : "",
         ancestorActive ? "ancestor-active" : "",
       ].filter(Boolean).join(" ")}
       aria-current={active ? "page" : undefined}
@@ -307,14 +310,13 @@ export default function Navbar() {
             <span>Shared team board</span>
           </span>
           <ThemeToggle />
-          <button
-            type="button"
+          <Button
+            minimal
+            icon="log-out"
+            text="Log out"
             className="sidebar-logout"
             onClick={() => void logout()}
-          >
-            <Icon name="logout" />
-            <span>Log out</span>
-          </button>
+          />
         </div>
       </aside>
       {sheetOpen ? (

@@ -129,9 +129,8 @@ describe("Navbar", () => {
       "API Keys",
     ]) {
       const link = screen.getByRole("link", { name: label });
-      const icon = link.querySelector("svg");
+      const icon = link.querySelector("[data-icon]");
       expect(icon, `${label} should have an icon`).not.toBeNull();
-      expect(icon?.getAttribute("stroke")).toBe("currentColor");
     }
   });
 

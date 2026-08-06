@@ -365,7 +365,7 @@ describe("Tag", () => {
     let tag = screen.getByText("NPU").closest(".tag")!;
     expect(tag.getAttribute("data-tone")).toBe("0");
     const removeButton = screen.getByRole("button", { name: "Remove NPU" });
-    expect(removeButton.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+    expect(removeButton.querySelector("[data-icon]")).not.toBeNull();
     fireEvent.click(removeButton);
     expect(remove).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith("NPU");

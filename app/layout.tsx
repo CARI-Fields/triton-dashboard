@@ -23,6 +23,7 @@ const themeScript = `
       : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
+    document.documentElement.classList.toggle("bp6-dark", theme === "dark");
   } catch {}
 `;
 

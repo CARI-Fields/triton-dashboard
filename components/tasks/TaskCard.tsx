@@ -39,6 +39,10 @@ export default function TaskCard({
   const [ownerDraft, setOwnerDraft] = useState(task.owners);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const editorFocusRef = useRef<HTMLSelectElement>(null);
+  // Set when the menu closes because "Quick edit" was chosen, so the editor's
+  // own focus effect wins instead of onClosed yanking focus back to the trigger
+  // after the popover's close transition.
+  const skipFocusRestoreRef = useRef(false);
   const ownerDraftRef = useRef(task.owners);
   const authoritativeOwnersRef = useRef(task.owners);
   const ownerWriteTailRef = useRef<Promise<void>>(Promise.resolve());
@@ -62,13 +66,24 @@ export default function TaskCard({
   }
 
   function closeEditorAndRestoreFocus() {
+    // The editor is closing, so any pending "skip focus restore" intent from
+    // opening Quick edit no longer applies — clear it so a later menu close
+    // (e.g. opening the actions menu again and pressing Escape) still restores
+    // focus to the trigger.
+    skipFocusRestoreRef.current = false;
     setEditing(false);
     triggerRef.current?.focus();
   }
 
   // Blueprint dismisses the menu for us (Escape/outside-click/item selection);
-  // it fires `onClosed` once the menu is gone, where we restore focus to the trigger.
+  // it fires `onClosed` once the menu is gone, where we restore focus to the
+  // trigger — unless the close is transitioning into the Quick editor, in which
+  // case the editor's own focus effect must win.
   function closeActionsAndRestoreFocus() {
+    if (skipFocusRestoreRef.current) {
+      skipFocusRestoreRef.current = false;
+      return;
+    }
     triggerRef.current?.focus();
   }
 
@@ -123,7 +138,12 @@ export default function TaskCard({
     {
       text: "Quick edit",
       icon: "edit",
-      onClick: () => setEditing(true),
+      onClick: () => {
+        // The editor's focus effect should own focus after open; signal onClosed
+        // (which fires once the popover finishes closing) to skip the trigger.
+        skipFocusRestoreRef.current = true;
+        setEditing(true);
+      },
     },
     {
       text: "Delete",

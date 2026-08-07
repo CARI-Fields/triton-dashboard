@@ -686,8 +686,18 @@ describe("Board", () => {
     const quickEdit = within(menu).getByRole("menuitem", {
       name: "Quick edit",
     });
-    // Blueprint moves focus off the trigger and into the menu system when it opens.
-    await waitFor(() => expect(document.activeElement).not.toBe(trigger));
+    // Blueprint moves focus off the trigger and into the menu system when it
+    // opens. jsdom cannot drive Blueprint's focus-trap onto a [role="menuitem"]
+    // (the trap depends on real focus events jsdom does not dispatch), so
+    // document.activeElement lands on the Popover overlay's start-focus-trap
+    // div — a sibling of the menu inside the overlay. The strongest assertion
+    // jsdom supports is therefore that focus is contained within the open
+    // popover's overlay (the overlay that owns this menu), proving focus
+    // entered the menu system rather than merely leaving the trigger.
+    await waitFor(() => {
+      const overlay = menu.closest(".bp6-overlay");
+      expect(overlay?.contains(document.activeElement)).toBe(true);
+    });
     fireEvent.keyDown(quickEdit, { key: "Escape" });
     // Blueprint dismisses the Popover via a transition; wait for it.
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());

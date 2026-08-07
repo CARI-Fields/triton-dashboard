@@ -262,7 +262,6 @@ button, input, select, textarea { font-family: inherit; }
 .sidebar-sheet-close:focus-visible,
 .btn:focus-visible,
 .icon-btn:focus-visible,
-.task-open:focus-visible,
 .back-link:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -1190,17 +1189,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   }
 }
 
-/* ================= Task title link (board) ================= */
-.task-title { align-items: center; }
-.task-open {
-  color: inherit; text-decoration: none; font-weight: 550; flex: 1;
-  display: inline-flex; align-items: center; gap: 5px;
-  border-radius: 5px; padding: 1px 4px; margin-left: -4px;
-}
-.task-open:hover { background: var(--accent-subtle); text-decoration: underline; }
-.open-hint { font-size: 11px; opacity: 0.45; }
-.rename-btn { font-size: 12px; }
-
 /* ================= Task detail page ================= */
 .detail { max-width: 940px; }
 .back-link {
@@ -1455,16 +1443,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 .board-page .eyebrow {
   margin-bottom: 10px;
 }
-.board-new-task {
-  min-height: 38px;
-  margin-top: 4px;
-  padding-inline: 14px;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-}
 
-.board-view-tabs,
 .board-toolbar {
   position: sticky;
   z-index: 10;
@@ -1474,29 +1453,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   gap: 8px;
   border-bottom: 1px solid var(--border);
   background: var(--canvas);
-}
-.board-view-tabs {
-  min-height: 50px;
-  overflow-x: auto;
-}
-.board-view-tabs button {
-  align-self: stretch;
-  min-width: max-content;
-  padding: 0 12px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 550;
-}
-.board-view-tabs button:hover {
-  color: var(--text-primary);
-}
-.board-view-tabs button[aria-selected="true"] {
-  border-bottom-color: var(--accent);
-  color: var(--accent);
 }
 .board-toolbar {
   top: 50px;
@@ -1677,49 +1633,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   grid-row: 1;
   margin: -3px -5px 0 0;
 }
-.task-actions-trigger {
-  display: inline-grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  padding: 0;
-}
-.task-actions-trigger:hover,
-.drawer-close:hover,
-.quick-edit-head .icon-btn:hover {
+.drawer-close:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
-}
-.task-actions-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 3px);
-  right: 0;
-  display: grid;
-  min-width: 132px;
-  padding: 5px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
-  box-shadow: var(--shadow-3);
-}
-.task-actions-menu button {
-  width: 100%;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-primary);
-  cursor: pointer;
-  font-size: 12px;
-  text-align: left;
-}
-.task-actions-menu button:hover {
-  background: var(--surface-hover);
-}
-.task-actions-menu button.danger-action:hover {
-  background: var(--status-blocked-soft);
-  color: var(--status-blocked-foreground);
 }
 .task-card-type {
   grid-column: 1;
@@ -1846,13 +1762,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   align-items: center;
   gap: 6px;
 }
-.danger-action {
-  color: var(--status-blocked-foreground);
-}
-.btn.danger-action:hover {
-  border-color: var(--status-blocked);
-  color: var(--status-blocked-foreground);
-}
 
 @media (min-width: 768px) {
   .app-content:has(.board-page[data-view="board"]) {
@@ -1867,7 +1776,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
     padding-bottom: 0;
     overflow: hidden;
   }
-  .board-page[data-view="board"] .board-view-tabs,
   .board-page[data-view="board"] .board-toolbar {
     position: static;
   }
@@ -1929,9 +1837,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   font-size: 12px;
   font-weight: 600;
 }
-.secondary-create input,
-.table-input,
-.position-input {
+.secondary-create input {
   min-width: 0;
   min-height: 34px;
   padding: 6px 9px;
@@ -1997,19 +1903,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
 }
 .text-action:hover {
   background: var(--accent-subtle);
-}
-.type-cell .text-action {
-  opacity: 0;
-}
-.types-table tr:hover .type-cell .text-action,
-.types-table tr:focus-within .type-cell .text-action {
-  opacity: 1;
-}
-.table-input {
-  width: min(360px, 100%);
-}
-.position-input {
-  width: 76px;
 }
 .type-progress {
   display: flex;
@@ -2877,7 +2770,6 @@ footer { margin-top: 40px; font-size: 12px; color: var(--todo); font-family: var
   .btn,
   .brand,
   .back-link,
-  .task-open,
   .task-card-title,
   .board-table a,
   .experiment-table a,

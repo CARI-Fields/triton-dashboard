@@ -913,7 +913,7 @@ describe("workspace visual contracts", () => {
     const mobile = mediaBody(globals, 767);
     const links = ruleBody(
       mobile,
-      ".btn,\n  .brand,\n  .back-link,\n  .task-open,\n  .task-card-title,\n  .board-table a,\n  .experiment-table a,\n  .analytics-page .attention-list a",
+      ".btn,\n  .brand,\n  .back-link,\n  .task-card-title,\n  .board-table a,\n  .experiment-table a,\n  .analytics-page .attention-list a",
     );
     expect(links).toMatch(/display\s*:\s*inline-flex/);
     expect(links).toMatch(/min-width\s*:\s*44px/);

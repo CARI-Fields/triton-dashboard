@@ -581,9 +581,9 @@ describe("Board", () => {
     expect(screen.getByRole("button", { name: "New task" })).toBeDefined();
     expect(screen.queryByText(/Live updates enabled/i)).toBeNull();
     expect(screen.queryByText(/authoritative rows refreshed/i)).toBeNull();
-    expect(screen.getByRole("tab", { name: "Types" })).toBeDefined();
+    expect(screen.getByRole("radio", { name: "Types" })).toBeDefined();
     for (const view of ["Board", "Types", "Ownership", "Team"]) {
-      expect(screen.getByRole("tab", { name: view })).toBeDefined();
+      expect(screen.getByRole("radio", { name: view })).toBeDefined();
     }
     expect(document.body.textContent).not.toMatch(
       /\b(Module|Foundation|Pipeline|Assignee|Assignees)\b/i,
@@ -605,37 +605,58 @@ describe("Board", () => {
     ).toBe(0);
   });
 
-  it("implements keyboard activation and relationships for the view tabs", async () => {
+  it("implements keyboard activation and selection states for the view segmented control", async () => {
     await renderLoadedBoard();
 
-    const boardTab = screen.getByRole("tab", { name: "Board" });
-    const typesTab = screen.getByRole("tab", { name: "Types" });
-    const teamTab = screen.getByRole("tab", { name: "Team" });
-    const panel = screen.getByRole("tabpanel");
+    const viewGroup = screen.getByRole("radiogroup", { name: "Task views" });
+    const boardOption = within(viewGroup).getByRole("radio", {
+      name: "Board",
+    });
+    const typesOption = within(viewGroup).getByRole("radio", {
+      name: "Types",
+    });
+    const ownershipOption = within(viewGroup).getByRole("radio", {
+      name: "Ownership",
+    });
+    const teamOption = within(viewGroup).getByRole("radio", {
+      name: "Team",
+    });
     const boardPage = screen.getByRole("heading", { name: "Task Board" })
       .closest(".board-page") as HTMLElement;
     expect(boardPage.dataset.view).toBe("board");
-    expect(boardTab.getAttribute("aria-controls")).toBe(panel.id);
-    expect(panel.getAttribute("aria-labelledby")).toBe(boardTab.id);
-    expect(boardTab.tabIndex).toBe(0);
-    expect(typesTab.tabIndex).toBe(-1);
+    // The selected option reports its state via aria-checked.
+    expect(boardOption.getAttribute("aria-checked")).toBe("true");
+    expect(typesOption.getAttribute("aria-checked")).toBe("false");
+    // Roving tabindex keeps only the selected option in the tab order.
+    expect(boardOption.tabIndex).toBe(0);
+    expect(typesOption.tabIndex).toBe(-1);
 
-    boardTab.focus();
-    fireEvent.keyDown(boardTab, { key: "ArrowRight" });
-    expect(document.activeElement).toBe(typesTab);
-    expect(typesTab.getAttribute("aria-selected")).toBe("true");
+    boardOption.focus();
+    fireEvent.keyDown(boardOption, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(typesOption);
+    expect(typesOption.getAttribute("aria-checked")).toBe("true");
+    expect(boardOption.getAttribute("aria-checked")).toBe("false");
     expect(boardPage.dataset.view).toBe("types");
     expect(screen.getByRole("columnheader", { name: "Task count" }))
       .toBeDefined();
-    expect(panel.getAttribute("aria-labelledby")).toBe(typesTab.id);
 
-    fireEvent.keyDown(typesTab, { key: "End" });
-    expect(document.activeElement).toBe(teamTab);
-    expect(teamTab.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(typesOption, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(ownershipOption);
+    expect(ownershipOption.getAttribute("aria-checked")).toBe("true");
 
-    fireEvent.keyDown(teamTab, { key: "Home" });
-    expect(document.activeElement).toBe(boardTab);
-    expect(boardTab.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(ownershipOption, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(teamOption);
+    expect(teamOption.getAttribute("aria-checked")).toBe("true");
+
+    // ArrowRight on the last option wraps around to the first.
+    fireEvent.keyDown(teamOption, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(boardOption);
+    expect(boardOption.getAttribute("aria-checked")).toBe("true");
+
+    // ArrowLeft navigates backward (and wraps from the first to the last).
+    fireEvent.keyDown(boardOption, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(teamOption);
+    expect(teamOption.getAttribute("aria-checked")).toBe("true");
   });
 
   it("groups by Status or Type and keeps one global creation entry point", async () => {
@@ -854,7 +875,7 @@ describe("Board", () => {
   it("renders exact Types and Ownership table semantics", async () => {
     await renderLoadedBoard();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Types" }));
     for (const heading of [
       "Type",
       "Description",
@@ -878,7 +899,7 @@ describe("Board", () => {
     expect(progress.getAttribute("max")).toBe("2");
     expect(progress.getAttribute("value")).toBe("1");
 
-    fireEvent.click(screen.getByRole("tab", { name: "Ownership" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Ownership" }));
     for (const heading of ["Owner", "Task", "Type", "Status", "Updated"]) {
       expect(
         screen.getByRole("columnheader", { name: heading }).getAttribute("scope"),
@@ -898,20 +919,20 @@ describe("Board", () => {
     await screen.findByRole("heading", { name: "To do" });
     expect(screen.getByRole("button", { name: "New task" })).toBeDefined();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Types" }));
     expect(screen.getByText("No types yet.")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Ownership" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Ownership" }));
     expect(screen.getByText("No tasks yet.")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Team" }));
     expect(screen.getByText("No team members yet.")).toBeDefined();
   });
 
   it("creates, patches, and deletes Types with compatibility defaults and exact copy", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
-    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Types" }));
 
     fireEvent.change(screen.getByLabelText("New type name"), {
       target: { value: "Documentation" },
@@ -967,7 +988,7 @@ describe("Board", () => {
 
   it("reconciles failed Type drafts and external realtime values", async () => {
     await renderLoadedBoard();
-    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Types" }));
 
     failNext("modules", "update", "Description failed.", "type-kernel");
     const description = screen.getByLabelText("Description for Kernel");
@@ -1026,7 +1047,7 @@ describe("Board", () => {
 
   it("rolls a failed Type commit back to the latest realtime value", async () => {
     await renderLoadedBoard();
-    fireEvent.click(screen.getByRole("tab", { name: "Types" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Types" }));
 
     const delayedCommit = deferred();
     delayNextMutation(
@@ -1081,7 +1102,7 @@ describe("Board", () => {
   it("removes a Team member through UUID cascades without rewriting Tasks", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
-    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Team" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove Maya" }));
 
     await waitFor(() => {
@@ -1110,7 +1131,7 @@ describe("Board", () => {
       "member-maya",
     );
     await renderLoadedBoard();
-    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Team" }));
     const removeMaya = screen.getByRole("button", { name: "Remove Maya" });
     const removeYubai = screen.getByRole("button", { name: "Remove Yubai" });
 
@@ -1153,7 +1174,7 @@ describe("Board", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     failNext("members", "delete", "Owner delete failed.", "member-maya");
     await renderLoadedBoard();
-    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Team" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove Maya" }));
 
     const alert = await screen.findByRole("alert");
@@ -1175,7 +1196,7 @@ describe("Board", () => {
   it("keeps a deletion failure visible after a slower realtime reload", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
-    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Team" }));
 
     const slowRealtime = deferred();
     supabaseState.readDelays.push(
@@ -1228,7 +1249,7 @@ describe("Board", () => {
   it("keeps the Team draft and reports a failed add-member write", async () => {
     failNext("members", "insert", "Owner insert failed.");
     await renderLoadedBoard();
-    fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Team" }));
     fireEvent.change(screen.getByLabelText("New owner name"), {
       target: { value: "Nova" },
     });

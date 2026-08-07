@@ -1,7 +1,7 @@
 "use client";
 
+import { Callout, SegmentedControl } from "@blueprintjs/core";
 import {
-  type KeyboardEvent,
   useCallback,
   useEffect,
   useRef,
@@ -13,7 +13,8 @@ import TaskBoardView, {
   type BoardView,
   type GroupBy,
 } from "@/components/tasks/TaskBoardView";
-import { Icon } from "@/components/ui/Icons";
+import { Button } from "@/components/ui/blueprint/Button";
+import { HTMLSelect } from "@/components/ui/blueprint/Inputs";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusDot from "@/components/ui/StatusDot";
 import WorkspaceSkeleton from "@/components/ui/WorkspaceSkeleton";
@@ -120,7 +121,6 @@ export default function Board() {
     status?: Status;
     typeId?: string | null;
   }>({});
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const reloadGenerationRef = useRef(0);
   const memberRemovalLockRef = useRef(false);
   const tasksRef = useRef<TaskModel[]>([]);
@@ -495,27 +495,6 @@ export default function Board() {
 
   const errorMsg = mutationErrorMsg ?? loadErrorMsg;
 
-  function handleViewTabKeyDown(
-    event: KeyboardEvent<HTMLButtonElement>,
-    index: number,
-  ) {
-    let nextIndex: number | null = null;
-    if (event.key === "ArrowRight") {
-      nextIndex = (index + 1) % BOARD_VIEWS.length;
-    } else if (event.key === "ArrowLeft") {
-      nextIndex = (index - 1 + BOARD_VIEWS.length) % BOARD_VIEWS.length;
-    } else if (event.key === "Home") {
-      nextIndex = 0;
-    } else if (event.key === "End") {
-      nextIndex = BOARD_VIEWS.length - 1;
-    }
-    if (nextIndex === null) return;
-
-    event.preventDefault();
-    setView(BOARD_VIEWS[nextIndex].value);
-    tabRefs.current[nextIndex]?.focus();
-  }
-
   if (!isSupabaseConfigured) return <SetupScreen />;
 
   return (
@@ -530,47 +509,27 @@ export default function Board() {
           </p>
         )}
         actions={(
-          <button
-            type="button"
-            className="btn primary board-new-task"
+          <Button
+            intent="primary"
+            icon="plus"
+            text="New task"
             onClick={() => {
               setCreateDefaults({});
               setCreateOpen(true);
             }}
-          >
-            <Icon name="plus" size={18} />
-            New task
-          </button>
+          />
         )}
       />
 
-      <div className="board-view-tabs" role="tablist" aria-label="Task views">
-        {BOARD_VIEWS.map((item, index) => (
-          <button
-            key={item.value}
-            ref={(node) => {
-              tabRefs.current[index] = node;
-            }}
-            id={`board-view-tab-${item.value}`}
-            type="button"
-            role="tab"
-            aria-selected={view === item.value}
-            aria-controls="board-view-panel"
-            tabIndex={view === item.value ? 0 : -1}
-            onClick={() => setView(item.value)}
-            onKeyDown={(event) => handleViewTabKeyDown(event, index)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        aria-label="Task views"
+        small
+        options={BOARD_VIEWS}
+        value={view}
+        onValueChange={(value) => setView(value as BoardView)}
+      />
 
-      <div
-        id="board-view-panel"
-        className="board-view-panel"
-        role="tabpanel"
-        aria-labelledby={`board-view-tab-${view}`}
-      >
+      <div className="board-view-panel">
         {view === "board" ? (
           <div className="board-toolbar">
             <div className="board-status-legend" aria-label="Task statuses">
@@ -584,34 +543,35 @@ export default function Board() {
             </div>
             <label className="group-control">
               <span>Group by</span>
-              <select
+              <HTMLSelect
                 aria-label="Group by"
                 value={groupBy}
-                onChange={(event) => (
-                  setGroupBy(event.target.value as GroupBy)
-                )}
-              >
-                <option value="status">Status</option>
-                <option value="type">Type</option>
-              </select>
+                onChange={(value) => setGroupBy(value as GroupBy)}
+                options={[
+                  { label: "Status", value: "status" },
+                  { label: "Type", value: "type" },
+                ]}
+              />
             </label>
           </div>
         ) : null}
 
         {errorMsg ? (
-          <div className="error-banner board-error-banner" role="alert">
+          <Callout
+            intent="danger"
+            role="alert"
+            className="board-error-banner"
+          >
             <span>{errorMsg}</span>
             {loadErrorMsg ? (
-              <button
-                type="button"
-                className="btn"
+              <Button
+                minimal
+                text={loading ? "Retrying…" : "Retry"}
                 disabled={loading}
                 onClick={() => void reload()}
-              >
-                {loading ? "Retrying…" : "Retry"}
-              </button>
+              />
             ) : null}
-          </div>
+          </Callout>
         ) : null}
 
         {loading && !hasSuccessfulSnapshot ? (

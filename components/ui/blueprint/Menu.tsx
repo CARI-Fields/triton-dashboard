@@ -36,19 +36,32 @@ export interface ActionMenuProps {
   items: ActionMenuItem[];
   /** The trigger element (rendered as the Popover target). */
   children: ReactNode;
+  /**
+   * Called after the menu finishes closing (Escape, outside-click, or item
+   * selection). The portal content is unmounted by this point, so it is the
+   * right place to restore focus to the trigger.
+   */
+  onClosed?: PopoverProps["onClosed"];
 }
 
 /**
  * Convenience dropdown: a click-triggered, minimal Popover anchored to the
  * bottom-end of its trigger, containing one MenuItem per `items` entry.
  */
-export function ActionMenu({ items, children }: ActionMenuProps) {
+export function ActionMenu({
+  items,
+  children,
+  onClosed,
+}: ActionMenuProps) {
   return (
     <BPPopover
       interactionKind="click"
       minimal
       placement="bottom-end"
       popoverClassName="bp_menu-overflow"
+      canEscapeKeyClose
+      enforceFocus={false}
+      onClosed={onClosed}
       content={
         <BPMenu>
           {items.map((item, index) => (

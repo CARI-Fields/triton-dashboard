@@ -484,10 +484,12 @@ async function renderLoadedBoard() {
   return result;
 }
 
-function openTaskActions(title: string) {
+async function openTaskActions(title: string) {
   fireEvent.click(screen.getByRole("button", {
     name: `Actions for ${title}`,
   }));
+  // Blueprint renders the menu into a portal once the Popover opens.
+  await screen.findByRole("menu");
 }
 
 beforeEach(resetSupabaseState);
@@ -676,32 +678,29 @@ describe("Board", () => {
     const trigger = screen.getByRole("button", {
       name: "Actions for Validate NPU kernels",
     });
-    openTaskActions("Validate NPU kernels");
-    const actions = screen.getByRole("group", {
-      name: "Actions for Validate NPU kernels",
-    });
-    expect(trigger.getAttribute("aria-controls")).toBe(actions.id);
+    // Blueprint Popover wires the trigger to its menu via aria-haspopup/expanded.
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    await openTaskActions("Validate NPU kernels");
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    const quickEdit = screen.getByRole("button", {
-      name: "Quick edit Validate NPU kernels",
+    const menu = screen.getByRole("menu");
+    const quickEdit = within(menu).getByRole("menuitem", {
+      name: "Quick edit",
     });
-    await waitFor(() => expect(document.activeElement).toBe(quickEdit));
+    // Blueprint moves focus off the trigger and into the menu system when it opens.
+    await waitFor(() => expect(document.activeElement).not.toBe(trigger));
     fireEvent.keyDown(quickEdit, { key: "Escape" });
-    expect(screen.queryByRole("group", {
-      name: "Actions for Validate NPU kernels",
-    })).toBeNull();
+    // Blueprint dismisses the Popover via a transition; wait for it.
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     expect(document.activeElement).toBe(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
 
-    openTaskActions("Validate NPU kernels");
+    await openTaskActions("Validate NPU kernels");
     fireEvent.mouseDown(document.body);
-    expect(screen.queryByRole("group", {
-      name: "Actions for Validate NPU kernels",
-    })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 
-    openTaskActions("Validate NPU kernels");
-    fireEvent.click(screen.getByRole("button", {
-      name: "Quick edit Validate NPU kernels",
+    await openTaskActions("Validate NPU kernels");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: "Quick edit",
     }));
     expect(screen.getByRole("region", {
       name: "Quick edit Validate NPU kernels",
@@ -715,9 +714,9 @@ describe("Board", () => {
 
   it("maps quick edits through storage and reloads authoritative rows", async () => {
     await renderLoadedBoard();
-    openTaskActions("Validate NPU kernels");
-    fireEvent.click(screen.getByRole("button", {
-      name: "Quick edit Validate NPU kernels",
+    await openTaskActions("Validate NPU kernels");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: "Quick edit",
     }));
     fireEvent.change(screen.getByLabelText("Status for Validate NPU kernels"), {
       target: { value: "done" },
@@ -744,9 +743,9 @@ describe("Board", () => {
 
   it("writes quick-edit Owner changes through UUID relationships", async () => {
     await renderLoadedBoard();
-    openTaskActions("Validate NPU kernels");
-    fireEvent.click(screen.getByRole("button", {
-      name: "Quick edit Validate NPU kernels",
+    await openTaskActions("Validate NPU kernels");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: "Quick edit",
     }));
     const editor = screen.getByRole("region", {
       name: "Quick edit Validate NPU kernels",
@@ -782,9 +781,9 @@ describe("Board", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderLoadedBoard();
 
-    openTaskActions("Validate NPU kernels");
-    fireEvent.click(screen.getByRole("button", {
-      name: "Quick edit Validate NPU kernels",
+    await openTaskActions("Validate NPU kernels");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: "Quick edit",
     }));
     failNext("tasks", "update", "Task update failed.", "task-kernels");
     fireEvent.change(screen.getByLabelText("Status for Validate NPU kernels"), {
@@ -796,12 +795,9 @@ describe("Board", () => {
     );
     expect(supabaseState.readTrace.length).toBeGreaterThanOrEqual(6);
 
-    openTaskActions("Validate NPU kernels");
-    const actions = screen.getByRole("group", {
-      name: "Actions for Validate NPU kernels",
-    });
-    fireEvent.click(within(actions).getByRole("button", {
-      name: "Delete Validate NPU kernels",
+    await openTaskActions("Validate NPU kernels");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: "Delete",
     }));
     await waitFor(() => {
       expect(confirm).toHaveBeenCalledWith(
@@ -823,9 +819,9 @@ describe("Board", () => {
     failNext("tasks", "delete", "Task delete failed.", "task-kernels");
     await renderLoadedBoard();
 
-    openTaskActions("Validate NPU kernels");
-    fireEvent.click(screen.getByRole("button", {
-      name: "Delete Validate NPU kernels",
+    await openTaskActions("Validate NPU kernels");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: "Delete",
     }));
 
     const alert = await screen.findByRole("alert");

@@ -1,14 +1,12 @@
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
+import { Card, Tooltip } from "@blueprintjs/core";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Icon } from "@/components/ui/Icons";
 import OwnerAvatar from "@/components/ui/OwnerAvatar";
 import StatusDot from "@/components/ui/StatusDot";
 import Tag from "@/components/ui/Tag";
+import { Button, IconButton } from "@/components/ui/blueprint/Button";
+import { ActionMenu, type ActionMenuItem } from "@/components/ui/blueprint/Menu";
+import { Checkbox, HTMLSelect } from "@/components/ui/blueprint/Inputs";
 import { STATUS_OPTIONS, statusLabel } from "@/lib/status";
 import { relTime } from "@/lib/time";
 import type {
@@ -37,13 +35,9 @@ export default function TaskCard({
   onPatch,
   onDelete,
 }: TaskCardProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [ownerDraft, setOwnerDraft] = useState(task.owners);
-  const actionsId = useId();
-  const actionsRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const firstActionRef = useRef<HTMLButtonElement>(null);
   const editorFocusRef = useRef<HTMLSelectElement>(null);
   const ownerDraftRef = useRef(task.owners);
   const authoritativeOwnersRef = useRef(task.owners);
@@ -52,25 +46,6 @@ export default function TaskCard({
   const latestOwnerWriteSucceededRef = useRef(true);
   const deletePendingRef = useRef(false);
   authoritativeOwnersRef.current = task.owners;
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    firstActionRef.current?.focus();
-
-    function closeOnOutsidePointer(event: MouseEvent) {
-      if (
-        actionsRef.current
-        && !actionsRef.current.contains(event.target as Node)
-      ) {
-        setMenuOpen(false);
-      }
-    }
-
-    document.addEventListener("mousedown", closeOnOutsidePointer);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutsidePointer);
-    };
-  }, [menuOpen]);
 
   useEffect(() => {
     if (editing) editorFocusRef.current?.focus();
@@ -86,13 +61,14 @@ export default function TaskCard({
     void onPatch(patchValue).catch(() => undefined);
   }
 
-  function closeActionsAndRestoreFocus() {
-    setMenuOpen(false);
+  function closeEditorAndRestoreFocus() {
+    setEditing(false);
     triggerRef.current?.focus();
   }
 
-  function closeEditorAndRestoreFocus() {
-    setEditing(false);
+  // Blueprint dismisses the menu for us (Escape/outside-click/item selection);
+  // it fires `onClosed` once the menu is gone, where we restore focus to the trigger.
+  function closeActionsAndRestoreFocus() {
     triggerRef.current?.focus();
   }
 
@@ -138,14 +114,27 @@ export default function TaskCard({
     } finally {
       deletePendingRef.current = false;
       if (triggerRef.current?.isConnected) {
-        setMenuOpen(false);
         triggerRef.current.focus();
       }
     }
   }
 
+  const actionItems: ActionMenuItem[] = [
+    {
+      text: "Quick edit",
+      icon: "edit",
+      onClick: () => setEditing(true),
+    },
+    {
+      text: "Delete",
+      icon: "trash",
+      intent: "danger",
+      onClick: () => void deleteFromActions(),
+    },
+  ];
+
   return (
-    <article className="task-card">
+    <Card className="task-card">
       <div className="task-card-head">
         <span
           className={`task-card-type ${type ? "" : "is-empty"}`}
@@ -156,52 +145,14 @@ export default function TaskCard({
         <Link href={`/task/${task.id}`} className="task-card-title">
           {task.title}
         </Link>
-        <div className="task-card-menu" ref={actionsRef}>
-          <button
-            ref={triggerRef}
-            type="button"
-            className="icon-btn task-actions-trigger"
-            aria-label={`Actions for ${task.title}`}
-            aria-expanded={menuOpen}
-            aria-controls={actionsId}
-            onClick={() => setMenuOpen((current) => !current)}
-          >
-            <Icon name="more" size={18} />
-          </button>
-          {menuOpen ? (
-            <div
-              id={actionsId}
-              className="task-actions-menu"
-              role="group"
-              aria-label={`Actions for ${task.title}`}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  closeActionsAndRestoreFocus();
-                }
-              }}
-            >
-              <button
-                ref={firstActionRef}
-                type="button"
-                aria-label={`Quick edit ${task.title}`}
-                onClick={() => {
-                  setEditing(true);
-                  setMenuOpen(false);
-                }}
-              >
-                Quick edit
-              </button>
-              <button
-                type="button"
-                className="danger-action"
-                aria-label={`Delete ${task.title}`}
-                onClick={() => void deleteFromActions()}
-              >
-                Delete
-              </button>
-            </div>
-          ) : null}
+        <div className="task-card-menu">
+          <ActionMenu items={actionItems} onClosed={closeActionsAndRestoreFocus}>
+            <IconButton
+              ref={triggerRef}
+              icon="more"
+              label={`Actions for ${task.title}`}
+            />
+          </ActionMenu>
         </div>
       </div>
 
@@ -254,75 +205,68 @@ export default function TaskCard({
         >
           <div className="quick-edit-head">
             <strong>Quick edit</strong>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={`Close quick edit ${task.title}`}
-              onClick={closeEditorAndRestoreFocus}
-            >
-              <Icon name="close" size={15} />
-            </button>
+            <Tooltip content="Close" placement="top">
+              <IconButton
+                icon="cross"
+                label={`Close quick edit ${task.title}`}
+                onClick={closeEditorAndRestoreFocus}
+              />
+            </Tooltip>
           </div>
           <label>
             Status
-            <select
+            <HTMLSelect
               ref={editorFocusRef}
               aria-label={`Status for ${task.title}`}
               value={task.status}
-              onChange={(event) => patch({
-                status: event.target.value as TaskModel["status"],
+              onChange={(value) => patch({
+                status: value as TaskModel["status"],
               })}
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              options={STATUS_OPTIONS.map((option) => ({
+                label: option.label,
+                value: option.value,
+              }))}
+            />
           </label>
           <label>
             Type
-            <select
+            <HTMLSelect
               aria-label={`Type for ${task.title}`}
               value={task.typeId ?? ""}
-              onChange={(event) => patch({
-                typeId: event.target.value || null,
+              onChange={(value) => patch({
+                typeId: value || null,
               })}
-            >
-              <option value="">No type</option>
-              {types.map((taskType) => (
-                <option key={taskType.id} value={taskType.id}>
-                  {taskType.name}
-                </option>
-              ))}
-            </select>
+              options={[
+                { label: "No type", value: "" },
+                ...types.map((taskType) => ({
+                  label: taskType.name,
+                  value: taskType.id,
+                })),
+              ]}
+            />
           </label>
           <fieldset>
             <legend>Owner</legend>
             {members.map((member) => {
               const checked = ownerDraft.includes(member.name);
               return (
-                <label key={member.id}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleOwner(member.name)}
-                  />
-                  {member.name}
-                </label>
+                <Checkbox
+                  key={member.id}
+                  label={member.name}
+                  checked={checked}
+                  onChange={() => toggleOwner(member.name)}
+                />
               );
             })}
           </fieldset>
-          <button
-            type="button"
-            className="btn danger-action"
+          <Button
+            intent="danger"
+            text="Delete task"
             aria-label={`Delete ${task.title}`}
             onClick={() => void onDelete().catch(() => undefined)}
-          >
-            Delete task
-          </button>
+          />
         </section>
       ) : null}
-    </article>
+    </Card>
   );
 }

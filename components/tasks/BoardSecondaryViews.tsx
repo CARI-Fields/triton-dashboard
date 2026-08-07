@@ -5,7 +5,9 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { HTMLTable, InputGroup } from "@blueprintjs/core";
 import OwnerAvatar from "@/components/ui/OwnerAvatar";
+import { Button } from "@/components/ui/blueprint/Button";
 import { statusLabel } from "@/lib/status";
 import { relTime } from "@/lib/time";
 import type {
@@ -81,21 +83,21 @@ function TypeRow({
       <td aria-label={taskType.name}>
         <div className="type-cell">
           <span>{taskType.name}</span>
-          <button
-            type="button"
-            className="text-action danger-action"
+          <Button
+            minimal
+            small
+            intent="danger"
+            text="Remove"
             aria-label={`Remove ${taskType.name}`}
             onClick={() => (
               void onDeleteType(taskType).catch(() => undefined)
             )}
-          >
-            Remove
-          </button>
+          />
         </div>
       </td>
       <td>
-        <input
-          className="table-input"
+        <InputGroup
+          size="small"
           aria-label={`Description for ${taskType.name}`}
           value={description}
           onChange={(event) => setDescription(event.target.value)}
@@ -114,9 +116,10 @@ function TypeRow({
         </div>
       </td>
       <td>
-        <input
-          className="position-input"
+        <InputGroup
+          size="small"
           type="number"
+          style={{ width: 76 }}
           aria-label={`Position for ${taskType.name}`}
           value={position}
           onChange={(event) => setPosition(event.target.value)}
@@ -201,17 +204,22 @@ export default function BoardSecondaryViews({
           }}
         >
           <label htmlFor="new-type-name">New type name</label>
-          <input
+          <InputGroup
             id="new-type-name"
             value={newType}
             onChange={(event) => setNewType(event.target.value)}
           />
-          <button type="submit" className="btn" disabled={pending}>
+          <Button type="submit" intent="primary" disabled={pending}>
             Add type
-          </button>
+          </Button>
         </form>
         <div className="table-scroll board-table-scroll">
-          <table className="board-table types-table">
+          <HTMLTable
+            compact
+            interactive
+            bordered
+            className="board-table types-table"
+          >
             <thead>
               <tr>
                 <th scope="col">Type</th>
@@ -239,7 +247,7 @@ export default function BoardSecondaryViews({
                 />
               ))}
             </tbody>
-          </table>
+          </HTMLTable>
         </div>
       </section>
     );
@@ -260,7 +268,12 @@ export default function BoardSecondaryViews({
     return (
       <section className="secondary-view" aria-label="Ownership">
         <div className="table-scroll board-table-scroll">
-          <table className="board-table ownership-table">
+          <HTMLTable
+            compact
+            interactive
+            bordered
+            className="board-table ownership-table"
+          >
             <thead>
               <tr>
                 <th scope="col">Owner</th>
@@ -292,7 +305,7 @@ export default function BoardSecondaryViews({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </HTMLTable>
         </div>
       </section>
     );
@@ -308,14 +321,14 @@ export default function BoardSecondaryViews({
         }}
       >
         <label htmlFor="new-member-name">New owner name</label>
-        <input
+        <InputGroup
           id="new-member-name"
           value={newMember}
           onChange={(event) => setNewMember(event.target.value)}
         />
-        <button type="submit" className="btn" disabled={pending}>
+        <Button type="submit" intent="primary" disabled={pending}>
           Add owner
-        </button>
+        </Button>
       </form>
       <ul className="team-list">
         {members.length === 0 ? (
@@ -329,15 +342,15 @@ export default function BoardSecondaryViews({
               size={30}
             />
             <span>{member.name}</span>
-            <button
-              type="button"
-              className="btn"
+            <Button
+              small
+              intent="danger"
               aria-label={`Remove ${member.name}`}
               disabled={memberRemovalPending}
               onClick={() => void removeMember(member)}
             >
               Remove
-            </button>
+            </Button>
           </li>
         ))}
       </ul>
